@@ -50,6 +50,7 @@ resend==2.30.0
 # Monitoring & Logging
 sentry-sdk[fastapi]==2.59.0
 loguru==0.7.3
+axiom-py==0.10.0
 
 # Rate limiting
 slowapi==0.1.9

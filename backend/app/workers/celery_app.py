@@ -120,8 +120,10 @@ celery_app.conf.update(
 
 @worker_ready.connect
 def on_worker_ready(sender, **kwargs):
-    """Log when a Celery worker comes online."""
+    """Initialise logging and log when a Celery worker comes online."""
     from loguru import logger
+    from app.core.logging import setup_logging
+    setup_logging()
     logger.info(f"Celery worker ready: {sender}")
 
 

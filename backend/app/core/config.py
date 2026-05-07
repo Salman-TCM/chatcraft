@@ -39,6 +39,7 @@ class Settings(BaseSettings):
 
     sentry_dsn: str = ""
     axiom_token: str = ""
+    axiom_dataset: str = "chatcraft-logs"
     posthog_api_key: str = ""
 
     aws_access_key_id: str = ""
