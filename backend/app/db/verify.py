@@ -11,6 +11,7 @@ import sys
 
 import asyncpg
 from loguru import logger
+from sqlalchemy import text
 
 from app.core.config import settings
 
@@ -66,12 +67,28 @@ async def verify_supabase() -> bool:
         return False
 
 
+async def verify_sqlalchemy() -> bool:
+    """Test the SQLAlchemy async engine and session factory."""
+    try:
+        from app.db.session import engine
+        async with engine.connect() as conn:
+            result = await conn.execute(text("SELECT current_database(), current_user"))
+            row = result.fetchone()
+            logger.info(f"SQLAlchemy engine connected — db={row[0]}, user={row[1]}")
+        await engine.dispose()
+        return True
+    except Exception as exc:
+        logger.error(f"SQLAlchemy engine failed: {exc}")
+        return False
+
+
 async def main() -> None:
     logger.info("Running ChatCraft AI database connectivity checks...")
 
     results = await asyncio.gather(
         verify_postgres(),
         verify_pgvector(),
+        verify_sqlalchemy(),
         verify_supabase(),
         return_exceptions=False,
     )
