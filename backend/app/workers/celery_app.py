@@ -129,13 +129,19 @@ def on_worker_ready(sender, **kwargs):
 
 @task_failure.connect
 def on_task_failure(sender, task_id, exception, traceback, einfo, **kwargs):
-    """Forward task failures to Sentry if configured."""
+    """Forward task failures to Sentry and Slack."""
     if settings.sentry_dsn:
         import sentry_sdk
         with sentry_sdk.push_scope() as scope:
             scope.set_tag("celery_task", sender.name)
             scope.set_context("task", {"task_id": task_id})
             sentry_sdk.capture_exception(exception)
+
+    from app.core.alerts import alert_on_exception
+    alert_on_exception(
+        exception,
+        context={"Task": sender.name, "Task ID": task_id},
+    )
 
 
 @task_retry.connect

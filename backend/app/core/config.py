@@ -38,6 +38,7 @@ class Settings(BaseSettings):
     resend_from_email: str = "noreply@chatcraft.ai"
 
     sentry_dsn: str = ""
+    slack_alert_webhook_url: str = ""
     axiom_token: str = ""
     axiom_dataset: str = "chatcraft-logs"
     posthog_api_key: str = ""

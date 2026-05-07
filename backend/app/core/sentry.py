@@ -9,6 +9,24 @@ from sentry_sdk.integrations.starlette import StarletteIntegration
 from app.core.config import settings
 
 
+def _before_send(event: dict, hint: dict) -> dict:
+    """Forward unhandled exceptions to the Slack alert channel."""
+    exc_info = hint.get("exc_info")
+    if exc_info and settings.slack_alert_webhook_url:
+        from app.core.alerts import alert_on_exception
+        exc = exc_info[1]
+        request = event.get("request", {})
+        alert_on_exception(
+            exc,
+            context={
+                "Sentry Event": event.get("event_id", ""),
+                "URL": request.get("url", ""),
+                "Method": request.get("method", ""),
+            },
+        )
+    return event
+
+
 def init_sentry() -> None:
     """Initialise Sentry SDK. No-op if SENTRY_DSN is not configured."""
     if not settings.sentry_dsn:
@@ -21,6 +39,7 @@ def init_sentry() -> None:
         traces_sample_rate=0.2 if settings.is_production else 1.0,
         profiles_sample_rate=0.1 if settings.is_production else 1.0,
         send_default_pii=False,
+        before_send=_before_send,
         integrations=[
             StarletteIntegration(transaction_style="endpoint"),
             FastApiIntegration(transaction_style="endpoint"),
