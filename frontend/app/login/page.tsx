@@ -24,6 +24,7 @@ export default function LoginPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const callbackUrl = searchParams.get("callbackUrl") ?? "/dashboard";
+  const passwordReset = searchParams.get("reset") === "1";
   const [serverError, setServerError] = useState("");
   const [googleLoading, setGoogleLoading] = useState(false);
 
@@ -62,6 +63,11 @@ export default function LoginPage() {
         </CardHeader>
 
         <CardContent className="space-y-4">
+          {passwordReset && (
+            <p className="text-sm text-green-600 bg-green-50 border border-green-200 rounded-md px-3 py-2">
+              Password updated — sign in with your new password.
+            </p>
+          )}
           <Button
             type="button"
             variant="outline"
