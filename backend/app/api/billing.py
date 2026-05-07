@@ -62,3 +62,32 @@ async def create_checkout_session(
         )
 
     return CheckoutResponse(data={"checkout_url": session.url, "session_id": session.id})
+
+
+@router.get("/portal", response_model=PortalResponse)
+async def customer_portal(
+    current_user: CurrentUser,
+    db: DBSession,
+) -> PortalResponse:
+    """Return a Stripe Billing Portal URL for the authenticated user."""
+    if not settings.stripe_secret_key:
+        raise HTTPException(
+            status_code=status.HTTP_501_NOT_IMPLEMENTED,
+            detail={"success": False, "error": "Stripe not configured", "code": "STRIPE_NOT_CONFIGURED"},
+        )
+
+    customer_id = await _get_or_create_stripe_customer(current_user, db)
+    return_url = f"{settings.frontend_url}/billing"
+
+    try:
+        session = stripe.billing_portal.Session.create(
+            customer=customer_id,
+            return_url=return_url,
+        )
+    except stripe.InvalidRequestError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={"success": False, "error": str(exc), "code": "STRIPE_INVALID_REQUEST"},
+        )
+
+    return PortalResponse(data={"portal_url": session.url})
