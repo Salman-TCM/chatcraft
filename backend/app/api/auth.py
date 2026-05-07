@@ -4,7 +4,7 @@ from fastapi import APIRouter, Cookie, HTTPException, Response, status
 from jose import JWTError
 from sqlalchemy import select
 
-from app.core.dependencies import DBSession, RedisClient
+from app.core.dependencies import CurrentUser, DBSession, RedisClient
 from app.core.security import (
     REFRESH_TOKEN_COOKIE,
     REFRESH_TOKEN_EXPIRE_DAYS,
@@ -18,6 +18,7 @@ from app.models.user import User, UserRole
 from app.schemas.auth import (
     LoginRequest,
     LoginResponse,
+    MeResponse,
     RefreshResponse,
     RegisterRequest,
     RegisterResponse,
@@ -177,3 +178,9 @@ async def refresh(
             user=UserResponse.model_validate(user),
         )
     )
+
+
+@router.get("/me", response_model=MeResponse)
+async def me(current_user: CurrentUser) -> MeResponse:
+    """Return the authenticated user's profile."""
+    return MeResponse(data=UserResponse.model_validate(current_user))

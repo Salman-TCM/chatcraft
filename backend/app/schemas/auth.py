@@ -55,3 +55,8 @@ class LoginResponse(BaseModel):
 class RefreshResponse(BaseModel):
     success: bool = True
     data: TokenData
+
+
+class MeResponse(BaseModel):
+    success: bool = True
+    data: UserResponse
