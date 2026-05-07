@@ -55,3 +55,43 @@ async def get_current_user(
 
 # Typed shorthand for injecting the authenticated user
 CurrentUser = Annotated["User", Depends(get_current_user)]  # type: ignore[name-defined]
+
+
+# ---------------------------------------------------------------------------
+# Role-based access control
+# ---------------------------------------------------------------------------
+
+def require_role(*allowed_roles: str):
+    """
+    Dependency factory — returns a FastAPI dependency that enforces role membership.
+
+    Usage:
+        @router.get("/admin-only")
+        async def admin_only(user: CurrentUser, _: Annotated[None, Depends(require_role("admin"))]):
+            ...
+
+    Pre-built aliases below cover the common cases.
+    """
+    from app.models.user import UserRole
+
+    allowed = {UserRole(r) for r in allowed_roles}
+
+    async def _check(user: CurrentUser) -> None:  # type: ignore[name-defined]
+        if user.role not in allowed:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail={
+                    "success": False,
+                    "error": "Insufficient permissions",
+                    "code": "FORBIDDEN",
+                },
+            )
+
+    return _check
+
+
+# Convenience aliases — import these in route files
+RequireTrial = Depends(require_role("trial", "premium", "creator", "admin"))
+RequirePremium = Depends(require_role("premium", "creator", "admin"))
+RequireCreator = Depends(require_role("creator", "admin"))
+RequireAdmin = Depends(require_role("admin"))
