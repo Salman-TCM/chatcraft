@@ -6,7 +6,10 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from app.core.config import settings
+from app.core.sentry import init_sentry
 from app.api.health import router as health_router
+
+init_sentry()
 
 
 @asynccontextmanager
