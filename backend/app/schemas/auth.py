@@ -50,3 +50,8 @@ class TokenData(BaseModel):
 class LoginResponse(BaseModel):
     success: bool = True
     data: TokenData
+
+
+class RefreshResponse(BaseModel):
+    success: bool = True
+    data: TokenData

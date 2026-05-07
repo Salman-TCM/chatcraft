@@ -66,12 +66,18 @@ def decode_token(token: str) -> dict:
     return jwt.decode(token, settings.secret_key, algorithms=[ALGORITHM])
 
 
+from jose import JWTError as _JWTError
+
+# Re-export so callers don't need to import jose directly
+JWTError = _JWTError
+
 __all__ = [
     "hash_password",
     "verify_password",
     "create_access_token",
     "create_refresh_token",
     "decode_token",
+    "JWTError",
     "REFRESH_TOKEN_COOKIE",
     "REFRESH_TOKEN_EXPIRE_DAYS",
 ]

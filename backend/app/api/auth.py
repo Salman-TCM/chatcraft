@@ -1,6 +1,7 @@
 from datetime import timedelta
 
-from fastapi import APIRouter, HTTPException, Response, status
+from fastapi import APIRouter, Cookie, HTTPException, Response, status
+from jose import JWTError
 from sqlalchemy import select
 
 from app.core.dependencies import DBSession, RedisClient
@@ -9,6 +10,7 @@ from app.core.security import (
     REFRESH_TOKEN_EXPIRE_DAYS,
     create_access_token,
     create_refresh_token,
+    decode_token,
     hash_password,
     verify_password,
 )
@@ -16,6 +18,7 @@ from app.models.user import User, UserRole
 from app.schemas.auth import (
     LoginRequest,
     LoginResponse,
+    RefreshResponse,
     RegisterRequest,
     RegisterResponse,
     TokenData,
@@ -87,6 +90,68 @@ async def login(
     )
 
     return LoginResponse(
+        data=TokenData(
+            access_token=access_token,
+            user=UserResponse.model_validate(user),
+        )
+    )
+
+
+_INVALID_REFRESH = HTTPException(
+    status_code=status.HTTP_401_UNAUTHORIZED,
+    detail={"success": False, "error": "Invalid or expired refresh token", "code": "INVALID_REFRESH_TOKEN"},
+)
+
+
+@router.post("/refresh", response_model=RefreshResponse)
+async def refresh(
+    response: Response,
+    db: DBSession,
+    redis: RedisClient,
+    refresh_token: str | None = Cookie(default=None, alias=REFRESH_TOKEN_COOKIE),
+) -> RefreshResponse:
+    """Rotate refresh token. Old JTI is revoked; new tokens are issued."""
+    if not refresh_token:
+        raise _INVALID_REFRESH
+
+    try:
+        payload = decode_token(refresh_token)
+    except JWTError:
+        raise _INVALID_REFRESH
+
+    if payload.get("type") != "refresh":
+        raise _INVALID_REFRESH
+
+    user_id: str = payload.get("sub", "")
+    jti: str = payload.get("jti", "")
+
+    redis_key = f"refresh:{jti}"
+    stored = await redis.get(redis_key)
+    if not stored:
+        raise _INVALID_REFRESH
+
+    # Revoke the used token immediately (rotation)
+    await redis.delete(redis_key)
+
+    user = await db.get(User, user_id)
+    if not user:
+        raise _INVALID_REFRESH
+
+    access_token = create_access_token(user.id, user.role.value)
+    new_refresh_token, new_jti = create_refresh_token(user.id)
+    await redis.setex(f"refresh:{new_jti}", _REFRESH_TTL, user.id)
+
+    response.set_cookie(
+        key=REFRESH_TOKEN_COOKIE,
+        value=new_refresh_token,
+        httponly=True,
+        secure=True,
+        samesite="lax",
+        max_age=_REFRESH_TTL,
+        path="/api/auth",
+    )
+
+    return RefreshResponse(
         data=TokenData(
             access_token=access_token,
             user=UserResponse.model_validate(user),
