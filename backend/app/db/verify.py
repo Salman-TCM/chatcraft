@@ -40,10 +40,21 @@ async def verify_pgvector() -> bool:
             "SELECT default_version FROM pg_available_extensions WHERE name = 'vector'"
         )
         await conn.close()
-        if result:
-            logger.info(f"pgvector available: v{result}")
+        if not result:
+            logger.warning("pgvector package not available — install pgvector on the DB server")
+            return False
+
+        # Also confirm it's been CREATED (not just available)
+        installed = await conn.fetchval(
+            "SELECT extversion FROM pg_extension WHERE extname = 'vector'"
+        )
+        if installed:
+            logger.info(f"pgvector installed and active: v{installed}")
             return True
-        logger.warning("pgvector extension not available — run: CREATE EXTENSION vector;")
+        logger.warning(
+            "pgvector package exists but extension not created — "
+            "run: alembic upgrade head"
+        )
         return False
     except Exception as exc:
         logger.error(f"pgvector check failed: {exc}")
