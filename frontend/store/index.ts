@@ -2,12 +2,13 @@ import { create } from "zustand";
 import { persist, createJSONStorage } from "zustand/middleware";
 import type { UserRole } from "@chatcraft/shared";
 
-interface AuthUser {
+export interface AuthUser {
   id: string;
   email: string;
   name: string | null;
   role: UserRole;
   avatarUrl: string | null;
+  accessToken: string;
 }
 
 interface AuthState {
@@ -41,7 +42,13 @@ export const useAppStore = create<AppState>()(
     {
       name: "chatcraft-store",
       storage: createJSONStorage(() => localStorage),
+      // Only persist UI prefs — auth state comes from NextAuth on every load
       partialize: (state) => ({ sidebarOpen: state.sidebarOpen }),
     }
   )
 );
+
+// Convenience selectors
+export const useUser = () => useAppStore((s) => s.user);
+export const useIsAuthenticated = () => useAppStore((s) => s.isAuthenticated);
+export const useUserRole = () => useAppStore((s) => s.user?.role ?? null);
