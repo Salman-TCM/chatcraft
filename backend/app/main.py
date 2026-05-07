@@ -7,6 +7,8 @@ from fastapi.responses import JSONResponse
 
 from app.core.config import settings
 from app.core.logging import setup_logging
+from app.core.request_id import RequestIDMiddleware
+from app.core.request_logging import RequestLoggingMiddleware
 from app.core.sentry import init_sentry
 from app.api.health import router as health_router
 
@@ -29,6 +31,8 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+app.add_middleware(RequestLoggingMiddleware)
+app.add_middleware(RequestIDMiddleware)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_origins,

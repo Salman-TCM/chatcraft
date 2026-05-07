@@ -7,6 +7,14 @@ from loguru import logger
 from app.core.config import settings
 
 
+def _get_request_id() -> str:
+    try:
+        from app.core.request_id import get_request_id
+        return get_request_id()
+    except Exception:
+        return ""
+
+
 def _serialize(record: dict) -> str:
     """Render a Loguru record as a structured JSON string."""
     subset: dict[str, Any] = {
@@ -17,10 +25,14 @@ def _serialize(record: dict) -> str:
         "environment": settings.environment,
         "logger": f"{record['name']}:{record['line']}",
     }
+    request_id = record["extra"].get("request_id") or _get_request_id()
+    if request_id:
+        subset["request_id"] = request_id
     if record["exception"]:
         subset["exception"] = record["exception"]
-    if record["extra"]:
-        subset["extra"] = record["extra"]
+    extra = {k: v for k, v in (record["extra"] or {}).items() if k != "request_id"}
+    if extra:
+        subset["extra"] = extra
     return json.dumps(subset)
 
 
@@ -32,20 +44,19 @@ def _axiom_sink(message):
         client = _get_axiom_client()
         if client is None:
             return
-        client.ingest_events(
-            dataset=settings.axiom_dataset,
-            events=[
-                {
-                    "_time": record["time"].isoformat(),
-                    "level": record["level"].name,
-                    "message": record["message"],
-                    "service": "chatcraft-api",
-                    "environment": settings.environment,
-                    "logger": f"{record['name']}:{record['line']}",
-                    **(record["extra"] or {}),
-                }
-            ],
-        )
+        request_id = record["extra"].get("request_id") or _get_request_id()
+        event: dict[str, Any] = {
+            "_time": record["time"].isoformat(),
+            "level": record["level"].name,
+            "message": record["message"],
+            "service": "chatcraft-api",
+            "environment": settings.environment,
+            "logger": f"{record['name']}:{record['line']}",
+            **(record["extra"] or {}),
+        }
+        if request_id:
+            event["request_id"] = request_id
+        client.ingest_events(dataset=settings.axiom_dataset, events=[event])
     except Exception:
         pass  # never let logging failures crash the app
 
