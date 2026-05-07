@@ -22,6 +22,10 @@ interface UIState {
   sidebarOpen: boolean;
   setSidebarOpen: (open: boolean) => void;
   toggleSidebar: () => void;
+  upgradeModalOpen: boolean;
+  upgradeModalReason: string;
+  openUpgradeModal: (reason?: string) => void;
+  closeUpgradeModal: () => void;
 }
 
 type AppState = AuthState & UIState;
@@ -38,6 +42,13 @@ export const useAppStore = create<AppState>()(
       setSidebarOpen: (open) => set({ sidebarOpen: open }),
       toggleSidebar: () =>
         set((state) => ({ sidebarOpen: !state.sidebarOpen })),
+
+      upgradeModalOpen: false,
+      upgradeModalReason: "",
+      openUpgradeModal: (reason = "") =>
+        set({ upgradeModalOpen: true, upgradeModalReason: reason }),
+      closeUpgradeModal: () =>
+        set({ upgradeModalOpen: false, upgradeModalReason: "" }),
     }),
     {
       name: "chatcraft-store",

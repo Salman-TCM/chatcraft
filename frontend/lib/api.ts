@@ -14,11 +14,23 @@ export const apiClient: AxiosInstance = axios.create({
 apiClient.interceptors.response.use(
   (response) => response,
   async (error) => {
-    if (error.response?.status === 401) {
-      if (typeof window !== "undefined") {
-        window.location.href = "/login";
-      }
+    const status = error.response?.status;
+    const code = error.response?.data?.detail?.code ?? error.response?.data?.code;
+
+    if (status === 401 && typeof window !== "undefined") {
+      window.location.href = "/login";
     }
+
+    if (
+      typeof window !== "undefined" &&
+      (status === 429 || code === "USAGE_LIMIT_REACHED" || code === "MESSAGE_CAP_REACHED")
+    ) {
+      const { useAppStore } = await import("@/store");
+      useAppStore.getState().openUpgradeModal(
+        error.response?.data?.detail?.error ?? "You've reached your usage limit"
+      );
+    }
+
     return Promise.reject(error);
   }
 );

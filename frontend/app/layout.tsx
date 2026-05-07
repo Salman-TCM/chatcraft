@@ -3,6 +3,7 @@ import { Inter } from "next/font/google";
 import { SessionProvider } from "next-auth/react";
 import { SessionSync } from "@/components/session-sync";
 import { TrialBanner } from "@/components/trial-banner";
+import { UpgradeModal } from "@/components/upgrade-modal";
 import "./globals.css";
 
 const inter = Inter({
@@ -35,6 +36,7 @@ export default function RootLayout({
         <SessionProvider>
           <SessionSync />
           <TrialBanner />
+          <UpgradeModal />
           {children}
         </SessionProvider>
       </body>
