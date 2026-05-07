@@ -15,3 +15,14 @@ class CheckoutResponse(BaseModel):
 class PortalResponse(BaseModel):
     success: bool = True
     data: dict
+
+
+class PaymentIntentRequest(BaseModel):
+    amount: int = Field(gt=0, description="Amount in smallest currency unit (e.g. cents)")
+    currency: str = Field(default="usd", min_length=3, max_length=3)
+    description: str | None = Field(default=None, max_length=500)
+
+
+class PaymentIntentResponse(BaseModel):
+    success: bool = True
+    data: dict

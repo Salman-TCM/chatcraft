@@ -10,7 +10,13 @@ from app.core.stripe import stripe
 from app.models.payment import Payment, PaymentStatus
 from app.models.subscription import Subscription, SubscriptionPlan, SubscriptionState
 from app.models.user import User, UserRole, SubscriptionStatus
-from app.schemas.billing import CheckoutRequest, CheckoutResponse, PortalResponse
+from app.schemas.billing import (
+    CheckoutRequest,
+    CheckoutResponse,
+    PaymentIntentRequest,
+    PaymentIntentResponse,
+    PortalResponse,
+)
 from app.services.email import _send
 
 router = APIRouter(prefix="/api/billing", tags=["billing"])
@@ -131,6 +137,61 @@ async def customer_portal(
         )
 
     return PortalResponse(data={"portal_url": session.url})
+
+
+# ---------------------------------------------------------------------------
+# One-time payment intent
+# ---------------------------------------------------------------------------
+
+@router.post("/payment-intent", response_model=PaymentIntentResponse)
+async def create_payment_intent(
+    body: PaymentIntentRequest,
+    current_user: CurrentUser,
+    db: DBSession,
+) -> PaymentIntentResponse:
+    """Create a Stripe PaymentIntent for a one-time charge.
+    Returns client_secret for use with Stripe.js on the frontend."""
+    if not settings.stripe_secret_key:
+        raise HTTPException(
+            status_code=status.HTTP_501_NOT_IMPLEMENTED,
+            detail={"success": False, "error": "Stripe not configured", "code": "STRIPE_NOT_CONFIGURED"},
+        )
+
+    customer_id = await _get_or_create_stripe_customer(current_user, db)
+
+    try:
+        intent = stripe.PaymentIntent.create(
+            amount=body.amount,
+            currency=body.currency.lower(),
+            customer=customer_id,
+            description=body.description,
+            metadata={"user_id": current_user.id},
+            automatic_payment_methods={"enabled": True},
+        )
+    except stripe.InvalidRequestError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={"success": False, "error": str(exc), "code": "STRIPE_INVALID_REQUEST"},
+        )
+
+    # Record the pending payment — confirmed via webhook invoice.payment_succeeded
+    payment = Payment(
+        user_id=current_user.id,
+        stripe_payment_intent_id=intent.id,
+        amount=body.amount,
+        currency=body.currency.lower(),
+        status=PaymentStatus.processing,
+        description=body.description,
+    )
+    db.add(payment)
+    await db.commit()
+
+    return PaymentIntentResponse(
+        data={
+            "client_secret": intent.client_secret,
+            "payment_intent_id": intent.id,
+        }
+    )
 
 
 # ---------------------------------------------------------------------------
