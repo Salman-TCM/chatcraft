@@ -77,6 +77,9 @@ class User(TimestampMixin, Base):
     subscription: Mapped["Subscription | None"] = relationship(  # type: ignore[name-defined]
         "Subscription", back_populates="user", uselist=False
     )
+    payments: Mapped[list["Payment"]] = relationship(  # type: ignore[name-defined]
+        "Payment", back_populates="user"
+    )
 
     def __repr__(self) -> str:
         return f"<User id={self.id} email={self.email} role={self.role}>"
