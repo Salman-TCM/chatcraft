@@ -2,7 +2,7 @@ import enum
 from datetime import datetime
 
 from sqlalchemy import Boolean, DateTime, Enum, String
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import Base, TimestampMixin
 
@@ -71,6 +71,11 @@ class User(TimestampMixin, Base):
     # Google OAuth
     google_id: Mapped[str | None] = mapped_column(
         String(255), unique=True, nullable=True, index=True
+    )
+
+    # Relationships
+    subscription: Mapped["Subscription | None"] = relationship(  # type: ignore[name-defined]
+        "Subscription", back_populates="user", uselist=False
     )
 
     def __repr__(self) -> str:
