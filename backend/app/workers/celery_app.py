@@ -1,8 +1,14 @@
 from celery import Celery
+from celery.schedules import crontab
 from celery.signals import task_failure, task_retry, worker_ready
 from kombu import Exchange, Queue
 
 from app.core.config import settings
+
+
+def _cron(**kwargs) -> crontab:
+    """Shorthand for creating a crontab schedule."""
+    return crontab(**kwargs)
 
 # ---------------------------------------------------------------------------
 # Queue definitions
@@ -21,7 +27,10 @@ QUEUES = (
 TASK_ROUTES = {
     "workers.process_document": {"queue": "embeddings", "routing_key": "embeddings"},
     "workers.send_email": {"queue": "emails", "routing_key": "emails"},
-    "workers.aggregate_usage": {"queue": "analytics", "routing_key": "analytics"},
+    "workers.aggregate_daily_usage": {"queue": "analytics", "routing_key": "analytics"},
+    "workers.sync_stripe_metered_billing": {"queue": "analytics", "routing_key": "analytics"},
+    "workers.send_usage_alerts": {"queue": "analytics", "routing_key": "analytics"},
+    "workers.expire_trials": {"queue": "priority", "routing_key": "priority"},
 }
 
 # ---------------------------------------------------------------------------
@@ -34,6 +43,7 @@ celery_app = Celery(
     include=[
         "app.workers.embedding_worker",
         "app.workers.email_worker",
+        "app.workers.analytics_worker",
     ],
 )
 
@@ -61,8 +71,33 @@ celery_app.conf.update(
     # Retry defaults applied to all tasks unless overridden per-task
     task_max_retries=3,
     task_default_retry_delay=60,   # seconds
-    # Beat schedule — populated in Phase 6 (usage aggregation, billing sync)
-    beat_schedule={},
+    # Beat schedule — cron jobs that run automatically
+    beat_schedule={
+        # Aggregate yesterday's usage into analytics_daily (Phase 6)
+        "aggregate-daily-usage": {
+            "task": "workers.aggregate_daily_usage",
+            "schedule": _cron(hour=1, minute=0),  # 01:00 Europe/London nightly
+            "options": {"queue": "analytics"},
+        },
+        # Report metered billing units to Stripe (Phase 6)
+        "sync-stripe-metered-billing": {
+            "task": "workers.sync_stripe_metered_billing",
+            "schedule": _cron(hour=2, minute=0),  # 02:00 Europe/London nightly
+            "options": {"queue": "analytics"},
+        },
+        # Email users approaching/at their usage cap (Phase 6)
+        "send-usage-alerts": {
+            "task": "workers.send_usage_alerts",
+            "schedule": _cron(minute=0),           # every hour on the hour
+            "options": {"queue": "analytics"},
+        },
+        # Downgrade expired trials (Phase 2)
+        "expire-trials": {
+            "task": "workers.expire_trials",
+            "schedule": 1800,                      # every 30 minutes
+            "options": {"queue": "priority"},
+        },
+    },
     # Broker connection retry on startup
     broker_connection_retry_on_startup=True,
     broker_connection_max_retries=10,
