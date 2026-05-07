@@ -97,6 +97,26 @@ async def login(
     )
 
 
+@router.post("/logout", status_code=status.HTTP_200_OK)
+async def logout(
+    response: Response,
+    redis: RedisClient,
+    refresh_token: str | None = Cookie(default=None, alias=REFRESH_TOKEN_COOKIE),
+) -> dict:
+    """Revoke the refresh token and clear the cookie. Always returns 200."""
+    if refresh_token:
+        try:
+            payload = decode_token(refresh_token)
+            jti = payload.get("jti", "")
+            if jti:
+                await redis.delete(f"refresh:{jti}")
+        except JWTError:
+            pass  # expired/invalid token — still clear the cookie
+
+    response.delete_cookie(key=REFRESH_TOKEN_COOKIE, path="/api/auth")
+    return {"success": True, "data": {"message": "Logged out"}}
+
+
 _INVALID_REFRESH = HTTPException(
     status_code=status.HTTP_401_UNAUTHORIZED,
     detail={"success": False, "error": "Invalid or expired refresh token", "code": "INVALID_REFRESH_TOKEN"},
