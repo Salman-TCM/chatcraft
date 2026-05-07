@@ -3,7 +3,7 @@ import urllib.parse
 from datetime import timedelta
 
 import httpx
-from fastapi import APIRouter, Cookie, HTTPException, Response, status
+from fastapi import APIRouter, Cookie, HTTPException, Query, Response, status
 from fastapi.responses import RedirectResponse
 from jose import JWTError
 from sqlalchemy import select
@@ -30,6 +30,7 @@ from app.schemas.auth import (
     TokenData,
     UserResponse,
 )
+from app.services.email import send_verification_email
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 
@@ -50,15 +51,19 @@ async def register(body: RegisterRequest, db: DBSession) -> RegisterResponse:
             detail={"success": False, "error": "Email already registered", "code": "EMAIL_TAKEN"},
         )
 
+    verification_token = secrets.token_urlsafe(32)
     user = User(
         email=body.email,
         password_hash=hash_password(body.password),
         name=body.name,
         role=UserRole.free,
+        email_verification_token=verification_token,
     )
     db.add(user)
     await db.commit()
     await db.refresh(user)
+
+    send_verification_email(user.email, verification_token)
 
     return RegisterResponse(data=UserResponse.model_validate(user))
 
@@ -189,6 +194,28 @@ async def refresh(
 async def me(current_user: CurrentUser) -> MeResponse:
     """Return the authenticated user's profile."""
     return MeResponse(data=UserResponse.model_validate(current_user))
+
+
+@router.get("/verify-email")
+async def verify_email(
+    db: DBSession,
+    token: str = Query(...),
+) -> dict:
+    """Mark the user's email as verified using the token sent on registration."""
+    user = await db.scalar(
+        select(User).where(User.email_verification_token == token)
+    )
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={"success": False, "error": "Invalid or expired verification token", "code": "INVALID_VERIFICATION_TOKEN"},
+        )
+
+    user.email_verified = True
+    user.email_verification_token = None
+    await db.commit()
+
+    return {"success": True, "data": {"message": "Email verified"}}
 
 
 # ---------------------------------------------------------------------------
