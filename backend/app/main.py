@@ -6,6 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from app.core.config import settings
+from app.api.health import router as health_router
 
 
 @asynccontextmanager
@@ -31,11 +32,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-
-@app.get("/health", tags=["health"])
-async def health_check() -> JSONResponse:
-    """Health check endpoint for load balancers and uptime monitors."""
-    return JSONResponse({"status": "healthy", "service": "chatcraft-api"})
+app.include_router(health_router)
 
 
 @app.get("/", tags=["health"])
