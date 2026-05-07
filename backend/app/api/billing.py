@@ -140,6 +140,77 @@ async def customer_portal(
 
 
 # ---------------------------------------------------------------------------
+# Stripe Connect — creator payouts
+# ---------------------------------------------------------------------------
+
+@router.post("/connect", status_code=status.HTTP_200_OK)
+async def connect_onboard(
+    current_user: CurrentUser,
+    db: DBSession,
+) -> dict:
+    """Create a Stripe Express Connect account (if needed) and return an
+    Account Link URL so the creator can complete onboarding."""
+    if not settings.stripe_secret_key:
+        raise HTTPException(
+            status_code=status.HTTP_501_NOT_IMPLEMENTED,
+            detail={"success": False, "error": "Stripe not configured", "code": "STRIPE_NOT_CONFIGURED"},
+        )
+
+    # Create Express account on first call
+    if not current_user.stripe_connect_account_id:
+        account = stripe.Account.create(
+            type="express",
+            email=current_user.email,
+            metadata={"user_id": current_user.id},
+            capabilities={
+                "transfers": {"requested": True},
+            },
+        )
+        current_user.stripe_connect_account_id = account.id
+        await db.commit()
+
+    refresh_url = f"{settings.frontend_url}/billing/connect?refresh=1"
+    return_url = f"{settings.frontend_url}/billing/connect?success=1"
+
+    link = stripe.AccountLink.create(
+        account=current_user.stripe_connect_account_id,
+        refresh_url=refresh_url,
+        return_url=return_url,
+        type="account_onboarding",
+    )
+
+    return {"success": True, "data": {"onboarding_url": link.url}}
+
+
+@router.get("/connect", status_code=status.HTTP_200_OK)
+async def connect_status(current_user: CurrentUser) -> dict:
+    """Return the creator's Stripe Connect account status."""
+    if not settings.stripe_secret_key:
+        raise HTTPException(
+            status_code=status.HTTP_501_NOT_IMPLEMENTED,
+            detail={"success": False, "error": "Stripe not configured", "code": "STRIPE_NOT_CONFIGURED"},
+        )
+
+    if not current_user.stripe_connect_account_id:
+        return {
+            "success": True,
+            "data": {"connected": False, "charges_enabled": False, "payouts_enabled": False},
+        }
+
+    account = stripe.Account.retrieve(current_user.stripe_connect_account_id)
+    return {
+        "success": True,
+        "data": {
+            "connected": True,
+            "account_id": account.id,
+            "charges_enabled": account.charges_enabled,
+            "payouts_enabled": account.payouts_enabled,
+            "details_submitted": account.details_submitted,
+        },
+    }
+
+
+# ---------------------------------------------------------------------------
 # One-time payment intent
 # ---------------------------------------------------------------------------
 

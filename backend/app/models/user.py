@@ -68,6 +68,11 @@ class User(TimestampMixin, Base):
         DateTime(timezone=True), nullable=True
     )
 
+    # Stripe Connect (creator payouts)
+    stripe_connect_account_id: Mapped[str | None] = mapped_column(
+        String(255), unique=True, nullable=True, index=True
+    )
+
     # Google OAuth
     google_id: Mapped[str | None] = mapped_column(
         String(255), unique=True, nullable=True, index=True
