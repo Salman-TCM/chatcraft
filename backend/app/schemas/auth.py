@@ -26,6 +26,7 @@ class UserResponse(BaseModel):
     name: str | None
     role: UserRole
     email_verified: bool
+    trial_ends_at: datetime | None = None
     created_at: datetime
 
     model_config = {"from_attributes": True}

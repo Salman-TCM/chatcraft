@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { Inter } from "next/font/google";
 import { SessionProvider } from "next-auth/react";
 import { SessionSync } from "@/components/session-sync";
+import { TrialBanner } from "@/components/trial-banner";
 import "./globals.css";
 
 const inter = Inter({
@@ -33,6 +34,7 @@ export default function RootLayout({
       <body className={`${inter.variable} font-sans antialiased`}>
         <SessionProvider>
           <SessionSync />
+          <TrialBanner />
           {children}
         </SessionProvider>
       </body>

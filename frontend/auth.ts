@@ -33,6 +33,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
             image: data.user.avatar_url ?? null,
             role: data.user.role,
             accessToken: data.access_token,
+            trialEndsAt: data.user.trial_ends_at ?? null,
           };
         } catch {
           return null;
@@ -65,6 +66,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
           user.id = data.user.id;
           user.role = data.user.role;
           user.accessToken = data.access_token;
+          user.trialEndsAt = data.user.trial_ends_at ?? null;
         } catch {
           return false;
         }
@@ -78,6 +80,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         token.role = user.role;
         token.accessToken = user.accessToken;
         token.accessTokenExpiry = Date.now() + ACCESS_TOKEN_LIFETIME_MS;
+        token.trialEndsAt = user.trialEndsAt ?? null;
       }
       // Proactively refresh the backend access token when it nears expiry
       if (Date.now() < token.accessTokenExpiry) return token;
@@ -102,6 +105,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
       session.user.id = token.id;
       session.user.role = token.role;
       session.user.accessToken = token.accessToken;
+      session.user.trialEndsAt = token.trialEndsAt ?? null;
       if (token.error) session.error = token.error;
       return session;
     },
