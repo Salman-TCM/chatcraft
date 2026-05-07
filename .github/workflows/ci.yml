@@ -1,0 +1,141 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [master, main, develop]
+  push:
+    branches: [master, main]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # Backend — lint, type-check, test
+  # ---------------------------------------------------------------------------
+  backend:
+    name: Backend (Python ${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+
+    strategy:
+      matrix:
+        python-version: ["3.11"]
+
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: chatcraft
+          POSTGRES_PASSWORD: chatcraft
+          POSTGRES_DB: chatcraft_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U chatcraft"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    defaults:
+      run:
+        working-directory: backend
+
+    env:
+      ENVIRONMENT: test
+      SECRET_KEY: ci-test-secret-key
+      DATABASE_URL: postgresql+asyncpg://chatcraft:chatcraft@localhost:5432/chatcraft_test
+      REDIS_URL: redis://localhost:6379/0
+      ANTHROPIC_API_KEY: sk-ant-test
+      OPENAI_API_KEY: sk-test
+      STRIPE_SECRET_KEY: sk_test_ci
+      STRIPE_WEBHOOK_SECRET: whsec_ci
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Install linting tools
+        run: pip install ruff mypy
+
+      - name: Lint with ruff
+        run: ruff check .
+
+      - name: Type-check with mypy
+        run: mypy app --ignore-missing-imports --no-strict-optional
+        continue-on-error: true  # non-blocking until type coverage improves
+
+      - name: Apply database migrations
+        run: alembic upgrade head
+
+      - name: Run tests
+        run: pytest -v --tb=short
+
+  # ---------------------------------------------------------------------------
+  # Frontend — type-check, lint
+  # ---------------------------------------------------------------------------
+  frontend:
+    name: Frontend (Node ${{ matrix.node-version }})
+    runs-on: ubuntu-latest
+
+    strategy:
+      matrix:
+        node-version: ["20"]
+
+    defaults:
+      run:
+        working-directory: .  # run from root for workspace support
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node.js ${{ matrix.node-version }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+          cache: npm
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Type-check
+        run: npm run type-check --workspace=frontend
+
+      - name: Lint
+        run: npm run lint --workspace=frontend
+
+  # ---------------------------------------------------------------------------
+  # Required status check — both jobs must pass before merge is allowed
+  # ---------------------------------------------------------------------------
+  ci-passed:
+    name: CI passed
+    runs-on: ubuntu-latest
+    needs: [backend, frontend]
+    if: always()
+    steps:
+      - name: Check all jobs passed
+        run: |
+          if [[ "${{ needs.backend.result }}" != "success" || "${{ needs.frontend.result }}" != "success" ]]; then
+            echo "One or more CI jobs failed"
+            exit 1
+          fi
+          echo "All CI jobs passed"
