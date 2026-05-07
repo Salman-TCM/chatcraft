@@ -73,3 +73,32 @@ async def readiness() -> JSONResponse:
         },
         status_code=200 if ready else 503,
     )
+
+
+@router.get("/health/queue")
+async def queue_check() -> JSONResponse:
+    """
+    End-to-end Celery queue smoke test — only available outside production.
+    Dispatches a ping task and waits up to 5 seconds for the result.
+    Returns 503 if no worker picks it up in time.
+    """
+    if settings.is_production:
+        return JSONResponse({"error": "not available in production"}, status_code=404)
+
+    start = time.monotonic()
+    try:
+        from app.workers.debug_worker import ping
+        result = ping.apply_async()
+        outcome = result.get(timeout=5)
+        latency_ms = round((time.monotonic() - start) * 1000, 2)
+        return JSONResponse({
+            "status": "healthy",
+            "task_id": result.id,
+            "worker": outcome.get("worker"),
+            "latency_ms": latency_ms,
+        })
+    except Exception as exc:
+        return JSONResponse(
+            {"status": "unhealthy", "error": str(exc)},
+            status_code=503,
+        )

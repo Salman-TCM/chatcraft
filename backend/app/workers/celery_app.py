@@ -44,6 +44,7 @@ celery_app = Celery(
         "app.workers.embedding_worker",
         "app.workers.email_worker",
         "app.workers.analytics_worker",
+        "app.workers.debug_worker",
     ],
 )
 
