@@ -78,3 +78,10 @@ class ResetPasswordRequest(BaseModel):
         if not any(c.isdigit() for c in v):
             raise ValueError("Password must contain at least one digit")
         return v
+
+
+class GoogleSyncRequest(BaseModel):
+    google_id: str
+    email: EmailStr
+    name: str | None = None
+    avatar_url: str | None = None

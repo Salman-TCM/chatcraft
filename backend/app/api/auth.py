@@ -22,6 +22,7 @@ from app.core.security import (
 from app.models.user import User, UserRole
 from app.schemas.auth import (
     ForgotPasswordRequest,
+    GoogleSyncRequest,
     LoginRequest,
     LoginResponse,
     MeResponse,
@@ -274,6 +275,7 @@ async def reset_password(body: ResetPasswordRequest, db: DBSession) -> dict:
 # ---------------------------------------------------------------------------
 
 _GOOGLE_AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth"
+_GOOGLE_TOKENINFO_URL = "https://oauth2.googleapis.com/tokeninfo"
 _GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token"
 _GOOGLE_USERINFO_URL = "https://www.googleapis.com/oauth2/v3/userinfo"
 _OAUTH_STATE_TTL = 600  # 10 minutes
@@ -412,3 +414,58 @@ async def google_oauth_callback(
         f"?access_token={urllib.parse.quote(access_token)}"
     )
     return RedirectResponse(url=redirect_url, status_code=302)
+
+
+@router.post("/google/sync", response_model=LoginResponse)
+async def google_sync(
+    body: GoogleSyncRequest,
+    response: Response,
+    db: DBSession,
+    redis: RedisClient,
+) -> LoginResponse:
+    """Called by NextAuth after Google sign-in to upsert the user and return
+    a ChatCraft JWT. The Google token has already been verified by NextAuth."""
+    user = await db.scalar(select(User).where(User.google_id == body.google_id))
+    if not user:
+        user = await db.scalar(select(User).where(User.email == body.email))
+
+    if user:
+        if not user.google_id:
+            user.google_id = body.google_id
+        if not user.avatar_url and body.avatar_url:
+            user.avatar_url = body.avatar_url
+        await db.commit()
+        await db.refresh(user)
+    else:
+        user = User(
+            email=body.email,
+            google_id=body.google_id,
+            name=body.name,
+            avatar_url=body.avatar_url,
+            role=UserRole.free,
+            email_verified=True,
+        )
+        db.add(user)
+        await db.commit()
+        await db.refresh(user)
+
+    access_token = create_access_token(user.id, user.role.value)
+    refresh_token, jti = create_refresh_token(user.id)
+    await redis.setex(f"refresh:{jti}", _REFRESH_TTL, user.id)
+
+    response.set_cookie(
+        key=REFRESH_TOKEN_COOKIE,
+        value=refresh_token,
+        httponly=True,
+        secure=True,
+        samesite="lax",
+        max_age=_REFRESH_TTL,
+        path="/api/auth",
+    )
+
+    return LoginResponse(
+        data=TokenData(
+            access_token=access_token,
+            user=UserResponse.model_validate(user),
+        )
+    )
