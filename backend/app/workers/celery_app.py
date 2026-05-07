@@ -53,8 +53,7 @@ celery_app.conf.update(
     task_serializer="json",
     accept_content=["json"],
     result_serializer="json",
-    # Timezone (UK)
-    timezone="Europe/London",
+    timezone="UTC",
     enable_utc=True,
     # Queues & routing
     task_queues=QUEUES,
@@ -77,13 +76,13 @@ celery_app.conf.update(
         # Aggregate yesterday's usage into analytics_daily (Phase 6)
         "aggregate-daily-usage": {
             "task": "workers.aggregate_daily_usage",
-            "schedule": _cron(hour=1, minute=0),  # 01:00 Europe/London nightly
+            "schedule": _cron(hour=1, minute=0),  # 01:00 UTC nightly
             "options": {"queue": "analytics"},
         },
         # Report metered billing units to Stripe (Phase 6)
         "sync-stripe-metered-billing": {
             "task": "workers.sync_stripe_metered_billing",
-            "schedule": _cron(hour=2, minute=0),  # 02:00 Europe/London nightly
+            "schedule": _cron(hour=2, minute=0),  # 02:00 UTC nightly
             "options": {"queue": "analytics"},
         },
         # Email users approaching/at their usage cap (Phase 6)

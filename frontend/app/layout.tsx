@@ -12,8 +12,8 @@ export const metadata: Metadata = {
     default: "ChatCraft AI",
     template: "%s | ChatCraft AI",
   },
-  description: "Production-grade AI chatbot platform for UK businesses",
-  keywords: ["AI chatbot", "UK business", "customer support", "ChatCraft"],
+  description: "Production-grade AI chatbot platform for businesses worldwide",
+  keywords: ["AI chatbot", "customer support", "ChatCraft", "AI platform"],
   authors: [{ name: "ChatCraft AI" }],
   creator: "ChatCraft AI",
   metadataBase: new URL(

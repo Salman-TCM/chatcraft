@@ -6,7 +6,7 @@ export default function HomePage() {
           ChatCraft AI
         </h1>
         <p className="text-lg text-muted-foreground max-w-prose mx-auto">
-          Production-grade AI chatbot platform for UK businesses.
+          Production-grade AI chatbot platform for businesses worldwide.
         </p>
       </div>
     </main>

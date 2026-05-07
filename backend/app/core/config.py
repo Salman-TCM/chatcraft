@@ -44,7 +44,7 @@ class Settings(BaseSettings):
     aws_access_key_id: str = ""
     aws_secret_access_key: str = ""
     aws_s3_bucket: str = ""
-    aws_region: str = "eu-west-2"
+    aws_region: str = "us-east-1"
 
     jwt_algorithm: str = "HS256"
     access_token_expire_minutes: int = 15

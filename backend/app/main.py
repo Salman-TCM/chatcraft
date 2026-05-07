@@ -18,7 +18,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 app = FastAPI(
     title="ChatCraft AI API",
     version="0.1.0",
-    description="Production-grade AI chatbot platform API for UK businesses",
+    description="Production-grade AI chatbot platform API for businesses worldwide",
     docs_url="/docs" if not settings.is_production else None,
     redoc_url="/redoc" if not settings.is_production else None,
     lifespan=lifespan,

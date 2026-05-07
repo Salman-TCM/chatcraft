@@ -1,6 +1,6 @@
 # ChatCraft AI
 
-Production-grade AI chatbot platform for UK businesses. Build, brand, and deploy AI chatbots with voice, knowledge base, and full analytics — all from one dashboard.
+Production-grade AI chatbot platform for businesses worldwide. Build, brand, and deploy AI chatbots with voice, knowledge base, and full analytics — all from one dashboard.
 
 ---
 

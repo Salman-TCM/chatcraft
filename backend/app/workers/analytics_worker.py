@@ -12,7 +12,7 @@ from app.workers.celery_app import celery_app
 def aggregate_daily_usage(self) -> dict:
     """
     Aggregate yesterday's usage_logs into analytics_daily.
-    Runs nightly at 01:00 Europe/London via Celery beat.
+    Runs nightly at 01:00 UTC via Celery beat.
     Implemented in Phase 6.
     """
     raise NotImplementedError("Implemented in Phase 6")
@@ -29,7 +29,7 @@ def aggregate_daily_usage(self) -> dict:
 def sync_stripe_metered_billing(self) -> dict:
     """
     Report metered usage units to Stripe at the end of each billing period.
-    Runs daily at 02:00 Europe/London via Celery beat.
+    Runs daily at 02:00 UTC via Celery beat.
     Implemented in Phase 6.
     """
     raise NotImplementedError("Implemented in Phase 6")
