@@ -34,3 +34,19 @@ class UserResponse(BaseModel):
 class RegisterResponse(BaseModel):
     success: bool = True
     data: UserResponse
+
+
+class LoginRequest(BaseModel):
+    email: EmailStr
+    password: str
+
+
+class TokenData(BaseModel):
+    access_token: str
+    token_type: str = "bearer"
+    user: UserResponse
+
+
+class LoginResponse(BaseModel):
+    success: bool = True
+    data: TokenData
