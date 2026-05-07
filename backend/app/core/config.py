@@ -21,6 +21,11 @@ class Settings(BaseSettings):
 
     cors_origins: List[str] = ["http://localhost:3000"]
 
+    google_oauth_client_id: str = ""
+    google_oauth_client_secret: str = ""
+    google_oauth_redirect_uri: str = "http://localhost:8000/api/auth/google/callback"
+    frontend_url: str = "http://localhost:3000"
+
     anthropic_api_key: str = ""
     openai_api_key: str = ""
     google_ai_api_key: str = ""
