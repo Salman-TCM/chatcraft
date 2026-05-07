@@ -47,7 +47,8 @@ services:
       context: ./backend
       dockerfile: Dockerfile
     restart: unless-stopped
-    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+    # --reload-dir limits watchfiles to app/ only, avoiding spurious reloads
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload --reload-dir app
     ports:
       - "8000:8000"
     volumes:
@@ -55,6 +56,11 @@ services:
     environment:
       ENVIRONMENT: development
       DEBUG: "true"
+      # Unbuffered output so logs appear immediately in docker compose logs
+      PYTHONUNBUFFERED: "1"
+      PYTHONDONTWRITEBYTECODE: "1"
+      # Force watchfiles to use polling — required on macOS/Windows Docker Desktop
+      WATCHFILES_FORCE_POLLING: "true"
       SECRET_KEY: ${SECRET_KEY:-dev-secret-change-in-production}
       DATABASE_URL: postgresql+asyncpg://chatcraft:chatcraft@postgres:5432/chatcraft
       REDIS_URL: redis://redis:6379/0
@@ -99,6 +105,8 @@ services:
       - ./backend:/app
     environment:
       ENVIRONMENT: development
+      PYTHONUNBUFFERED: "1"
+      PYTHONDONTWRITEBYTECODE: "1"
       SECRET_KEY: ${SECRET_KEY:-dev-secret-change-in-production}
       DATABASE_URL: postgresql+asyncpg://chatcraft:chatcraft@postgres:5432/chatcraft
       REDIS_URL: redis://redis:6379/0
@@ -139,6 +147,8 @@ services:
       - celery_beat_data:/var/run/celerybeat
     environment:
       ENVIRONMENT: development
+      PYTHONUNBUFFERED: "1"
+      PYTHONDONTWRITEBYTECODE: "1"
       SECRET_KEY: ${SECRET_KEY:-dev-secret-change-in-production}
       DATABASE_URL: postgresql+asyncpg://chatcraft:chatcraft@postgres:5432/chatcraft
       REDIS_URL: redis://redis:6379/0
@@ -178,6 +188,9 @@ services:
       NEXT_PUBLIC_POSTHOG_KEY: ${NEXT_PUBLIC_POSTHOG_KEY:-}
       NEXT_PUBLIC_POSTHOG_HOST: ${NEXT_PUBLIC_POSTHOG_HOST:-https://eu.posthog.com}
       NEXT_PUBLIC_SENTRY_DSN: ${NEXT_PUBLIC_SENTRY_DSN:-}
+      # Force filesystem polling for hot reload on macOS/Windows Docker Desktop
+      WATCHPACK_POLLING: "true"
+      CHOKIDAR_USEPOLLING: "true"
     depends_on:
       backend:
         condition: service_healthy
