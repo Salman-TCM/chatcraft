@@ -42,6 +42,7 @@ elevenlabs==1.14.3
 
 # Storage
 boto3==1.35.93
+supabase==2.11.0
 
 # Email
 resend==2.5.0
