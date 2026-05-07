@@ -66,6 +66,9 @@ class Subscription(TimestampMixin, Base):
     canceled_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
+    payment_failed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
 
     # Relationship
     user: Mapped["User"] = relationship("User", back_populates="subscription")  # type: ignore[name-defined]

@@ -429,6 +429,7 @@ async def _handle_invoice_failed(data: dict, db: DBSession) -> None:
         )
         if sub:
             sub.status = SubscriptionState.past_due
+            sub.payment_failed_at = sub.payment_failed_at or datetime.now(timezone.utc)
             user.subscription_status = SubscriptionStatus.past_due
             await db.commit()
 

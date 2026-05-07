@@ -31,6 +31,7 @@ TASK_ROUTES = {
     "workers.sync_stripe_metered_billing": {"queue": "analytics", "routing_key": "analytics"},
     "workers.send_usage_alerts": {"queue": "analytics", "routing_key": "analytics"},
     "workers.expire_trials": {"queue": "priority", "routing_key": "priority"},
+    "workers.expire_payment_grace_periods": {"queue": "priority", "routing_key": "priority"},
 }
 
 # ---------------------------------------------------------------------------
@@ -44,6 +45,7 @@ celery_app = Celery(
         "app.workers.embedding_worker",
         "app.workers.email_worker",
         "app.workers.analytics_worker",
+        "app.workers.billing_worker",
         "app.workers.debug_worker",
     ],
 )
@@ -95,6 +97,12 @@ celery_app.conf.update(
         "expire-trials": {
             "task": "workers.expire_trials",
             "schedule": 1800,                      # every 30 minutes
+            "options": {"queue": "priority"},
+        },
+        # Downgrade users past 3-day payment grace period (Phase 2)
+        "expire-payment-grace-periods": {
+            "task": "workers.expire_payment_grace_periods",
+            "schedule": _cron(minute=0),           # every hour on the hour
             "options": {"queue": "priority"},
         },
     },
