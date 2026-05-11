@@ -1,0 +1,117 @@
+"use client";
+
+import { useState } from "react";
+import { Check, Copy, ThumbsDown, ThumbsUp } from "lucide-react";
+import { cn } from "@/lib/utils";
+import { Button } from "@/components/ui/button";
+import { apiClient } from "@/lib/api";
+import type { ChatMessage } from "./types";
+
+interface MessageBubbleProps {
+  message: ChatMessage;
+  onFeedbackChange?: (id: string, feedback: "thumbs_up" | "thumbs_down") => void;
+}
+
+export function MessageBubble({ message, onFeedbackChange }: MessageBubbleProps) {
+  const [copied, setCopied] = useState(false);
+  const [feedback, setFeedback] = useState(message.feedback ?? null);
+  const isUser = message.role === "user";
+
+  async function handleCopy() {
+    await navigator.clipboard.writeText(message.content);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 1500);
+  }
+
+  async function handleFeedback(value: "thumbs_up" | "thumbs_down") {
+    if (feedback === value) return;
+    try {
+      await apiClient.post(`/api/chat/messages/${message.id}/feedback`, {
+        feedback: value,
+      });
+      setFeedback(value);
+      onFeedbackChange?.(message.id, value);
+    } catch {
+      // Feedback is best-effort
+    }
+  }
+
+  return (
+    <div className={cn("group flex gap-3 px-4 py-3", isUser && "flex-row-reverse")}>
+      {/* Avatar */}
+      <div
+        className={cn(
+          "flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-xs font-semibold",
+          isUser
+            ? "bg-primary text-primary-foreground"
+            : "bg-muted text-muted-foreground border"
+        )}
+      >
+        {isUser ? "U" : "AI"}
+      </div>
+
+      {/* Bubble */}
+      <div className={cn("flex max-w-[75%] flex-col gap-1", isUser && "items-end")}>
+        <div
+          className={cn(
+            "rounded-2xl px-4 py-2.5 text-sm leading-relaxed whitespace-pre-wrap break-words",
+            isUser
+              ? "bg-primary text-primary-foreground rounded-tr-sm"
+              : "bg-muted text-foreground rounded-tl-sm"
+          )}
+        >
+          {message.content}
+          {message.isStreaming && (
+            <span className="ml-0.5 inline-block h-4 w-0.5 animate-pulse bg-current opacity-70" />
+          )}
+        </div>
+
+        {/* Action row — visible on hover for assistant messages */}
+        {!isUser && !message.isStreaming && (
+          <div className="flex items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100">
+            <Button
+              size="icon"
+              variant="ghost"
+              className="h-7 w-7 text-muted-foreground hover:text-foreground"
+              onClick={handleCopy}
+              title="Copy"
+            >
+              {copied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
+            </Button>
+            <Button
+              size="icon"
+              variant="ghost"
+              className={cn(
+                "h-7 w-7",
+                feedback === "thumbs_up"
+                  ? "text-green-600"
+                  : "text-muted-foreground hover:text-foreground"
+              )}
+              onClick={() => handleFeedback("thumbs_up")}
+              title="Good response"
+            >
+              <ThumbsUp className="h-3.5 w-3.5" />
+            </Button>
+            <Button
+              size="icon"
+              variant="ghost"
+              className={cn(
+                "h-7 w-7",
+                feedback === "thumbs_down"
+                  ? "text-red-500"
+                  : "text-muted-foreground hover:text-foreground"
+              )}
+              onClick={() => handleFeedback("thumbs_down")}
+              title="Poor response"
+            >
+              <ThumbsDown className="h-3.5 w-3.5" />
+            </Button>
+            {message.model && (
+              <span className="ml-1 text-[10px] text-muted-foreground">{message.model}</span>
+            )}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
