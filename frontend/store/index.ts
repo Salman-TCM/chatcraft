@@ -26,6 +26,10 @@ interface UIState {
   upgradeModalReason: string;
   openUpgradeModal: (reason?: string) => void;
   closeUpgradeModal: () => void;
+  hardPaywallOpen: boolean;
+  hardPaywallCap: number;
+  openHardPaywall: (cap?: number) => void;
+  closeHardPaywall: () => void;
 }
 
 type AppState = AuthState & UIState;
@@ -49,6 +53,11 @@ export const useAppStore = create<AppState>()(
         set({ upgradeModalOpen: true, upgradeModalReason: reason }),
       closeUpgradeModal: () =>
         set({ upgradeModalOpen: false, upgradeModalReason: "" }),
+
+      hardPaywallOpen: false,
+      hardPaywallCap: 0,
+      openHardPaywall: (cap = 0) => set({ hardPaywallOpen: true, hardPaywallCap: cap }),
+      closeHardPaywall: () => set({ hardPaywallOpen: false, hardPaywallCap: 0 }),
     }),
     {
       name: "chatcraft-store",

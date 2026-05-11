@@ -21,9 +21,13 @@ apiClient.interceptors.response.use(
       window.location.href = "/login";
     }
 
-    if (
+    if (typeof window !== "undefined" && code === "MESSAGE_CAP_REACHED") {
+      const { useAppStore } = await import("@/store");
+      const cap = error.response?.data?.detail?.cap ?? 0;
+      useAppStore.getState().openHardPaywall(cap);
+    } else if (
       typeof window !== "undefined" &&
-      (status === 429 || code === "USAGE_LIMIT_REACHED" || code === "MESSAGE_CAP_REACHED")
+      (status === 429 || code === "USAGE_LIMIT_REACHED")
     ) {
       const { useAppStore } = await import("@/store");
       useAppStore.getState().openUpgradeModal(
