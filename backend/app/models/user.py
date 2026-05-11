@@ -85,6 +85,12 @@ class User(TimestampMixin, Base):
     payments: Mapped[list["Payment"]] = relationship(  # type: ignore[name-defined]
         "Payment", back_populates="user"
     )
+    chatbot_configs: Mapped[list["ChatbotConfig"]] = relationship(  # type: ignore[name-defined]
+        "ChatbotConfig", back_populates="user", cascade="all, delete-orphan"
+    )
+    conversations: Mapped[list["Conversation"]] = relationship(  # type: ignore[name-defined]
+        "Conversation", back_populates="user"
+    )
 
     def __repr__(self) -> str:
         return f"<User id={self.id} email={self.email} role={self.role}>"
