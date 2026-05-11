@@ -60,6 +60,7 @@ class Settings(BaseSettings):
     free_tier_message_cap: int = 20
     trial_tier_message_cap: int = 500
     premium_tier_message_cap: int = 5000
+    default_fallback_model: str = "gpt-4o-mini"
 
     @property
     def is_production(self) -> bool:
