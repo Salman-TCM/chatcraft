@@ -1,21 +1,40 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Check, Copy, ThumbsDown, ThumbsUp } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { apiClient } from "@/lib/api";
+import { AudioPlayer } from "./audio-player";
 import type { ChatMessage } from "./types";
 
 interface MessageBubbleProps {
   message: ChatMessage;
   onFeedbackChange?: (id: string, feedback: "thumbs_up" | "thumbs_down") => void;
+  ttsEnabled?: boolean;
+  autoPlayTts?: boolean;
+  accessToken?: string | null;
+  apiBase?: string;
 }
 
-export function MessageBubble({ message, onFeedbackChange }: MessageBubbleProps) {
+const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
+
+export function MessageBubble({
+  message,
+  onFeedbackChange,
+  ttsEnabled = false,
+  autoPlayTts = false,
+  accessToken,
+  apiBase = API_BASE,
+}: MessageBubbleProps) {
   const [copied, setCopied] = useState(false);
   const [feedback, setFeedback] = useState(message.feedback ?? null);
   const isUser = message.role === "user";
+
+  // TTS audio URL — built from API endpoint; backend redirects to cached S3 URL
+  const ttsUrl = ttsEnabled && !isUser && !message.isStreaming && message.content
+    ? `${apiBase}/api/voice/tts`
+    : null;
 
   async function handleCopy() {
     await navigator.clipboard.writeText(message.content);
@@ -66,6 +85,16 @@ export function MessageBubble({ message, onFeedbackChange }: MessageBubbleProps)
           )}
         </div>
 
+        {/* TTS audio player */}
+        {ttsUrl && (
+          <TtsPlayer
+            text={message.content}
+            apiBase={apiBase}
+            accessToken={accessToken}
+            autoPlay={autoPlayTts}
+          />
+        )}
+
         {/* Action row — visible on hover for assistant messages */}
         {!isUser && !message.isStreaming && (
           <div className="flex items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100">
@@ -114,4 +143,61 @@ export function MessageBubble({ message, onFeedbackChange }: MessageBubbleProps)
       </div>
     </div>
   );
+}
+
+// ── TTS Player sub-component ──────────────────────────────────────────────────
+
+function TtsPlayer({
+  text,
+  apiBase,
+  accessToken,
+  autoPlay,
+}: {
+  text: string;
+  apiBase: string;
+  accessToken?: string | null;
+  autoPlay: boolean;
+}) {
+  const [audioUrl, setAudioUrl] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [requested, setRequested] = useState(false);
+
+  // Auto-fetch on mount when autoPlay is enabled
+  useEffect(() => {
+    if (autoPlay && !requested) fetchAudio();
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  async function fetchAudio() {
+    if (loading || audioUrl) return;
+    setLoading(true);
+    setRequested(true);
+    try {
+      const headers: Record<string, string> = { "Content-Type": "application/json" };
+      if (accessToken) headers["Authorization"] = `Bearer ${accessToken}`;
+      const res = await fetch(`${apiBase}/api/voice/tts`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({ text, use_cache_url: false }),
+      });
+      if (!res.ok) return;
+      const blob = await res.blob();
+      setAudioUrl(URL.createObjectURL(blob));
+    } catch {}
+    finally { setLoading(false); }
+  }
+
+  if (!audioUrl && !loading) {
+    return (
+      <button
+        onClick={fetchAudio}
+        className="mt-1 text-[10px] text-muted-foreground hover:text-foreground underline-offset-2 hover:underline"
+      >
+        Listen
+      </button>
+    );
+  }
+  if (loading) {
+    return <p className="mt-1 text-[10px] text-muted-foreground">Generating audio…</p>;
+  }
+  return <AudioPlayer src={audioUrl!} autoPlay={autoPlay} className="mt-1 max-w-xs" />;
 }

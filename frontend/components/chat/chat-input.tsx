@@ -1,9 +1,10 @@
 "use client";
 
 import { useRef } from "react";
-import { Send, Square } from "lucide-react";
+import { Maximize2, Send, Square } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
+import { VoiceRecorder } from "./voice-recorder";
 
 const MAX_CHARS = 32_000;
 
@@ -14,6 +15,9 @@ interface ChatInputProps {
   onStop: () => void;
   isStreaming: boolean;
   disabled?: boolean;
+  sttEnabled?: boolean;
+  onVoiceMode?: () => void;
+  accessToken?: string | null;
 }
 
 export function ChatInput({
@@ -23,6 +27,9 @@ export function ChatInput({
   onStop,
   isStreaming,
   disabled,
+  sttEnabled,
+  onVoiceMode,
+  accessToken,
 }: ChatInputProps) {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
@@ -60,11 +67,29 @@ export function ChatInput({
           disabled={disabled || isStreaming}
           className="flex-1 resize-none bg-transparent text-sm leading-relaxed outline-none placeholder:text-muted-foreground disabled:opacity-50 max-h-[200px]"
         />
-        <div className="flex shrink-0 items-center gap-2">
+        <div className="flex shrink-0 items-center gap-1">
           {nearLimit && (
             <span className={cn("text-[10px]", remaining < 100 ? "text-destructive" : "text-muted-foreground")}>
               {remaining.toLocaleString()}
             </span>
+          )}
+          {sttEnabled && (
+            <VoiceRecorder
+              onTranscript={(t) => onChange(value ? `${value} ${t}` : t)}
+              accessToken={accessToken}
+              disabled={isStreaming}
+            />
+          )}
+          {onVoiceMode && sttEnabled && (
+            <Button
+              size="icon"
+              variant="ghost"
+              className="h-8 w-8"
+              onClick={onVoiceMode}
+              title="Voice mode"
+            >
+              <Maximize2 className="h-3.5 w-3.5" />
+            </Button>
           )}
           {isStreaming ? (
             <Button

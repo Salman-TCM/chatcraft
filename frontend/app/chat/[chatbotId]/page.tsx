@@ -32,6 +32,12 @@ export default function ChatPage() {
         allowModelSwitch: b.allow_model_switch,
         published: b.published,
         systemPrompt: b.system_prompt,
+        ttsEnabled: b.tts_enabled ?? false,
+        sttEnabled: b.stt_enabled ?? false,
+        autoPlayTts: b.auto_play_tts ?? false,
+        voiceId: b.voice_id ?? null,
+        voiceStability: b.voice_stability ?? 0.5,
+        voiceSimilarityBoost: b.voice_similarity_boost ?? 0.75,
       });
     } catch {
       setError("Chatbot not found or unavailable.");

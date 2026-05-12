@@ -9,6 +9,7 @@ import { ChatInput } from "./chat-input";
 import { MessageBubble } from "./message-bubble";
 import { ModelSwitcher } from "./model-switcher";
 import { TypingIndicator } from "./typing-indicator";
+import { VoiceMode } from "./voice-mode";
 import type { ChatMessage, ChatbotConfig } from "./types";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
@@ -46,6 +47,7 @@ export function ChatWindow({
   const [selectedModel, setSelectedModel] = useState(chatbot.defaultModel);
   const [isStreaming, setIsStreaming] = useState(false);
   const [loadingHistory, setLoadingHistory] = useState(false);
+  const [voiceModeOpen, setVoiceModeOpen] = useState(false);
 
   const abortRef = useRef<AbortController | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
@@ -330,6 +332,19 @@ export function ChatWindow({
 
   return (
     <div className="flex h-full flex-col">
+      {voiceModeOpen && (
+        <VoiceMode
+          chatbotName={chatbot.name}
+          accessToken={accessToken}
+          onTranscriptSend={(text) => {
+            setVoiceModeOpen(false);
+            setInput(text);
+            // Slight delay so input state settles before sending
+            setTimeout(() => sendMessage(), 50);
+          }}
+          onClose={() => setVoiceModeOpen(false)}
+        />
+      )}
       {/* Toolbar */}
       <div className="flex items-center justify-between border-b px-4 py-2">
         <span className="text-sm font-medium truncate">{chatbot.name}</span>
@@ -378,6 +393,9 @@ export function ChatWindow({
                   prev.map((m) => (m.id === id ? { ...m, feedback: fb } : m))
                 )
               }
+              ttsEnabled={chatbot.ttsEnabled}
+              autoPlayTts={chatbot.autoPlayTts}
+              accessToken={accessToken}
             />
           ))}
           {isStreaming && messages[messages.length - 1]?.content === "" && (
@@ -394,6 +412,9 @@ export function ChatWindow({
         onSend={sendMessage}
         onStop={handleStop}
         isStreaming={isStreaming}
+        sttEnabled={chatbot.sttEnabled}
+        onVoiceMode={chatbot.sttEnabled ? () => setVoiceModeOpen(true) : undefined}
+        accessToken={accessToken}
       />
     </div>
   );

@@ -24,4 +24,11 @@ export interface ChatbotConfig {
   allowModelSwitch: boolean;
   published: boolean;
   systemPrompt: string | null;
+  // Voice
+  ttsEnabled: boolean;
+  sttEnabled: boolean;
+  autoPlayTts: boolean;
+  voiceId: string | null;
+  voiceStability: number;
+  voiceSimilarityBoost: number;
 }
