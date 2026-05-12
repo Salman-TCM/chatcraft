@@ -20,6 +20,7 @@ from app.api.usage import router as usage_router
 from app.api.analytics import router as analytics_router
 from app.api.gdpr import router as gdpr_router
 from app.core.security_headers import SecurityHeadersMiddleware
+from app.core.ip_abuse import IPAbuseMiddleware
 from app.core.config import settings
 from app.core.logging import setup_logging
 from app.core.rate_limit import limiter
@@ -33,8 +34,10 @@ init_sentry()
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
-    """Manage application startup and shutdown lifecycle."""
+    from app.db.redis import get_async_redis
+    app.state.redis = get_async_redis()
     yield
+    await app.state.redis.aclose()
 
 
 app = FastAPI(
@@ -51,6 +54,7 @@ app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 app.add_middleware(SecurityHeadersMiddleware)
+app.add_middleware(IPAbuseMiddleware)
 app.add_middleware(SlowAPIMiddleware)
 app.add_middleware(RequestLoggingMiddleware)
 app.add_middleware(RequestIDMiddleware)

@@ -5,6 +5,7 @@ import { SessionSync } from "@/components/session-sync";
 import { TrialBanner } from "@/components/trial-banner";
 import { UpgradeModal } from "@/components/upgrade-modal";
 import { HardPaywallModal } from "@/components/hard-paywall-modal";
+import { CookieConsent } from "@/components/cookie-consent";
 import "./globals.css";
 
 const inter = Inter({
@@ -39,6 +40,7 @@ export default function RootLayout({
           <TrialBanner />
           <UpgradeModal />
           <HardPaywallModal />
+          <CookieConsent />
           {children}
         </SessionProvider>
       </body>
