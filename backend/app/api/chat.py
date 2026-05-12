@@ -40,6 +40,7 @@ from app.schemas.chat import (
     MessageResponse,
 )
 from app.services.kb.rag import RAGService
+from app.services import usage as usage_svc
 from app.services.llm import (
     ChatMessage,
     LLMRouter,
@@ -227,6 +228,17 @@ async def stream_chat(
                         conversation_id=str(conv_id),
                         message_id=str(msg_id),
                     )
+
+                    import asyncio as _asyncio
+                    _asyncio.create_task(usage_svc.log_llm(
+                        user_id=user.id if user else None,
+                        chatbot_id=chatbot_id,
+                        conversation_id=conv_id,
+                        model=chunk.model or model_id,
+                        input_tokens=chunk.input_tokens,
+                        output_tokens=chunk.output_tokens,
+                        cost_usd=chunk.cost_usd,
+                    ))
 
                     # Auto-generate title after first turn (background)
                     if is_first_message:
