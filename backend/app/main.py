@@ -15,6 +15,7 @@ from app.api.chatbots import router as chatbots_router
 from app.api.health import router as health_router
 from app.api.kb import router as kb_router
 from app.api.voice import router as voice_router
+from app.api.widget import router as widget_router
 from app.core.config import settings
 from app.core.logging import setup_logging
 from app.core.rate_limit import limiter
@@ -63,6 +64,7 @@ app.include_router(chatbots_router)
 app.include_router(chat_router)
 app.include_router(kb_router)
 app.include_router(voice_router)
+app.include_router(widget_router)
 
 
 @app.get("/", tags=["health"])
