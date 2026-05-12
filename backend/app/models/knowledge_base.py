@@ -39,11 +39,14 @@ class KnowledgeBaseDocument(TimestampMixin, Base):
         Enum(DocumentType, name="document_type"), nullable=False
     )
 
-    # S3 / Supabase Storage URL; NULL for raw-text pastes
+    # S3 / Supabase Storage URL; NULL for raw-text pastes and URL-type docs
     file_url: Mapped[str | None] = mapped_column(String(2048), nullable=True)
 
     # For URL-type documents
     source_url: Mapped[str | None] = mapped_column(String(2048), nullable=True)
+
+    # Raw content for type=text (paste ingestion)
+    raw_content: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     status: Mapped[DocumentStatus] = mapped_column(
         Enum(DocumentStatus, name="document_status"),

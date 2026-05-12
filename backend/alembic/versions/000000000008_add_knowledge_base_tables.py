@@ -45,6 +45,7 @@ def upgrade() -> None:
         sa.Column("type", sa.Enum("pdf", "docx", "txt", "url", "text", name="document_type"), nullable=False),
         sa.Column("file_url", sa.String(2048), nullable=True),
         sa.Column("source_url", sa.String(2048), nullable=True),
+        sa.Column("raw_content", sa.Text(), nullable=True),
         sa.Column("status", sa.Enum("pending", "processing", "ready", "error", name="document_status"),
                   server_default="pending", nullable=False),
         sa.Column("chunk_count", sa.Integer(), server_default="0", nullable=False),

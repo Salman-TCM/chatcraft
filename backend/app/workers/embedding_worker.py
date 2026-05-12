@@ -1,9 +1,18 @@
+"""
+Celery task: process_document
+Pipeline: extract text → clean → chunk → embed → store in pgvector.
+Document status is updated at each stage so the UI can reflect progress.
+"""
+import asyncio
+import uuid
+
 from celery import Task
+from loguru import logger
+
 from app.workers.celery_app import celery_app
 
 
 class EmbeddingTask(Task):
-    """Base class that holds a lazy DB session for embedding tasks."""
     abstract = True
 
 
@@ -18,7 +27,124 @@ class EmbeddingTask(Task):
 )
 def process_document(self: EmbeddingTask, document_id: str) -> dict:
     """
-    Chunk, embed, and store a knowledge base document.
-    Implemented in Phase 4.
+    Full document ingestion pipeline:
+    1. Set status → processing
+    2. Extract text from source (pdf/docx/txt/url/text)
+    3. Clean and normalise
+    4. Chunk (500 tokens, 50 overlap)
+    5. Embed with text-embedding-3-small (batched, with retry)
+    6. Persist KnowledgeBaseChunk rows + update document counters
+    7. Set status → ready  (or error on unrecoverable failure)
     """
-    raise NotImplementedError("Implemented in Phase 4")
+    try:
+        asyncio.run(_run_pipeline(document_id))
+        return {"document_id": document_id, "status": "ready"}
+    except Exception as exc:
+        logger.exception(f"process_document failed for {document_id}: {exc}")
+        # Mark document as error in DB
+        try:
+            asyncio.run(_mark_error(document_id, str(exc)))
+        except Exception:
+            pass
+
+        # Retry transient errors (network, rate limits)
+        if self.request.retries < self.max_retries:
+            raise self.retry(exc=exc, countdown=30 * (2 ** self.request.retries))
+        return {"document_id": document_id, "status": "error", "error": str(exc)}
+
+
+async def _run_pipeline(document_id: str) -> None:
+    from app.db.session import AsyncSessionLocal
+    from app.models.knowledge_base import (
+        DocumentStatus,
+        KnowledgeBaseChunk,
+        KnowledgeBaseDocument,
+    )
+    from app.services.kb.chunker import chunk_text
+    from app.services.kb.cleaner import clean
+    from app.services.kb.embedder import embed_texts
+    from app.services.kb.extractor import extract_text_for_document
+
+    doc_uuid = uuid.UUID(document_id)
+
+    async with AsyncSessionLocal() as db:
+        doc: KnowledgeBaseDocument | None = await db.get(KnowledgeBaseDocument, doc_uuid)
+        if not doc:
+            raise ValueError(f"Document {document_id} not found")
+
+        # ── 1. Mark as processing ─────────────────────────────────────────────
+        doc.status = DocumentStatus.processing
+        doc.error_message = None
+        await db.commit()
+
+        logger.info(f"[KB] Processing document {document_id} type={doc.type.value}")
+
+        # ── 2. Extract text ───────────────────────────────────────────────────
+        raw_text = await extract_text_for_document(
+            doc_type=doc.type.value,
+            file_url=doc.file_url,
+            source_url=doc.source_url,
+            raw_content=doc.raw_content,
+        )
+        if not raw_text.strip():
+            raise ValueError("No text could be extracted from the document")
+
+        # ── 3. Clean ──────────────────────────────────────────────────────────
+        cleaned = clean(raw_text)
+
+        # ── 4. Chunk ──────────────────────────────────────────────────────────
+        chunks = chunk_text(cleaned)
+        if not chunks:
+            raise ValueError("Document produced no chunks after cleaning")
+
+        logger.info(f"[KB] Document {document_id} → {len(chunks)} chunks")
+
+        # ── 5. Embed (batched) ────────────────────────────────────────────────
+        texts = [c.content for c in chunks]
+        vectors = await embed_texts(texts)
+
+        # ── 6. Persist chunks ─────────────────────────────────────────────────
+        # Delete any stale chunks from a previous (failed) attempt
+        from sqlalchemy import delete
+        await db.execute(
+            delete(KnowledgeBaseChunk).where(
+                KnowledgeBaseChunk.document_id == doc_uuid
+            )
+        )
+
+        total_tokens = 0
+        for chunk, vector in zip(chunks, vectors):
+            db.add(
+                KnowledgeBaseChunk(
+                    document_id=doc_uuid,
+                    chunk_index=chunk.index,
+                    content=chunk.content,
+                    token_count=chunk.token_count,
+                    embedding=vector,
+                )
+            )
+            total_tokens += chunk.token_count
+
+        # ── 7. Update document counters and mark ready ────────────────────────
+        doc.chunk_count = len(chunks)
+        doc.token_count = total_tokens
+        doc.status = DocumentStatus.ready
+        doc.error_message = None
+
+        await db.commit()
+        logger.info(
+            f"[KB] Document {document_id} ready — "
+            f"{len(chunks)} chunks, {total_tokens} tokens"
+        )
+
+
+async def _mark_error(document_id: str, message: str) -> None:
+    from app.db.session import AsyncSessionLocal
+    from app.models.knowledge_base import DocumentStatus, KnowledgeBaseDocument
+
+    async with AsyncSessionLocal() as db:
+        doc = await db.get(KnowledgeBaseDocument, uuid.UUID(document_id))
+        if doc:
+            doc.status = DocumentStatus.error
+            doc.error_message = message[:1000]
+            await db.commit()
