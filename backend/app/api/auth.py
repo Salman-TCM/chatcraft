@@ -71,6 +71,10 @@ async def register(body: RegisterRequest, db: DBSession) -> RegisterResponse:
     return RegisterResponse(data=UserResponse.model_validate(user))
 
 
+_LOGIN_ATTEMPT_LIMIT = 10
+_LOGIN_LOCKOUT_SECONDS = 900  # 15 minutes
+
+
 @router.post("/login", response_model=LoginResponse)
 async def login(
     body: LoginRequest,
@@ -80,12 +84,27 @@ async def login(
 ) -> LoginResponse:
     """Authenticate with email + password. Returns JWT access token in body
     and sets a httpOnly refresh token cookie."""
+    attempt_key = f"login_attempts:{body.email.lower()}"
+    attempts = await redis.get(attempt_key)
+    if attempts and int(attempts) >= _LOGIN_ATTEMPT_LIMIT:
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail={"success": False, "error": "Too many login attempts. Try again in 15 minutes.", "code": "TOO_MANY_ATTEMPTS"},
+        )
+
     user = await db.scalar(select(User).where(User.email == body.email))
     if not user or not user.password_hash or not verify_password(body.password, user.password_hash):
+        pipe = redis.pipeline()
+        pipe.incr(attempt_key)
+        pipe.expire(attempt_key, _LOGIN_LOCKOUT_SECONDS)
+        await pipe.execute()
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail={"success": False, "error": "Invalid credentials", "code": "INVALID_CREDENTIALS"},
         )
+
+    # Successful login — clear attempt counter
+    await redis.delete(attempt_key)
 
     access_token = create_access_token(user.id, user.role.value)
     refresh_token, jti = create_refresh_token(user.id)

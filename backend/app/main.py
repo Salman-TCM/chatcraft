@@ -18,6 +18,8 @@ from app.api.voice import router as voice_router
 from app.api.widget import router as widget_router
 from app.api.usage import router as usage_router
 from app.api.analytics import router as analytics_router
+from app.api.gdpr import router as gdpr_router
+from app.core.security_headers import SecurityHeadersMiddleware
 from app.core.config import settings
 from app.core.logging import setup_logging
 from app.core.rate_limit import limiter
@@ -48,6 +50,7 @@ app = FastAPI(
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
+app.add_middleware(SecurityHeadersMiddleware)
 app.add_middleware(SlowAPIMiddleware)
 app.add_middleware(RequestLoggingMiddleware)
 app.add_middleware(RequestIDMiddleware)
@@ -69,6 +72,7 @@ app.include_router(voice_router)
 app.include_router(widget_router)
 app.include_router(usage_router)
 app.include_router(analytics_router)
+app.include_router(gdpr_router)
 
 
 @app.get("/", tags=["health"])
