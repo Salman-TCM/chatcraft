@@ -25,6 +25,23 @@ class ChatbotUpdateRequest(BaseModel):
     allow_model_switch: bool | None = None
     system_prompt: str | None = Field(None, max_length=8000)
     published: bool | None = None
+    # Branding
+    logo_url: str | None = Field(None, max_length=2048)
+    primary_colour: str | None = Field(None, pattern=r"^#[0-9A-Fa-f]{6}$")
+    secondary_colour: str | None = Field(None, pattern=r"^#[0-9A-Fa-f]{6}$")
+    background_colour: str | None = Field(None, pattern=r"^#[0-9A-Fa-f]{6}$")
+    font_family: str | None = Field(None, max_length=100)
+    welcome_message: str | None = Field(None, max_length=500)
+    placeholder_text: str | None = Field(None, max_length=200)
+    bubble_style: str | None = Field(None, pattern=r"^(rounded|square|pill)$")
+    dark_mode: bool | None = None
+    # Voice
+    tts_enabled: bool | None = None
+    stt_enabled: bool | None = None
+    auto_play_tts: bool | None = None
+    voice_id: str | None = Field(None, max_length=100)
+    voice_stability: float | None = Field(None, ge=0.0, le=1.0)
+    voice_similarity_boost: float | None = Field(None, ge=0.0, le=1.0)
 
 
 class ChatbotResponse(BaseModel):
@@ -37,6 +54,23 @@ class ChatbotResponse(BaseModel):
     allow_model_switch: bool
     published: bool
     system_prompt: str | None
+    # Branding
+    logo_url: str | None
+    primary_colour: str
+    secondary_colour: str
+    background_colour: str
+    font_family: str
+    welcome_message: str | None
+    placeholder_text: str
+    bubble_style: str
+    dark_mode: bool
+    # Voice
+    tts_enabled: bool
+    stt_enabled: bool
+    auto_play_tts: bool
+    voice_id: str | None
+    voice_stability: float
+    voice_similarity_boost: float
     created_at: datetime
     updated_at: datetime
 

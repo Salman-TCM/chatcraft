@@ -45,6 +45,27 @@ def _s3_client():
     )
 
 
+async def upload_logo(
+    data: bytes,
+    filename: str,
+    content_type: str,
+    chatbot_id: str,
+) -> str:
+    """Upload a chatbot logo and return a public URL. Key path: logos/{chatbot_id}/{filename}"""
+    safe_name = PurePosixPath(filename).name
+    key = f"logos/{chatbot_id}/{safe_name}"
+
+    if settings.aws_access_key_id and settings.aws_s3_bucket:
+        return await _upload_s3(data, key, content_type)
+    if settings.supabase_url and settings.supabase_key:
+        return await _upload_supabase(data, key, content_type)
+
+    raise RuntimeError(
+        "No storage backend configured. Set AWS_ACCESS_KEY_ID + AWS_S3_BUCKET "
+        "or SUPABASE_URL + SUPABASE_KEY."
+    )
+
+
 async def upload_file(
     data: bytes,
     filename: str,

@@ -1,13 +1,13 @@
 import uuid
-from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, HTTPException, UploadFile, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.dependencies import CurrentUser, DBSession
 from app.models.chatbot_config import ChatbotConfig
 from app.schemas.chat import ChatbotCreateRequest, ChatbotResponse, ChatbotUpdateRequest
+from app.services import storage as storage_svc
 
 router = APIRouter(prefix="/api/chatbots", tags=["chatbots"])
 
@@ -69,6 +69,41 @@ async def update_chatbot(
     await db.commit()
     await db.refresh(bot)
     return {"success": True, "data": ChatbotResponse.model_validate(bot)}
+
+
+@router.post("/{chatbot_id}/logo", response_model=dict)
+async def upload_logo(
+    chatbot_id: uuid.UUID,
+    file: UploadFile,
+    user: CurrentUser,
+    db: DBSession,
+) -> dict:
+    ALLOWED = {"image/png", "image/jpeg", "image/webp", "image/gif"}
+    MAX_LOGO_BYTES = 5 * 1024 * 1024  # 5 MB
+
+    if file.content_type not in ALLOWED:
+        raise HTTPException(
+            status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
+            detail={"success": False, "error": "Logo must be PNG, JPEG, WebP, or GIF", "code": "INVALID_MIME"},
+        )
+
+    data = await file.read()
+    if len(data) > MAX_LOGO_BYTES:
+        raise HTTPException(
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            detail={"success": False, "error": "Logo must be under 5 MB", "code": "FILE_TOO_LARGE"},
+        )
+
+    bot = await _get_owned_bot(chatbot_id, user.id, db)
+
+    ext = (file.filename or "logo").rsplit(".", 1)[-1].lower()
+    filename = f"logo_{chatbot_id}.{ext}"
+    url = await storage_svc.upload_logo(data, filename, file.content_type or "image/png", str(chatbot_id))
+
+    bot.logo_url = url
+    await db.commit()
+    await db.refresh(bot)
+    return {"success": True, "data": {"logo_url": url}}
 
 
 @router.delete("/{chatbot_id}", response_model=dict)

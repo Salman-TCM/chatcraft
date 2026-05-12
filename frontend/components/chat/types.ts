@@ -24,6 +24,16 @@ export interface ChatbotConfig {
   allowModelSwitch: boolean;
   published: boolean;
   systemPrompt: string | null;
+  // Branding
+  logoUrl: string | null;
+  primaryColour: string;
+  secondaryColour: string;
+  backgroundColour: string;
+  fontFamily: string;
+  welcomeMessage: string | null;
+  placeholderText: string;
+  bubbleStyle: "rounded" | "square" | "pill";
+  darkMode: boolean;
   // Voice
   ttsEnabled: boolean;
   sttEnabled: boolean;
