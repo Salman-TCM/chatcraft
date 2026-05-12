@@ -22,6 +22,7 @@ const NAV = [
   { href: "/dashboard/chatbots",     label: "Chatbots",      icon: Bot },
   { href: "/dashboard/analytics",    label: "Conversations", icon: MessageSquare },
   { href: "/dashboard/usage",        label: "Usage",         icon: Zap },
+  { href: "/dashboard/settings",     label: "Settings",      icon: Settings },
 ];
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
