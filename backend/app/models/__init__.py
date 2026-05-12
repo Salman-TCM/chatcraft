@@ -7,3 +7,10 @@ from app.models.payment import Payment  # noqa: F401
 from app.models.chatbot_config import ChatbotConfig  # noqa: F401
 from app.models.conversation import Conversation  # noqa: F401
 from app.models.message import Message, MessageRole, MessageFeedback  # noqa: F401
+from app.models.knowledge_base import (  # noqa: F401
+    KnowledgeBaseDocument,
+    KnowledgeBaseChunk,
+    DocumentType,
+    DocumentStatus,
+    EMBEDDING_DIM,
+)

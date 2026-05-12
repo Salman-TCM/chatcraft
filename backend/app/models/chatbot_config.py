@@ -37,6 +37,9 @@ class ChatbotConfig(TimestampMixin, Base):
     conversations: Mapped[list["Conversation"]] = relationship(  # type: ignore[name-defined]
         "Conversation", back_populates="chatbot", cascade="all, delete-orphan"
     )
+    kb_documents: Mapped[list["KnowledgeBaseDocument"]] = relationship(  # type: ignore[name-defined]
+        "KnowledgeBaseDocument", back_populates="chatbot", cascade="all, delete-orphan"
+    )
 
     def __repr__(self) -> str:
         return f"<ChatbotConfig id={self.id} name={self.name!r}>"
