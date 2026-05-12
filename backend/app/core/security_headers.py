@@ -13,6 +13,8 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
     browsers to refuse plain-HTTP local development requests.
     """
 
+    _DOCS_PATHS = {"/docs", "/redoc", "/openapi.json"}
+
     async def dispatch(self, request: Request, call_next) -> Response:
         response: Response = await call_next(request)
 
@@ -23,10 +25,24 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         response.headers["Permissions-Policy"] = (
             "geolocation=(), microphone=(), camera=()"
         )
-        # Conservative CSP for a JSON API — no HTML/scripts served.
-        response.headers["Content-Security-Policy"] = (
-            "default-src 'none'; frame-ancestors 'none'"
-        )
+
+        is_docs = request.url.path in self._DOCS_PATHS
+        if is_docs and not settings.is_production:
+            # Swagger/ReDoc need inline scripts, CDN assets, and data: URIs for fonts
+            response.headers["Content-Security-Policy"] = (
+                "default-src 'self'; "
+                "script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; "
+                "style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; "
+                "img-src 'self' data: https://fastapi.tiangolo.com; "
+                "font-src 'self' data:; "
+                "connect-src 'self'; "
+                "frame-ancestors 'none'"
+            )
+        else:
+            # Conservative CSP for all other routes (pure JSON API)
+            response.headers["Content-Security-Policy"] = (
+                "default-src 'none'; frame-ancestors 'none'"
+            )
 
         if settings.is_production:
             response.headers["Strict-Transport-Security"] = (
