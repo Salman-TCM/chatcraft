@@ -39,6 +39,7 @@ from app.schemas.chat import (
     FeedbackRequest,
     MessageResponse,
 )
+from app.services.kb.rag import RAGService
 from app.services.llm import (
     ChatMessage,
     LLMRouter,
@@ -171,9 +172,17 @@ async def stream_chat(
         fallback_model=bot.fallback_model or settings.default_fallback_model,
     )
 
+    # ── RAG context retrieval ─────────────────────────────────────────────────
+    rag = RAGService(db)
+    knowledge_context, _ = await rag.query(
+        chatbot_id=chatbot_id,
+        user_message=sanitized,
+    )
+
     sys_ctx = SystemPromptContext(
         chatbot_name=bot.name,
         custom_instructions=bot.system_prompt,
+        knowledge_context=knowledge_context,
     )
     system_prompt = build_system_prompt(sys_ctx)
 
