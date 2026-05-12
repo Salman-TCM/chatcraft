@@ -14,3 +14,4 @@ from app.models.knowledge_base import (  # noqa: F401
     DocumentStatus,
     EMBEDDING_DIM,
 )
+from app.models.widget_config import WidgetConfig  # noqa: F401
