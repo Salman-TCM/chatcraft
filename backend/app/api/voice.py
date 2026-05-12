@@ -6,13 +6,11 @@ Voice API
   GET  /api/voice/usage      — current month TTS chars + STT seconds
 """
 import asyncio
-import uuid as _uuid
 
 from fastapi import APIRouter, HTTPException, UploadFile, status
 from fastapi.responses import RedirectResponse, StreamingResponse
 
-from app.core.dependencies import CurrentUser, DBSession, RedisClient
-from app.models.chatbot_config import ChatbotConfig
+from app.core.dependencies import CurrentUser, RedisClient
 from app.schemas.voice import (
     STTResponse,
     TTSRequest,
@@ -27,11 +25,10 @@ router = APIRouter(prefix="/api/voice", tags=["voice"])
 _MP3_BYTES_PER_SEC = 16_000
 
 
-@router.post("/tts")
+@router.post("/tts", response_model=None)
 async def text_to_speech(
     body: TTSRequest,
     user: CurrentUser,
-    db: DBSession,
     redis: RedisClient,
 ) -> StreamingResponse | RedirectResponse:
     """
