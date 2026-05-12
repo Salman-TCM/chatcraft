@@ -5,6 +5,7 @@ import Link from "next/link";
 import {
   Bot,
   BarChart2,
+  MessageSquare,
   Zap,
   Settings,
   LogOut,
@@ -17,9 +18,10 @@ import { signOut } from "next-auth/react";
 import { useAppStore } from "@/store";
 
 const NAV = [
-  { href: "/dashboard",        label: "Overview",  icon: BarChart2 },
-  { href: "/dashboard/chatbots", label: "Chatbots", icon: Bot },
-  { href: "/dashboard/usage",  label: "Usage",     icon: Zap },
+  { href: "/dashboard",              label: "Overview",      icon: BarChart2 },
+  { href: "/dashboard/chatbots",     label: "Chatbots",      icon: Bot },
+  { href: "/dashboard/analytics",    label: "Conversations", icon: MessageSquare },
+  { href: "/dashboard/usage",        label: "Usage",         icon: Zap },
 ];
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
