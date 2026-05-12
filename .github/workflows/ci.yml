@@ -124,17 +124,57 @@ jobs:
         run: npm run lint --workspace=frontend
 
   # ---------------------------------------------------------------------------
+  # E2E — Playwright (chromium only, push to master/main only)
+  # ---------------------------------------------------------------------------
+  e2e:
+    name: E2E (Playwright)
+    runs-on: ubuntu-latest
+    needs: [frontend]
+    if: github.event_name == 'push'
+    defaults:
+      run:
+        working-directory: frontend
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Install Playwright browsers
+        run: npx playwright install --with-deps chromium
+
+      - name: Run E2E tests
+        run: npx playwright test
+        env:
+          PLAYWRIGHT_BASE_URL: ${{ secrets.STAGING_URL || 'http://localhost:3000' }}
+        continue-on-error: true  # non-blocking; failures upload report for review
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: playwright-report
+          path: frontend/playwright-report/
+          retention-days: 7
+
+  # ---------------------------------------------------------------------------
   # Required status check — both jobs must pass before merge is allowed
   # ---------------------------------------------------------------------------
   ci-passed:
     name: CI passed
     runs-on: ubuntu-latest
-    needs: [backend, frontend]
+    needs: [backend, frontend, e2e]
     if: always()
     steps:
       - name: Check all jobs passed
         run: |
-          if [[ "${{ needs.backend.result }}" != "success" || "${{ needs.frontend.result }}" != "success" ]]; then
+          if [[ "${{ needs.backend.result }}" != "success" || "${{ needs.frontend.result }}" != "success" || ("${{ needs.e2e.result }}" != "success" && "${{ needs.e2e.result }}" != "skipped") ]]; then
             echo "One or more CI jobs failed"
             exit 1
           fi

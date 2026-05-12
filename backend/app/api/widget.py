@@ -13,7 +13,7 @@ from calendar import monthrange
 from datetime import datetime, timezone
 from typing import AsyncIterator
 
-from fastapi import APIRouter, BackgroundTasks, Header, HTTPException, Request, status
+from fastapi import APIRouter, BackgroundTasks, Header, HTTPException, Request, Response as FastAPIResponse, status
 from fastapi.responses import StreamingResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from jose import JWTError
@@ -50,7 +50,11 @@ _GUEST_CAP = settings.free_tier_message_cap
 # ── Public config ──────────────────────────────────────────────────────────────
 
 @router.get("/{chatbot_id}/config", response_model=dict)
-async def get_widget_config(chatbot_id: uuid.UUID, db: DBSession) -> dict:
+async def get_widget_config(
+    chatbot_id: uuid.UUID,
+    db: DBSession,
+    http_response: "FastAPIResponse",
+) -> dict:
     """Return public branding + widget config for widget.js to consume."""
     bot = await db.get(ChatbotConfig, chatbot_id)
     if not bot or not bot.published:
@@ -78,6 +82,8 @@ async def get_widget_config(chatbot_id: uuid.UUID, db: DBSession) -> dict:
         position=wc.position,
         show_branding=wc.show_branding,
     )
+    # CDN-cacheable for 60 s; stale-while-revalidate allows serving while refreshing
+    http_response.headers["Cache-Control"] = "public, max-age=60, s-maxage=60, stale-while-revalidate=30"
     return {"success": True, "data": cfg.model_dump()}
 
 
