@@ -8,6 +8,8 @@ from typing import Sequence, Union
 
 import sqlalchemy as sa
 from alembic import op
+from sqlalchemy.dialects import postgresql
+from sqlalchemy.dialects.postgresql import UUID
 
 revision: str = "000000000004"
 down_revision: Union[str, None] = "000000000003"
@@ -16,33 +18,26 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
-    op.execute("""
-        CREATE TYPE payment_status AS ENUM (
-            'requires_payment_method', 'requires_confirmation', 'requires_action',
-            'processing', 'succeeded', 'canceled', 'failed'
-        )
-    """)
+    postgresql.ENUM(
+        "requires_payment_method", "requires_confirmation", "requires_action",
+        "processing", "succeeded", "canceled", "failed",
+        name="payment_status", create_type=False,
+    ).create(op.get_bind(), checkfirst=True)
 
     op.create_table(
         "payments",
-        sa.Column("id", sa.String(36), primary_key=True),
-        sa.Column(
-            "user_id",
-            sa.String(36),
-            sa.ForeignKey("users.id", ondelete="CASCADE"),
-            nullable=False,
-        ),
+        sa.Column("id", UUID(as_uuid=True), primary_key=True, server_default=sa.text("gen_random_uuid()"), nullable=False),
+        sa.Column("user_id", UUID(as_uuid=True), nullable=False),
         sa.Column("stripe_payment_intent_id", sa.String(255), unique=True, nullable=True),
         sa.Column("stripe_invoice_id", sa.String(255), nullable=True),
         sa.Column("amount", sa.Integer(), nullable=False),
         sa.Column("currency", sa.String(3), nullable=False, server_default="usd"),
         sa.Column(
             "status",
-            sa.Enum(
+            postgresql.ENUM(
                 "requires_payment_method", "requires_confirmation", "requires_action",
                 "processing", "succeeded", "canceled", "failed",
-                name="payment_status",
-                create_type=False,
+                name="payment_status", create_type=False,
             ),
             nullable=False,
             server_default="processing",
@@ -60,6 +55,7 @@ def upgrade() -> None:
             nullable=False,
             server_default=sa.text("now()"),
         ),
+        sa.ForeignKeyConstraint(["user_id"], ["users.id"], ondelete="CASCADE"),
     )
 
     op.create_index("ix_payments_user_id", "payments", ["user_id"])
