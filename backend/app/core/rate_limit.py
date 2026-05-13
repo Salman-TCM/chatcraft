@@ -29,6 +29,7 @@ _ROLE_LIMITS: dict[str, str] = {
 }
 
 _DEFAULT_LIMIT = "30/minute"
+_DEFAULT_LIMIT_DEV = "1000/minute"
 
 
 def _rate_limit_key(request: Request) -> str:
@@ -64,9 +65,11 @@ def _limit_for_request(request: Request) -> str:
 
 from app.core.config import settings as _settings
 
+_active_default = _DEFAULT_LIMIT if _settings.is_production else _DEFAULT_LIMIT_DEV
+
 limiter = Limiter(
     key_func=_rate_limit_key,
-    default_limits=[_DEFAULT_LIMIT],
+    default_limits=[_active_default],
     storage_uri=_settings.redis_url,
 )
 

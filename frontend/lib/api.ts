@@ -1,4 +1,5 @@
 import axios, { type AxiosInstance, type AxiosRequestConfig } from "axios";
+import { getSession } from "next-auth/react";
 import type { ApiResponse, PaginatedResponse } from "@chatcraft/shared";
 
 const BASE_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
@@ -9,6 +10,18 @@ export const apiClient: AxiosInstance = axios.create({
   headers: {
     "Content-Type": "application/json",
   },
+});
+
+// Attach the backend JWT on every request so the server can identify the user
+apiClient.interceptors.request.use(async (config) => {
+  if (typeof window !== "undefined") {
+    const session = await getSession();
+    const token = (session?.user as any)?.accessToken;
+    if (token) {
+      config.headers.Authorization = `Bearer ${token}`;
+    }
+  }
+  return config;
 });
 
 apiClient.interceptors.response.use(
