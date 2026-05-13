@@ -2,7 +2,9 @@ import NextAuth from "next-auth";
 import Credentials from "next-auth/providers/credentials";
 import Google from "next-auth/providers/google";
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
+// BACKEND_URL is the internal Docker service URL used by server-side code (NextAuth).
+// NEXT_PUBLIC_API_URL is the browser-facing URL used by client components.
+const API_URL = process.env.BACKEND_URL ?? process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 const ACCESS_TOKEN_LIFETIME_MS = 14 * 60 * 1000; // 14 min (1 min buffer before 15 min expiry)
 
 export const { handlers, auth, signIn, signOut } = NextAuth({
