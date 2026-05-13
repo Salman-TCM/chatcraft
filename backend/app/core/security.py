@@ -1,12 +1,12 @@
 import uuid
 from datetime import datetime, timedelta, timezone
 
+import bcrypt
 from jose import JWTError, jwt
-from passlib.context import CryptContext
 
 from app.core.config import settings
 
-_pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto", bcrypt__rounds=12)
+_BCRYPT_ROUNDS = 12
 
 ACCESS_TOKEN_EXPIRE_MINUTES = settings.access_token_expire_minutes
 REFRESH_TOKEN_EXPIRE_DAYS = settings.refresh_token_expire_days
@@ -20,12 +20,12 @@ REFRESH_TOKEN_COOKIE = "refresh_token"
 # ---------------------------------------------------------------------------
 
 def hash_password(plain: str) -> str:
-    return _pwd_context.hash(plain)
+    return bcrypt.hashpw(plain.encode(), bcrypt.gensalt(rounds=_BCRYPT_ROUNDS)).decode()
 
 
 def verify_password(plain: str, hashed: str) -> bool:
     try:
-        return _pwd_context.verify(plain, hashed)
+        return bcrypt.checkpw(plain.encode(), hashed.encode())
     except Exception:
         return False
 
@@ -34,10 +34,10 @@ def verify_password(plain: str, hashed: str) -> bool:
 # JWT tokens
 # ---------------------------------------------------------------------------
 
-def create_access_token(user_id: str, role: str) -> str:
+def create_access_token(user_id, role: str) -> str:
     now = datetime.now(timezone.utc)
     payload = {
-        "sub": user_id,
+        "sub": str(user_id),
         "role": role,
         "iat": now,
         "exp": now + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES),
@@ -46,12 +46,12 @@ def create_access_token(user_id: str, role: str) -> str:
     return jwt.encode(payload, settings.secret_key, algorithm=ALGORITHM)
 
 
-def create_refresh_token(user_id: str) -> tuple[str, str]:
+def create_refresh_token(user_id) -> tuple[str, str]:
     """Return (token_string, jti). jti is stored in Redis for revocation."""
     jti = str(uuid.uuid4())
     now = datetime.now(timezone.utc)
     payload = {
-        "sub": user_id,
+        "sub": str(user_id),
         "jti": jti,
         "iat": now,
         "exp": now + timedelta(days=REFRESH_TOKEN_EXPIRE_DAYS),

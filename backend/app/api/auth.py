@@ -110,7 +110,7 @@ async def login(
     refresh_token, jti = create_refresh_token(user.id)
 
     # Store JTI in Redis so it can be revoked on logout
-    await redis.setex(f"refresh:{jti}", _REFRESH_TTL, user.id)
+    await redis.setex(f"refresh:{jti}", _REFRESH_TTL, str(user.id))
 
     response.set_cookie(
         key=REFRESH_TOKEN_COOKIE,
@@ -192,7 +192,7 @@ async def refresh(
 
     access_token = create_access_token(user.id, user.role.value)
     new_refresh_token, new_jti = create_refresh_token(user.id)
-    await redis.setex(f"refresh:{new_jti}", _REFRESH_TTL, user.id)
+    await redis.setex(f"refresh:{new_jti}", _REFRESH_TTL, str(user.id))
 
     response.set_cookie(
         key=REFRESH_TOKEN_COOKIE,
@@ -464,7 +464,7 @@ async def google_oauth_callback(
     # Issue tokens
     access_token = create_access_token(user.id, user.role.value)
     refresh_token, jti = create_refresh_token(user.id)
-    await redis.setex(f"refresh:{jti}", _REFRESH_TTL, user.id)
+    await redis.setex(f"refresh:{jti}", _REFRESH_TTL, str(user.id))
 
     response.set_cookie(
         key=REFRESH_TOKEN_COOKIE,
@@ -520,7 +520,7 @@ async def google_sync(
 
     access_token = create_access_token(user.id, user.role.value)
     refresh_token, jti = create_refresh_token(user.id)
-    await redis.setex(f"refresh:{jti}", _REFRESH_TTL, user.id)
+    await redis.setex(f"refresh:{jti}", _REFRESH_TTL, str(user.id))
 
     response.set_cookie(
         key=REFRESH_TOKEN_COOKIE,
