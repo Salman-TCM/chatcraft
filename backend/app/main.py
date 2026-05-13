@@ -19,6 +19,11 @@ from app.api.widget import router as widget_router
 from app.api.usage import router as usage_router
 from app.api.analytics import router as analytics_router
 from app.api.gdpr import router as gdpr_router
+from app.api.crm import router as crm_router
+from app.api.admin import router as admin_router
+from app.api.inbox import router as inbox_router
+from app.api.webhooks import router as webhooks_router
+from app.api.integrations import router as integrations_router
 from app.core.security_headers import SecurityHeadersMiddleware
 from app.core.ip_abuse import IPAbuseMiddleware
 from app.core.config import settings
@@ -77,6 +82,11 @@ app.include_router(widget_router)
 app.include_router(usage_router)
 app.include_router(analytics_router)
 app.include_router(gdpr_router)
+app.include_router(crm_router)
+app.include_router(admin_router)
+app.include_router(inbox_router)
+app.include_router(webhooks_router)
+app.include_router(integrations_router)
 
 
 @app.get("/", tags=["health"])

@@ -1,0 +1,22 @@
+from app.services.channels.base import ChannelSender
+from app.services.channels.telegram import TelegramSender
+from app.services.channels.whatsapp import WhatsAppSender
+from app.services.channels.facebook import FacebookSender
+from app.services.channels.sms import SMSSender
+
+__all__ = ["ChannelSender", "TelegramSender", "WhatsAppSender", "FacebookSender", "SMSSender"]
+
+
+def get_sender(channel: str, config: dict) -> "ChannelSender":
+    """Return the appropriate ChannelSender for the given channel."""
+    match channel:
+        case "telegram":
+            return TelegramSender(config)
+        case "whatsapp":
+            return WhatsAppSender(config)
+        case "facebook":
+            return FacebookSender(config)
+        case "sms":
+            return SMSSender(config)
+        case _:
+            raise ValueError(f"No sender for channel: {channel}")

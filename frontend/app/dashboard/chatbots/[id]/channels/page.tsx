@@ -1,0 +1,436 @@
+"use client";
+
+import { useEffect, useState, useCallback } from "react";
+import { useParams, useRouter } from "next/navigation";
+import {
+  ArrowLeft,
+  Check,
+  ChevronDown,
+  ChevronRight,
+  Copy,
+  Loader2,
+  RefreshCw,
+  Trash2,
+  Wifi,
+  WifiOff,
+  X,
+} from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Card } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { apiClient } from "@/lib/api";
+
+// ── Types ─────────────────────────────────────────────────────────────────────
+
+interface Integration {
+  id: string;
+  channel: string;
+  is_active: boolean;
+  config: Record<string, string>;
+  webhook_secret: string;
+}
+
+// ── Channel definitions ───────────────────────────────────────────────────────
+
+interface ChannelDef {
+  key: string;
+  label: string;
+  icon: string;
+  color: string;
+  description: string;
+  fields: { key: string; label: string; placeholder: string; secret?: boolean }[];
+  webhookNote?: string;
+  setupUrl?: string;
+}
+
+const CHANNELS: ChannelDef[] = [
+  {
+    key: "telegram",
+    label: "Telegram",
+    icon: "✈️",
+    color: "bg-sky-50 border-sky-200",
+    description: "Connect a Telegram bot to handle messages via Bot API.",
+    fields: [
+      { key: "bot_token", label: "Bot Token", placeholder: "1234567890:ABCDef...", secret: true },
+    ],
+    webhookNote: "After saving, click 'Register Webhook' to activate the bot.",
+    setupUrl: "https://core.telegram.org/bots#botfather",
+  },
+  {
+    key: "whatsapp",
+    label: "WhatsApp",
+    icon: "💬",
+    color: "bg-green-50 border-green-200",
+    description: "Connect via WhatsApp Business Cloud API (Meta).",
+    fields: [
+      { key: "phone_number_id", label: "Phone Number ID", placeholder: "114890000000000" },
+      { key: "access_token", label: "Access Token", placeholder: "EAAGm...", secret: true },
+      { key: "verify_token", label: "Webhook Verify Token", placeholder: "my_verify_token_123" },
+    ],
+    setupUrl: "https://developers.facebook.com/docs/whatsapp/cloud-api",
+  },
+  {
+    key: "facebook",
+    label: "Facebook Messenger",
+    icon: "📘",
+    color: "bg-blue-50 border-blue-200",
+    description: "Connect a Facebook Page to receive and reply to Messenger messages.",
+    fields: [
+      { key: "page_access_token", label: "Page Access Token", placeholder: "EAAGm...", secret: true },
+      { key: "verify_token", label: "Webhook Verify Token", placeholder: "my_verify_token_123" },
+      { key: "app_secret", label: "App Secret (optional)", placeholder: "abc123def456", secret: true },
+    ],
+    setupUrl: "https://developers.facebook.com/docs/messenger-platform",
+  },
+  {
+    key: "sms",
+    label: "SMS (Twilio)",
+    icon: "📱",
+    color: "bg-red-50 border-red-200",
+    description: "Send and receive SMS messages via your Twilio account.",
+    fields: [
+      { key: "account_sid", label: "Account SID", placeholder: "ACxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx" },
+      { key: "auth_token", label: "Auth Token", placeholder: "your_auth_token", secret: true },
+      { key: "from_number", label: "From Number", placeholder: "+15551234567" },
+    ],
+    setupUrl: "https://console.twilio.com/",
+  },
+];
+
+// ── Main component ────────────────────────────────────────────────────────────
+
+export default function ChannelsPage() {
+  const { id: chatbotId } = useParams<{ id: string }>();
+  const router = useRouter();
+
+  const [integrations, setIntegrations] = useState<Record<string, Integration>>({});
+  const [loading, setLoading] = useState(true);
+  const [expanded, setExpanded] = useState<string | null>(null);
+  const [saving, setSaving] = useState<string | null>(null);
+  const [testing, setTesting] = useState<string | null>(null);
+  const [testResult, setTestResult] = useState<Record<string, { ok: boolean; msg: string }>>({});
+  const [settingWebhook, setSettingWebhook] = useState(false);
+  const [forms, setForms] = useState<Record<string, Record<string, string>>>({});
+  const [activeToggles, setActiveToggles] = useState<Record<string, boolean>>({});
+
+  const baseWebhookUrl = typeof window !== "undefined"
+    ? `${window.location.origin.replace(":3000", ":8000")}/webhooks`
+    : "/webhooks";
+
+  const load = useCallback(async () => {
+    try {
+      const { data } = await apiClient.get(`/api/v1/chatbots/${chatbotId}/integrations`);
+      const map: Record<string, Integration> = {};
+      const formInit: Record<string, Record<string, string>> = {};
+      const toggleInit: Record<string, boolean> = {};
+      for (const item of data.data as Integration[]) {
+        map[item.channel] = item;
+        formInit[item.channel] = { ...item.config };
+        toggleInit[item.channel] = item.is_active;
+      }
+      setIntegrations(map);
+      setForms(formInit);
+      setActiveToggles(toggleInit);
+    } finally {
+      setLoading(false);
+    }
+  }, [chatbotId]);
+
+  useEffect(() => { load(); }, [load]);
+
+  function setField(channel: string, key: string, value: string) {
+    setForms(prev => ({ ...prev, [channel]: { ...(prev[channel] ?? {}), [key]: value } }));
+  }
+
+  async function save(channel: string) {
+    setSaving(channel);
+    try {
+      const { data } = await apiClient.put(
+        `/api/v1/chatbots/${chatbotId}/integrations/${channel}`,
+        { config: forms[channel] ?? {}, is_active: activeToggles[channel] ?? true }
+      );
+      setIntegrations(prev => ({ ...prev, [channel]: data.data }));
+    } finally {
+      setSaving(null);
+    }
+  }
+
+  async function remove(channel: string) {
+    if (!confirm(`Remove ${channel} integration? This cannot be undone.`)) return;
+    await apiClient.delete(`/api/v1/chatbots/${chatbotId}/integrations/${channel}`);
+    setIntegrations(prev => { const n = { ...prev }; delete n[channel]; return n; });
+    setForms(prev => { const n = { ...prev }; delete n[channel]; return n; });
+    setActiveToggles(prev => { const n = { ...prev }; delete n[channel]; return n; });
+  }
+
+  async function test(channel: string) {
+    setTesting(channel);
+    setTestResult(prev => ({ ...prev, [channel]: { ok: false, msg: "" } }));
+    try {
+      const { data } = await apiClient.post(
+        `/api/v1/chatbots/${chatbotId}/integrations/${channel}/test`
+      );
+      const info = data.data;
+      const msg = channel === "telegram"
+        ? `@${info.username} (${info.first_name})`
+        : channel === "whatsapp"
+        ? `${info.verified_name} · ${info.display_phone_number}`
+        : channel === "facebook"
+        ? `${info.page_name} (${info.page_id})`
+        : `${info.friendly_name} · ${info.status}`;
+      setTestResult(prev => ({ ...prev, [channel]: { ok: true, msg } }));
+    } catch (e: any) {
+      const msg = e?.response?.data?.detail ?? "Connection failed";
+      setTestResult(prev => ({ ...prev, [channel]: { ok: false, msg } }));
+    } finally {
+      setTesting(null);
+    }
+  }
+
+  async function registerWebhook() {
+    setSettingWebhook(true);
+    try {
+      await apiClient.post(`/api/v1/chatbots/${chatbotId}/integrations/telegram/set-webhook`);
+      setTestResult(prev => ({ ...prev, telegram: { ok: true, msg: "Webhook registered!" } }));
+    } catch (e: any) {
+      setTestResult(prev => ({
+        ...prev,
+        telegram: { ok: false, msg: e?.response?.data?.detail ?? "Failed" },
+      }));
+    } finally {
+      setSettingWebhook(false);
+    }
+  }
+
+  function copyWebhookUrl(channel: string) {
+    const url = `${baseWebhookUrl}/${channel}/${chatbotId}`;
+    navigator.clipboard.writeText(url);
+  }
+
+  if (loading) {
+    return (
+      <div className="flex h-64 items-center justify-center">
+        <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+      </div>
+    );
+  }
+
+  return (
+    <div className="mx-auto max-w-3xl space-y-6 p-6">
+      {/* Header */}
+      <div className="flex items-center gap-3">
+        <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => router.back()}>
+          <ArrowLeft className="h-4 w-4" />
+        </Button>
+        <div>
+          <h1 className="text-xl font-semibold">Channel Integrations</h1>
+          <p className="text-sm text-muted-foreground">
+            Connect messaging channels to route conversations through your chatbot.
+          </p>
+        </div>
+      </div>
+
+      {/* Channel cards */}
+      {CHANNELS.map((ch) => {
+        const integration = integrations[ch.key];
+        const isConnected = !!integration;
+        const isExpanded = expanded === ch.key;
+        const form = forms[ch.key] ?? {};
+        const isActive = activeToggles[ch.key] ?? true;
+        const result = testResult[ch.key];
+        const webhookUrl = `${baseWebhookUrl}/${ch.key}/${chatbotId}`;
+
+        return (
+          <Card key={ch.key} className={`overflow-hidden border ${isConnected ? ch.color : ""}`}>
+            {/* Card header */}
+            <div
+              className="flex cursor-pointer items-center justify-between p-4"
+              onClick={() => setExpanded(isExpanded ? null : ch.key)}
+            >
+              <div className="flex items-center gap-3">
+                <span className="text-2xl">{ch.icon}</span>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <span className="font-medium">{ch.label}</span>
+                    {isConnected ? (
+                      <span className="flex items-center gap-1 rounded-full bg-green-100 px-2 py-0.5 text-[10px] font-medium text-green-700">
+                        <Wifi className="h-2.5 w-2.5" />
+                        {isActive ? "Active" : "Inactive"}
+                      </span>
+                    ) : (
+                      <span className="flex items-center gap-1 rounded-full bg-muted px-2 py-0.5 text-[10px] font-medium text-muted-foreground">
+                        <WifiOff className="h-2.5 w-2.5" />
+                        Not connected
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-xs text-muted-foreground">{ch.description}</p>
+                </div>
+              </div>
+              {isExpanded ? (
+                <ChevronDown className="h-4 w-4 text-muted-foreground shrink-0" />
+              ) : (
+                <ChevronRight className="h-4 w-4 text-muted-foreground shrink-0" />
+              )}
+            </div>
+
+            {/* Expanded config form */}
+            {isExpanded && (
+              <div className="border-t bg-background px-4 pb-4 pt-3 space-y-4">
+                {/* Credential fields */}
+                <div className="grid gap-3">
+                  {ch.fields.map((f) => (
+                    <div key={f.key} className="space-y-1.5">
+                      <Label className="text-xs">{f.label}</Label>
+                      <Input
+                        type={f.secret ? "password" : "text"}
+                        placeholder={f.placeholder}
+                        value={form[f.key] ?? ""}
+                        onChange={(e) => setField(ch.key, f.key, e.target.value)}
+                        className="h-8 text-sm font-mono"
+                      />
+                    </div>
+                  ))}
+                </div>
+
+                {/* Active toggle */}
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setActiveToggles(prev => ({ ...prev, [ch.key]: !prev[ch.key] }))}
+                    className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${
+                      isActive ? "bg-primary" : "bg-muted"
+                    }`}
+                  >
+                    <span
+                      className={`inline-block h-3.5 w-3.5 rounded-full bg-white shadow transition-transform ${
+                        isActive ? "translate-x-4.5" : "translate-x-0.5"
+                      }`}
+                    />
+                  </button>
+                  <span className="text-xs text-muted-foreground">
+                    {isActive ? "Active — bot will respond" : "Inactive — messages saved but no AI reply"}
+                  </span>
+                </div>
+
+                {/* Webhook URL */}
+                <div className="space-y-1.5">
+                  <Label className="text-xs">Webhook URL</Label>
+                  <div className="flex items-center gap-2">
+                    <Input
+                      readOnly
+                      value={webhookUrl}
+                      className="h-8 text-xs font-mono text-muted-foreground"
+                    />
+                    <Button
+                      size="icon"
+                      variant="ghost"
+                      className="h-8 w-8 shrink-0"
+                      onClick={() => copyWebhookUrl(ch.key)}
+                    >
+                      <Copy className="h-3.5 w-3.5" />
+                    </Button>
+                  </div>
+                  {ch.webhookNote && (
+                    <p className="text-[11px] text-muted-foreground">{ch.webhookNote}</p>
+                  )}
+                </div>
+
+                {/* Test result */}
+                {result && result.msg && (
+                  <div
+                    className={`flex items-center gap-2 rounded-md px-3 py-2 text-xs ${
+                      result.ok
+                        ? "bg-green-50 text-green-700"
+                        : "bg-red-50 text-red-700"
+                    }`}
+                  >
+                    {result.ok ? <Check className="h-3.5 w-3.5" /> : <X className="h-3.5 w-3.5" />}
+                    {result.msg}
+                  </div>
+                )}
+
+                {/* External setup link */}
+                {ch.setupUrl && (
+                  <p className="text-[11px] text-muted-foreground">
+                    Need credentials?{" "}
+                    <a
+                      href={ch.setupUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="underline underline-offset-2 hover:text-foreground"
+                    >
+                      Open {ch.label} developer console ↗
+                    </a>
+                  </p>
+                )}
+
+                {/* Action buttons */}
+                <div className="flex flex-wrap items-center gap-2 pt-1">
+                  <Button
+                    size="sm"
+                    className="h-8 text-xs"
+                    onClick={() => save(ch.key)}
+                    disabled={saving === ch.key}
+                  >
+                    {saving === ch.key ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />}
+                    Save
+                  </Button>
+
+                  {isConnected && (
+                    <>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="h-8 text-xs"
+                        onClick={() => test(ch.key)}
+                        disabled={testing === ch.key}
+                      >
+                        {testing === ch.key ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
+                        Test Connection
+                      </Button>
+
+                      {ch.key === "telegram" && (
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="h-8 text-xs"
+                          onClick={registerWebhook}
+                          disabled={settingWebhook}
+                        >
+                          {settingWebhook ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Wifi className="h-3.5 w-3.5" />}
+                          Register Webhook
+                        </Button>
+                      )}
+
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        className="h-8 text-xs text-destructive hover:text-destructive"
+                        onClick={() => remove(ch.key)}
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                        Remove
+                      </Button>
+                    </>
+                  )}
+                </div>
+              </div>
+            )}
+          </Card>
+        );
+      })}
+
+      {/* Info box */}
+      <Card className="bg-muted/40 p-4">
+        <p className="text-xs text-muted-foreground leading-relaxed">
+          <strong>How it works:</strong> When a message arrives on any connected channel, ChatCraft
+          creates a contact and conversation, runs the message through your chatbot's AI (with its
+          knowledge base), and sends the reply back — all automatically. You can monitor and take
+          over conversations from the <strong>Inbox</strong>.
+        </p>
+      </Card>
+    </div>
+  );
+}

@@ -89,6 +89,9 @@ class ChatbotConfig(TimestampMixin, Base):
     widget_config: Mapped["WidgetConfig | None"] = relationship(  # type: ignore[name-defined]
         "WidgetConfig", back_populates="chatbot", uselist=False, cascade="all, delete-orphan"
     )
+    channel_integrations: Mapped[list["ChannelIntegration"]] = relationship(  # type: ignore[name-defined]
+        "ChannelIntegration", back_populates="chatbot", cascade="all, delete-orphan"
+    )
 
     def __repr__(self) -> str:
         return f"<ChatbotConfig id={self.id} name={self.name!r}>"

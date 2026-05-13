@@ -1,0 +1,286 @@
+"""
+Channel Integration API — CRUD for per-chatbot channel connections.
+
+Routes (all require authenticated chatbot owner):
+  GET    /api/v1/chatbots/{chatbot_id}/integrations
+  PUT    /api/v1/chatbots/{chatbot_id}/integrations/{channel}
+  DELETE /api/v1/chatbots/{chatbot_id}/integrations/{channel}
+  POST   /api/v1/chatbots/{chatbot_id}/integrations/telegram/set-webhook
+  POST   /api/v1/chatbots/{chatbot_id}/integrations/telegram/test
+  POST   /api/v1/chatbots/{chatbot_id}/integrations/whatsapp/test
+  POST   /api/v1/chatbots/{chatbot_id}/integrations/facebook/test
+  POST   /api/v1/chatbots/{chatbot_id}/integrations/sms/test
+"""
+import secrets
+import uuid
+
+from fastapi import APIRouter, HTTPException, Request, status
+from sqlalchemy import select
+
+from app.core.config import settings
+from app.core.dependencies import CurrentUser, DBSession
+from app.models.channel_integration import ChannelIntegration
+from app.models.chatbot_config import ChatbotConfig
+
+router = APIRouter(prefix="/api/v1", tags=["integrations"])
+
+SUPPORTED_CHANNELS = {"telegram", "whatsapp", "facebook", "sms"}
+
+# Fields that should be masked in responses (contain credentials)
+_SECRET_FIELDS = {"bot_token", "access_token", "page_access_token", "auth_token", "app_secret"}
+
+
+def _mask(config: dict) -> dict:
+    """Return config with secret values replaced by masked strings."""
+    return {
+        k: ("••••••" + v[-4:] if isinstance(v, str) and len(v) > 6 else "••••••")
+        if k in _SECRET_FIELDS and v
+        else v
+        for k, v in config.items()
+    }
+
+
+def _integration_dict(i: ChannelIntegration, mask_secrets: bool = True) -> dict:
+    return {
+        "id": str(i.id),
+        "chatbot_id": str(i.chatbot_id),
+        "channel": i.channel,
+        "is_active": i.is_active,
+        "config": _mask(i.config) if mask_secrets else i.config,
+        "webhook_secret": i.webhook_secret,
+        "created_at": i.created_at.isoformat(),
+        "updated_at": i.updated_at.isoformat(),
+    }
+
+
+async def _get_owned_bot(chatbot_id: uuid.UUID, user_id: uuid.UUID, db) -> ChatbotConfig:
+    bot: ChatbotConfig | None = await db.get(ChatbotConfig, chatbot_id)
+    if not bot or bot.user_id != user_id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Chatbot not found")
+    return bot
+
+
+@router.get("/chatbots/{chatbot_id}/integrations", response_model=dict)
+async def list_integrations(chatbot_id: uuid.UUID, user: CurrentUser, db: DBSession) -> dict:
+    await _get_owned_bot(chatbot_id, user.id, db)
+    result = await db.execute(
+        select(ChannelIntegration).where(ChannelIntegration.chatbot_id == chatbot_id)
+    )
+    integrations = result.scalars().all()
+    return {"success": True, "data": [_integration_dict(i) for i in integrations]}
+
+
+@router.put("/chatbots/{chatbot_id}/integrations/{channel}", response_model=dict)
+async def upsert_integration(
+    chatbot_id: uuid.UUID,
+    channel: str,
+    body: dict,
+    user: CurrentUser,
+    db: DBSession,
+) -> dict:
+    if channel not in SUPPORTED_CHANNELS:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"Unsupported channel. Must be one of: {', '.join(sorted(SUPPORTED_CHANNELS))}",
+        )
+    await _get_owned_bot(chatbot_id, user.id, db)
+
+    result = await db.execute(
+        select(ChannelIntegration).where(
+            ChannelIntegration.chatbot_id == chatbot_id,
+            ChannelIntegration.channel == channel,
+        )
+    )
+    integration = result.scalar_one_or_none()
+
+    incoming_config: dict = body.get("config", {})
+    is_active: bool = body.get("is_active", True)
+
+    if integration:
+        # Merge config — preserve existing secret values unless caller provides a new non-masked one
+        merged = dict(integration.config)
+        for k, v in incoming_config.items():
+            if k in _SECRET_FIELDS and isinstance(v, str) and v.startswith("••••••"):
+                continue  # caller sent back a masked value — don't overwrite
+            merged[k] = v
+        integration.config = merged
+        integration.is_active = is_active
+    else:
+        integration = ChannelIntegration(
+            chatbot_id=chatbot_id,
+            channel=channel,
+            config=incoming_config,
+            is_active=is_active,
+            webhook_secret=secrets.token_urlsafe(32),
+        )
+        db.add(integration)
+
+    await db.commit()
+    await db.refresh(integration)
+    return {"success": True, "data": _integration_dict(integration)}
+
+
+@router.delete("/chatbots/{chatbot_id}/integrations/{channel}", response_model=dict)
+async def delete_integration(
+    chatbot_id: uuid.UUID,
+    channel: str,
+    user: CurrentUser,
+    db: DBSession,
+) -> dict:
+    await _get_owned_bot(chatbot_id, user.id, db)
+    result = await db.execute(
+        select(ChannelIntegration).where(
+            ChannelIntegration.chatbot_id == chatbot_id,
+            ChannelIntegration.channel == channel,
+        )
+    )
+    integration = result.scalar_one_or_none()
+    if not integration:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Integration not found")
+    await db.delete(integration)
+    await db.commit()
+    return {"success": True, "data": None}
+
+
+# ── Telegram: register webhook with Bot API ────────────────────────────────────
+
+@router.post("/chatbots/{chatbot_id}/integrations/telegram/set-webhook", response_model=dict)
+async def telegram_set_webhook(
+    chatbot_id: uuid.UUID,
+    request: Request,
+    user: CurrentUser,
+    db: DBSession,
+) -> dict:
+    await _get_owned_bot(chatbot_id, user.id, db)
+    result = await db.execute(
+        select(ChannelIntegration).where(
+            ChannelIntegration.chatbot_id == chatbot_id,
+            ChannelIntegration.channel == "telegram",
+        )
+    )
+    integration = result.scalar_one_or_none()
+    if not integration:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Telegram integration not configured")
+
+    from app.services.channels.telegram import TelegramSender
+    sender = TelegramSender(integration.config)
+
+    base_url = str(request.base_url).rstrip("/")
+    webhook_url = f"{base_url}/webhooks/telegram/{chatbot_id}"
+    try:
+        result_data = await sender.set_webhook(webhook_url)
+    except Exception as exc:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc))
+
+    return {"success": True, "data": {"webhook_url": webhook_url, "telegram_response": result_data}}
+
+
+# ── Connection test endpoints ──────────────────────────────────────────────────
+
+@router.post("/chatbots/{chatbot_id}/integrations/telegram/test", response_model=dict)
+async def test_telegram(chatbot_id: uuid.UUID, user: CurrentUser, db: DBSession) -> dict:
+    await _get_owned_bot(chatbot_id, user.id, db)
+    result = await db.execute(
+        select(ChannelIntegration).where(
+            ChannelIntegration.chatbot_id == chatbot_id,
+            ChannelIntegration.channel == "telegram",
+        )
+    )
+    integration = result.scalar_one_or_none()
+    if not integration:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not configured")
+
+    from app.services.channels.telegram import TelegramSender
+    try:
+        info = await TelegramSender(integration.config).get_me()
+    except Exception as exc:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc))
+    return {"success": True, "data": info.get("result", {})}
+
+
+@router.post("/chatbots/{chatbot_id}/integrations/whatsapp/test", response_model=dict)
+async def test_whatsapp(chatbot_id: uuid.UUID, user: CurrentUser, db: DBSession) -> dict:
+    await _get_owned_bot(chatbot_id, user.id, db)
+    result = await db.execute(
+        select(ChannelIntegration).where(
+            ChannelIntegration.chatbot_id == chatbot_id,
+            ChannelIntegration.channel == "whatsapp",
+        )
+    )
+    integration = result.scalar_one_or_none()
+    if not integration:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not configured")
+
+    import httpx
+    phone_number_id = integration.config.get("phone_number_id", "")
+    access_token = integration.config.get("access_token", "")
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            r = await client.get(
+                f"https://graph.facebook.com/v19.0/{phone_number_id}",
+                headers={"Authorization": f"Bearer {access_token}"},
+            )
+            r.raise_for_status()
+            data = r.json()
+    except Exception as exc:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc))
+    return {"success": True, "data": {"display_phone_number": data.get("display_phone_number"), "verified_name": data.get("verified_name")}}
+
+
+@router.post("/chatbots/{chatbot_id}/integrations/facebook/test", response_model=dict)
+async def test_facebook(chatbot_id: uuid.UUID, user: CurrentUser, db: DBSession) -> dict:
+    await _get_owned_bot(chatbot_id, user.id, db)
+    result = await db.execute(
+        select(ChannelIntegration).where(
+            ChannelIntegration.chatbot_id == chatbot_id,
+            ChannelIntegration.channel == "facebook",
+        )
+    )
+    integration = result.scalar_one_or_none()
+    if not integration:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not configured")
+
+    import httpx
+    token = integration.config.get("page_access_token", "")
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            r = await client.get(
+                "https://graph.facebook.com/v19.0/me",
+                params={"access_token": token, "fields": "id,name"},
+            )
+            r.raise_for_status()
+            data = r.json()
+    except Exception as exc:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc))
+    return {"success": True, "data": {"page_id": data.get("id"), "page_name": data.get("name")}}
+
+
+@router.post("/chatbots/{chatbot_id}/integrations/sms/test", response_model=dict)
+async def test_sms(chatbot_id: uuid.UUID, user: CurrentUser, db: DBSession) -> dict:
+    await _get_owned_bot(chatbot_id, user.id, db)
+    result = await db.execute(
+        select(ChannelIntegration).where(
+            ChannelIntegration.chatbot_id == chatbot_id,
+            ChannelIntegration.channel == "sms",
+        )
+    )
+    integration = result.scalar_one_or_none()
+    if not integration:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not configured")
+
+    import base64
+    import httpx
+    account_sid = integration.config.get("account_sid", "")
+    auth_token = integration.config.get("auth_token", "")
+    creds = base64.b64encode(f"{account_sid}:{auth_token}".encode()).decode()
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            r = await client.get(
+                f"https://api.twilio.com/2010-04-01/Accounts/{account_sid}.json",
+                headers={"Authorization": f"Basic {creds}"},
+            )
+            r.raise_for_status()
+            data = r.json()
+    except Exception as exc:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc))
+    return {"success": True, "data": {"account_sid": data.get("sid"), "friendly_name": data.get("friendly_name"), "status": data.get("status")}}

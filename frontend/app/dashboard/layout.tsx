@@ -12,6 +12,10 @@ import {
   Menu,
   X,
   ChevronRight,
+  Users,
+  Tag,
+  Kanban,
+  Inbox,
 } from "lucide-react";
 import { useState } from "react";
 import { signOut } from "next-auth/react";
@@ -21,6 +25,10 @@ const NAV = [
   { href: "/dashboard",              label: "Overview",      icon: BarChart2 },
   { href: "/dashboard/chatbots",     label: "Chatbots",      icon: Bot },
   { href: "/dashboard/analytics",    label: "Conversations", icon: MessageSquare },
+  { href: "/dashboard/inbox",        label: "Inbox",         icon: Inbox },
+  { href: "/dashboard/contacts",     label: "Contacts",      icon: Users },
+  { href: "/dashboard/pipelines",    label: "Pipelines",     icon: Kanban },
+  { href: "/dashboard/tags",         label: "Tags",          icon: Tag },
   { href: "/dashboard/usage",        label: "Usage",         icon: Zap },
   { href: "/dashboard/settings",     label: "Settings",      icon: Settings },
 ];
@@ -70,6 +78,15 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
           <p className="text-xs font-medium truncate">{user?.name ?? user?.email}</p>
           <p className="text-[11px] text-muted-foreground truncate capitalize">{user?.role ?? "free"}</p>
         </div>
+        {user?.role === "admin" && (
+          <Link
+            href="/admin"
+            className="flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm font-medium text-rose-600 hover:bg-rose-50 transition-colors"
+          >
+            <ChevronRight className="h-4 w-4 shrink-0" />
+            Admin Panel
+          </Link>
+        )}
         <button
           onClick={() => signOut({ callbackUrl: "/login" })}
           className="flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-sm text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"

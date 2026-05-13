@@ -10,6 +10,7 @@ import {
   Palette,
   Code2,
   BookOpen,
+  Radio,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -135,6 +136,7 @@ export default function ChatbotSettingsPage() {
           { label: "Branding", icon: Palette, href: `/dashboard/chatbots/${id}/branding` },
           { label: "Knowledge Base", icon: BookOpen, href: `/dashboard/chatbots/${id}/knowledge` },
           { label: "Embed Widget", icon: Code2, href: `/dashboard/chatbots/${id}/widget` },
+          { label: "Channels", icon: Radio, href: `/dashboard/chatbots/${id}/channels` },
         ].map(({ label, icon: Icon, href }) => (
           <Button key={href} size="sm" variant="outline" className="h-8 gap-1.5 text-xs" onClick={() => router.push(href)}>
             <Icon className="h-3.5 w-3.5" />
