@@ -16,6 +16,7 @@ import {
   Tag,
   Kanban,
   Inbox,
+  GitFork,
 } from "lucide-react";
 import { useState } from "react";
 import { signOut } from "next-auth/react";
@@ -27,6 +28,7 @@ const NAV = [
   { href: "/dashboard/analytics",    label: "Conversations", icon: MessageSquare },
   { href: "/dashboard/inbox",        label: "Inbox",         icon: Inbox },
   { href: "/dashboard/contacts",     label: "Contacts",      icon: Users },
+  { href: "/dashboard/flows",         label: "Flows",         icon: GitFork },
   { href: "/dashboard/pipelines",    label: "Pipelines",     icon: Kanban },
   { href: "/dashboard/tags",         label: "Tags",          icon: Tag },
   { href: "/dashboard/usage",        label: "Usage",         icon: Zap },
