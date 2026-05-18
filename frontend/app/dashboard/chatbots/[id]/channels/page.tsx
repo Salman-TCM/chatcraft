@@ -422,6 +422,9 @@ export default function ChannelsPage() {
         );
       })}
 
+      {/* A2A Protocol */}
+      <A2ASection chatbotId={id as string} />
+
       {/* Info box */}
       <Card className="bg-muted/40 p-4">
         <p className="text-xs text-muted-foreground leading-relaxed">
@@ -432,5 +435,67 @@ export default function ChannelsPage() {
         </p>
       </Card>
     </div>
+  );
+}
+
+function A2ASection({ chatbotId }: { chatbotId: string }) {
+  const [copied, setCopied] = useState<string | null>(null);
+  const apiBase = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+  const agentCardUrl = `${apiBase}/a2a/widgets/${chatbotId}/agent.json`;
+  const messageUrl = `${apiBase}/a2a/widgets/${chatbotId}`;
+
+  function copy(text: string, key: string) {
+    navigator.clipboard.writeText(text);
+    setCopied(key);
+    setTimeout(() => setCopied(null), 2000);
+  }
+
+  return (
+    <Card className="p-5 space-y-3">
+      <div>
+        <h3 className="font-semibold text-sm">Google A2A Protocol</h3>
+        <p className="text-xs text-muted-foreground mt-0.5">
+          Allow other AI agents to discover and communicate with this chatbot using the
+          Agent-to-Agent (A2A) open standard.
+        </p>
+      </div>
+
+      <div className="space-y-2">
+        <div>
+          <Label className="text-xs text-muted-foreground">Agent Card (discovery)</Label>
+          <div className="flex gap-2 mt-1">
+            <Input value={agentCardUrl} readOnly className="text-xs font-mono h-8" />
+            <Button
+              size="sm"
+              variant="outline"
+              className="h-8 w-8 p-0"
+              onClick={() => copy(agentCardUrl, "card")}
+            >
+              {copied === "card" ? <Check className="h-3.5 w-3.5 text-green-500" /> : <Copy className="h-3.5 w-3.5" />}
+            </Button>
+          </div>
+        </div>
+        <div>
+          <Label className="text-xs text-muted-foreground">Message endpoint (JSON-RPC 2.0)</Label>
+          <div className="flex gap-2 mt-1">
+            <Input value={messageUrl} readOnly className="text-xs font-mono h-8" />
+            <Button
+              size="sm"
+              variant="outline"
+              className="h-8 w-8 p-0"
+              onClick={() => copy(messageUrl, "rpc")}
+            >
+              {copied === "rpc" ? <Check className="h-3.5 w-3.5 text-green-500" /> : <Copy className="h-3.5 w-3.5" />}
+            </Button>
+          </div>
+        </div>
+      </div>
+
+      <div className="bg-muted/50 rounded p-3 text-xs text-muted-foreground">
+        <strong>Quick test:</strong> <code>curl {agentCardUrl}</code> — returns the agent card JSON.
+        <br />
+        POST to the message endpoint with <code>{`{"jsonrpc":"2.0","id":1,"method":"message/send","params":{"message":{"role":"user","parts":[{"type":"text","text":"Hello"}]}}}`}</code>
+      </div>
+    </Card>
   );
 }

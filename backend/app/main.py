@@ -31,6 +31,11 @@ from app.api.landing_pages import router as landing_pages_router
 from app.api.commerce import router as commerce_router
 from app.api.wallet import router as wallet_router
 from app.api.broadcast import router as broadcast_router
+from app.api.voice_lab import router as voice_lab_router
+from app.api.browser import router as browser_router
+from app.api.mcp_servers import router as mcp_servers_router
+from app.api.a2a import router as a2a_router
+from app.api.realtime_proxy import router as realtime_router
 from app.core.security_headers import SecurityHeadersMiddleware
 from app.core.ip_abuse import IPAbuseMiddleware
 from app.core.config import settings
@@ -101,6 +106,11 @@ app.include_router(landing_pages_router)
 app.include_router(commerce_router)
 app.include_router(wallet_router)
 app.include_router(broadcast_router)
+app.include_router(voice_lab_router)
+app.include_router(browser_router)
+app.include_router(mcp_servers_router)
+app.include_router(a2a_router)
+app.include_router(realtime_router)
 
 
 @app.get("/", tags=["health"])

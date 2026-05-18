@@ -85,6 +85,16 @@ class Settings(BaseSettings):
     # Public API base URL (used in pass callbacks, QR links, etc.)
     api_base_url: str = "http://localhost:8000"
 
+    # Additional LLM providers
+    groq_api_key: str = ""
+    deepseek_api_key: str = ""
+    perplexity_api_key: str = ""
+    xai_api_key: str = ""
+
+    # Cloud browser (Browserbase)
+    browserbase_api_key: str = ""
+    browserbase_project_id: str = ""
+
     jwt_algorithm: str = "HS256"
     access_token_expire_minutes: int = 15
     refresh_token_expire_days: int = 7
