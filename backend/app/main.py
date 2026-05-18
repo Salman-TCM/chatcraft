@@ -75,9 +75,16 @@ app.add_middleware(IPAbuseMiddleware)
 app.add_middleware(SlowAPIMiddleware)
 app.add_middleware(RequestLoggingMiddleware)
 app.add_middleware(RequestIDMiddleware)
+_cors_origin_regex = (
+    # In development allow any localhost port and Docker-internal addresses.
+    r"http://localhost(:\d+)?|http://127\.0\.0\.1(:\d+)?|http://172\.\d+\.\d+\.\d+(:\d+)?"
+    if not settings.is_production
+    else None
+)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_origins,
+    allow_origin_regex=_cors_origin_regex,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

@@ -47,7 +47,7 @@ services:
       context: ./backend
       dockerfile: Dockerfile
     restart: unless-stopped
-    # --reload-dir limits watchfiles to app/ only, avoiding spurious reloads
+    # start.sh runs `alembic upgrade head` then execs this command
     command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload --reload-dir app
     ports:
       - "8000:8000"
@@ -100,6 +100,7 @@ services:
       context: ./backend
       dockerfile: Dockerfile
     restart: unless-stopped
+    entrypoint: []   # skip migration entrypoint; backend already ran alembic upgrade head
     command: celery -A app.workers.celery_app worker --loglevel=info --concurrency=4
     volumes:
       - ./backend:/app
@@ -141,6 +142,7 @@ services:
       context: ./backend
       dockerfile: Dockerfile
     restart: unless-stopped
+    entrypoint: []   # skip migration entrypoint
     command: celery -A app.workers.celery_app beat --loglevel=info --scheduler celery.beat.PersistentScheduler --schedule /tmp/celerybeat-schedule
     volumes:
       - ./backend:/app
