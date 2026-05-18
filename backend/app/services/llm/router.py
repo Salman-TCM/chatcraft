@@ -90,7 +90,7 @@ class LLMRouter:
         primary = get_provider(self._model)
         first_chunk = True
         try:
-            async for chunk in await _wrap_stream(primary, messages, max_tokens, temperature):
+            async for chunk in _wrap_stream(primary, messages, max_tokens, temperature):
                 first_chunk = False
                 yield chunk
             return
@@ -103,7 +103,7 @@ class LLMRouter:
             )
 
         fallback = get_provider(self._fallback)
-        async for chunk in await _wrap_stream(fallback, messages, max_tokens, temperature):
+        async for chunk in _wrap_stream(fallback, messages, max_tokens, temperature):
             yield chunk
 
 
