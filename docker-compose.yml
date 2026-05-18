@@ -141,7 +141,7 @@ services:
       context: ./backend
       dockerfile: Dockerfile
     restart: unless-stopped
-    command: celery -A app.workers.celery_app beat --loglevel=info --scheduler celery.beat.PersistentScheduler
+    command: celery -A app.workers.celery_app beat --loglevel=info --scheduler celery.beat.PersistentScheduler --schedule /tmp/celerybeat-schedule
     volumes:
       - ./backend:/app
       - celery_beat_data:/var/run/celerybeat

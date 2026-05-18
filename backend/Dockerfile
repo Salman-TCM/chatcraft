@@ -40,7 +40,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 # Non-root user for security
 RUN groupadd --gid 1001 appgroup && \
-    useradd --uid 1001 --gid appgroup --shell /bin/bash --create-home appuser
+    useradd --uid 1001 --gid appgroup --shell /bin/bash --create-home appuser && \
+    mkdir -p /var/run/celerybeat && chown appuser:appgroup /var/run/celerybeat
 
 # Copy installed Python packages from builder
 COPY --from=builder /install /usr/local
