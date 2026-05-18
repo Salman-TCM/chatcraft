@@ -1,0 +1,2004 @@
+Jafear.com API Reference
+============================================================
+
+Base URL: https://app.jafear.com
+Version: 1.0.0
+Generated: 2026-05-13T06:13:46.223Z
+
+AUTHENTICATION
+----------------------------------------
+All endpoints require a Bearer token.
+Header: Authorization: Bearer <your_api_token>
+Generate tokens from Settings > API Tokens.
+
+============================================================
+DATA MODELS
+============================================================
+
+## Contact
+  id: integer - Internal numeric Contact ID
+  publicId: string - Public alphanumeric Contact ID (use this for API lookups)
+  contactId: string (nullable) - Short alphanumeric Contact ID
+  firstName: string - First name
+  lastName: string - Last name
+  name: string - Full display name
+  email: string - Email address
+  phone: string - Phone number
+  company: string - Company name
+  createdAt: string - Creation timestamp
+
+## Widget
+  id: integer - Widget ID
+  name: string - Widget name
+  widgetType: string [standard, voice, landing] - Widget type
+  isPublic: boolean - Whether the widget is public
+  createdAt: string - Creation timestamp
+
+## Conversation
+  id: integer - Conversation ID
+  contactId: integer - Contact ID
+  widgetId: integer - Widget ID
+  channel: string - Communication channel
+  status: string [active, closed] - Conversation status
+  createdAt: string - Creation timestamp
+
+## Message
+  id: integer - Message ID
+  conversationId: integer - Conversation ID
+  role: string [user, assistant, system] - Message role
+  content: string - Message content
+  createdAt: string - Creation timestamp
+
+## ApiToken
+  id: integer - Token ID
+  name: string - Token name/description
+  tokenPrefix: string - First 8 characters of the token
+  lastUsedAt: string (nullable) - Last usage timestamp
+  createdAt: string - Creation timestamp
+
+## Form
+  id: integer - Form ID
+  name: string - Form name
+  description: string (nullable) - Form description
+  formFields: array - Array of field definitions
+  isActive: boolean - Whether the form is active
+  successMessage: string - Message after submission
+  submitButtonText: string - Submit button text
+  publicId: string (nullable) - Public form ID
+  widgetId: integer (nullable) - Associated widget ID
+  createdAt: string
+
+## Flow
+  id: integer - Flow ID
+  name: string - Flow name
+  slug: string (nullable) - URL-friendly slug
+  description: string (nullable) - Flow description
+  isActive: boolean - Whether the flow is active
+  widgetId: integer (nullable) - Associated widget ID
+  webhookEnabled: boolean - Whether webhook trigger is enabled
+  createdAt: string
+
+## Function
+  id: integer - Function ID
+  name: string - Function name
+  description: string (nullable) - Function description
+  functionType: string - Type of function
+  isActive: boolean - Whether the function is active
+  widgetId: integer (nullable) - Associated widget ID
+  createdAt: string
+
+## Pipeline
+  id: integer - Pipeline ID
+  name: string - Pipeline name
+  description: string (nullable)
+  color: string - Pipeline color hex
+  widgetId: integer (nullable) - Linked widget/agent ID
+  isActive: boolean
+  createdAt: string
+
+## PipelineDeal
+  id: integer - Deal ID
+  stageId: integer - Current stage ID
+  contactId: integer - Contact ID
+  pipelineId: integer - Pipeline ID
+  order: integer - Sort order within stage
+  notes: string (nullable)
+  dealValue: integer (nullable) - Deal value in cents
+  createdAt: string
+
+## Keyword
+  id: integer - Keyword rule ID
+  keywords: array - Trigger keywords
+  responseType: string [text, flow] - Response type
+  responseText: string (nullable) - Text response (if type is text)
+  flowId: integer (nullable) - Flow to trigger (if type is flow)
+  widgetId: integer (nullable) - Widget scope
+  isActive: boolean
+  createdAt: string
+
+## Automation
+  id: integer - Automation ID
+  name: string - Automation name
+  description: string (nullable)
+  triggerType: string - What starts this automation
+  actionType: string - Action to perform
+  enabled: boolean
+  executionCount: integer - Times executed
+  lastExecutedAt: string (nullable)
+  createdAt: string
+
+## LandingPage
+  id: integer - Landing page ID
+  title: string - Page title
+  name: string - Internal name
+  slug: string - URL slug
+  shortId: string - Short ID for sharing
+  description: string (nullable) - Page description
+  widgetId: integer (nullable) - Associated widget ID
+  theme: string [light, dark, custom] - Page theme
+  primaryColor: string - Primary color hex
+  isPublished: boolean - Whether the page is published
+  createdAt: string
+
+## CommerceStore
+  id: integer - Store ID
+  name: string - Store name
+  slug: string (nullable) - URL-friendly store slug
+  description: string (nullable) - Store description
+  isActive: boolean - Whether the store is active
+  currency: string - Store currency (e.g. USD, EUR)
+  primaryColor: string - Primary brand color hex
+  defaultViewMode: string [grid, list] - Default product display mode
+  paymentProvider: string [stripe, razorpay, mercadopago] - Payment provider
+  productCount: integer (nullable) - Number of products in the store
+  createdAt: string
+
+## Product
+  id: string - Product ID (row index from catalog)
+  name: string - Product name
+  description: string - Product description
+  price: number - Product price
+  currency: string - Price currency
+  imageUrl: string (nullable) - Product image URL
+  category: string (nullable) - Product category
+  sku: string (nullable) - Stock keeping unit
+  inStock: boolean - Whether product is in stock
+  externalCheckoutUrl: string (nullable) - External checkout URL (overrides built-in cart)
+  buyNowText: string (nullable) - Custom buy now button text
+  addToCartText: string (nullable) - Custom add to cart button text
+
+## CartItem
+  id: string - Product ID
+  quantity: integer - Quantity to purchase
+
+## WalletProgram
+  id: integer - Program ID
+  name: string - Program display name
+  type: string [membership, punch_card, points, coupon, event_ticket, prepaid_balance, business_card] - Pass type
+  description: string (nullable)
+  status: string [active, archived] - Program status
+  config: object - Type-specific configuration (e.g. maxPunches, capacity, tiers)
+  brandOverrides: object (nullable) - Custom branding (backgroundColor, foregroundColor, labelColor, iconUrl)
+  widgetId: integer (nullable) - Linked AI agent for contact attribution
+  createdAt: string
+
+## WalletCard
+  id: integer - Card ID
+  serial: string - Unique card serial number (used in URLs and API calls)
+  programId: integer - Parent program ID
+  customerName: string
+  customerEmail: string (nullable)
+  customerPhone: string (nullable)
+  contactId: integer (nullable) - Linked CRM contact
+  status: string [active, redeemed, expired, revoked] - Card status
+  state: object - Type-specific mutable state (e.g. punches, points, balance, lastMessage)
+  createdAt: string
+
+## CommerceStorePayment
+  id: integer
+  commerceStoreId: integer
+  userId: integer
+  contactId: integer (nullable)
+  customerName: string
+  customerEmail: string
+  amount: integer - Amount in smallest currency unit (e.g. cents)
+  currency: string
+  stripePaymentIntentId: string
+  status: string [pending, succeeded, failed, refunded]
+  items: array - Purchased items
+  metadata: object (nullable)
+  createdAt: string
+  updatedAt: string
+
+============================================================
+API CATEGORIES
+============================================================
+
+- Authentication: API token management
+- Contacts: Contact management endpoints — supports lookup by numeric ID, publicId, or contactId
+- Widgets: Chat widget (AI agent) management
+- Conversations: Conversation endpoints — search by contact email/phone to find conversation IDs
+- Messages: Message endpoints
+- Forms: Form management and submission endpoints
+- Flows: Flow automation endpoints — create, trigger, and manage flows
+- Functions: AI function definition management
+- Tags: Tag management endpoints
+- Custom Fields: Custom field definitions and contact field values
+- Pipelines: Sales pipeline management with stages and deals
+- Pipeline Deals: Manage contacts/deals within pipeline stages
+- Landing Pages: Landing page management
+- Commerce: Commerce store management — create, update, and manage your webshop stores
+- Commerce Products: Product catalog management — list, add, update, and delete individual products in a store
+- Commerce Checkout: Shopping cart and checkout — create payment intents and confirm orders
+- Commerce Public: Public storefront endpoints — no authentication required, use for customer-facing integrations
+- Keywords: Cross-channel keyword trigger rules
+- Automations: Event-driven automation rules
+- Widget Management: Widget and function management — enable/disable AI, pause/unpause, assign functions, update settings. Designed for use with Flow External Request nodes.
+- Wallet: Digital wallet pass management — create programs (membership, punch card, points, coupon, event ticket, prepaid balance, business card), issue cards, perform actions (punch, redeem, check-in), and send push notifications to Apple Wallet and Google Wallet
+
+============================================================
+ENDPOINTS
+============================================================
+
+--------------------------------------------------
+Authentication
+--------------------------------------------------
+
+GET /api/tokens
+  Summary: List all API tokens
+  Description: Get all API tokens for the authenticated user. Supports both session auth (dashboard) and Bearer token auth (programmatic).
+  Responses:
+    200: List of API tokens
+      Returns: Array of ApiToken
+    401: Not authenticated
+
+POST /api/tokens
+  Summary: Create a new API token
+  Description: Generate a new API token programmatically. The full token value is only returned once in the response — save it securely. Supports both session auth (dashboard) and Bearer token auth (programmatic).
+  Request Body (JSON):
+    name: string (required) - A name/description for this token (e.g. "Production Server", "Staging")
+  Responses:
+    201: Token created successfully
+      id: integer - Token ID
+      name: string - Token name
+      token: string - The full API token — save this, it will not be shown again
+      tokenPrefix: string - First 12 characters of the token (for identification)
+      message: string
+    400: Token name is required
+    401: Not authenticated
+
+DELETE /api/tokens/{id}
+  Summary: Delete an API token
+  Description: Permanently revoke and delete an API token. Supports both session auth (dashboard) and Bearer token auth (programmatic). A token can delete itself.
+  Parameters:
+    path:id [integer] (required) - Token ID to delete
+  Responses:
+    200: Token deleted successfully
+    401: Not authenticated
+    404: Token not found
+
+GET /api/v1/me
+  Summary: Get current user info
+  Description: Get information about the authenticated user
+  Responses:
+    200: User information
+      id: integer
+      email: string
+      name: string
+      authMethod: string
+    401: Not authenticated
+
+--------------------------------------------------
+Contacts
+--------------------------------------------------
+
+GET /api/v1/contacts
+  Summary: List all contacts
+  Description: Get all contacts for the authenticated user
+  Parameters:
+    query:limit [integer] (optional) - Maximum number of contacts to return
+    query:offset [integer] (optional) - Number of contacts to skip
+  Responses:
+    200: List of contacts
+      contacts: array
+      total: integer
+    401: Not authenticated
+
+POST /api/v1/contacts
+  Summary: Create a new contact
+  Description: Create a new contact for the authenticated user
+  Request Body (JSON):
+    firstName: string (optional)
+    lastName: string (optional)
+    email: string (optional)
+    phone: string (optional)
+    company: string (optional)
+    customFields: object (optional)
+  Responses:
+    201: Contact created successfully
+    400: Invalid request
+    401: Not authenticated
+
+GET /api/v1/contacts/search
+  Summary: Search contacts
+  Description: Search contacts by email, phone, or name. Use this to find a contact ID when you only have an email or phone number.
+  Parameters:
+    query:email [string] (optional) - Search by email address (exact or partial match)
+    query:phone [string] (optional) - Search by phone number (exact or partial match)
+    query:name [string] (optional) - Search by first name, last name, or display name
+    query:q [string] (optional) - General search across email, phone, and name fields
+    query:widgetId [integer] (optional) - Filter by widget ID
+    query:limit [integer] (optional)
+    query:offset [integer] (optional)
+  Responses:
+    200: Matching contacts
+      contacts: array
+      total: integer
+    401: Not authenticated
+
+GET /api/v1/contacts/{id}
+  Summary: Get a contact by ID
+  Description: Get detailed information about a specific contact
+  Parameters:
+    path:id [string] (required) - Contact ID (numeric ID or alphanumeric contactId e.g. nfvqBZmd)
+  Responses:
+    200: Contact details
+      Returns: Contact
+    401: Not authenticated
+    404: Contact not found
+
+PATCH /api/v1/contacts/{id}
+  Summary: Update a contact
+  Description: Update an existing contact's information
+  Parameters:
+    path:id [string] (required) - Contact ID (numeric ID or alphanumeric contactId e.g. nfvqBZmd)
+  Request Body (JSON):
+    firstName: string (optional)
+    lastName: string (optional)
+    email: string (optional)
+    phone: string (optional)
+    company: string (optional)
+    customFields: object (optional)
+  Responses:
+    200: Contact updated successfully
+    401: Not authenticated
+    404: Contact not found
+
+DELETE /api/v1/contacts/{id}
+  Summary: Delete a contact
+  Description: Permanently delete a contact
+  Parameters:
+    path:id [string] (required) - Contact ID (numeric ID or alphanumeric contactId e.g. nfvqBZmd)
+  Responses:
+    200: Contact deleted successfully
+    401: Not authenticated
+    404: Contact not found
+
+POST /api/v1/contacts/{id}/messages
+  Summary: Send a message to a contact
+  Description: Send a message directly to a contact without needing a conversation ID. Automatically finds or creates the conversation and delivers via the appropriate channel (webchat, Facebook Messenger, Telegram, SMS, etc).
+  Parameters:
+    path:id [string] (required) - Contact ID (numeric ID or alphanumeric contactId e.g. nfvqBZmd)
+  Request Body (JSON):
+    content: string (required) - Message text to send
+    widgetId: integer (optional) - Widget ID (optional - uses most recent conversation's widget if not provided)
+  Responses:
+    201: Message sent successfully
+    401: Not authenticated
+    404: Contact not found
+
+POST /api/v1/contacts/{id}/tags
+  Summary: Add tags to a contact
+  Description: Add one or more tags to a contact
+  Parameters:
+    path:id [string] (required) - Contact ID (numeric ID or alphanumeric contactId e.g. nfvqBZmd)
+  Request Body (JSON):
+    tagIds: array (required)
+  Responses:
+    200: Tags added successfully
+    401: Not authenticated
+    404: Contact not found
+
+DELETE /api/v1/contacts/{id}/tags/{tagId}
+  Summary: Remove a tag from a contact
+  Description: Remove a specific tag from a contact
+  Parameters:
+    path:id [string] (required) - Contact ID (numeric ID or alphanumeric contactId e.g. nfvqBZmd)
+    path:tagId [integer] (required)
+  Responses:
+    200: Tag removed successfully
+    401: Not authenticated
+    404: Contact or tag not found
+
+--------------------------------------------------
+Widgets
+--------------------------------------------------
+
+GET /api/v1/widgets
+  Summary: List all widgets
+  Description: Get all chat widgets for the authenticated user
+  Responses:
+    200: List of widgets
+      widgets: array
+    401: Not authenticated
+
+POST /api/v1/widgets
+  Summary: Create a new widget
+  Description: Create a new chat widget
+  Request Body (JSON):
+    name: string (required) - Widget name
+    widgetType: string [standard, voice, landing] (optional) - Type of widget
+    isPublic: boolean (optional) - Whether the widget is publicly accessible
+    systemPrompt: string (optional) - AI system prompt instructions
+    welcomeMessage: string (optional) - Initial greeting message
+    llmProvider: string [openai, anthropic, google, xai, perplexity, deepseek] (optional) - LLM provider for AI responses
+    primaryColor: string (optional) - Primary theme color (hex)
+  Responses:
+    201: Widget created successfully
+      Returns: Widget
+    400: Invalid request body
+    401: Not authenticated
+
+GET /api/v1/widgets/{id}
+  Summary: Get widget details
+  Description: Get detailed information about a specific widget
+  Parameters:
+    path:id [integer] (required)
+  Responses:
+    200: Widget details
+    401: Not authenticated
+    404: Widget not found
+
+PATCH /api/v1/widgets/{id}
+  Summary: Update a widget
+  Description: Update widget settings. All fields are optional - only provided fields will be updated.
+  Parameters:
+    path:id [integer] (required)
+  Request Body (JSON):
+    name: string (optional) - Widget name
+    isPublic: boolean (optional) - Whether the widget is publicly accessible
+    systemPrompt: string (optional) - AI system prompt instructions. Existing guardrails are preserved unless the guardrails field is also provided.
+    guardrails: string (optional) - Enforcement rules that safeguard the widget. If omitted, existing guardrails are preserved. Set to empty string to clear.
+    welcomeMessage: string (optional) - Initial greeting message
+    llmProvider: string [openai, anthropic, google, xai, perplexity, deepseek] (optional) - LLM provider for AI responses
+    primaryColor: string (optional) - Primary theme color (hex)
+    widgetType: string [standard, voice, landing] (optional) - Type of widget
+  Responses:
+    200: Widget updated successfully
+      Returns: Widget
+    401: Not authenticated
+    404: Widget not found
+
+DELETE /api/v1/widgets/{id}
+  Summary: Delete a widget
+  Description: Permanently delete a chat widget and its associated data
+  Parameters:
+    path:id [integer] (required)
+  Responses:
+    200: Widget deleted successfully
+    401: Not authenticated
+    404: Widget not found
+
+--------------------------------------------------
+Conversations
+--------------------------------------------------
+
+GET /api/v1/conversations
+  Summary: List conversations
+  Description: Get conversations for the authenticated user. Filter by widgetId, contactId, or both.
+  Parameters:
+    query:widgetId [integer] (optional) - Filter by widget ID
+    query:contactId [integer] (optional) - Filter by contact ID
+    query:limit [integer] (optional) - Maximum conversations to return
+  Responses:
+    200: List of conversations
+      conversations: array
+    401: Not authenticated
+
+GET /api/v1/conversations/search
+  Summary: Search conversations
+  Description: Search conversations by contact email, phone, or name. Use this to find a conversation ID when you only have contact info.
+  Parameters:
+    query:email [string] (optional) - Find conversations by contact email
+    query:phone [string] (optional) - Find conversations by contact phone
+    query:name [string] (optional) - Find conversations by contact name
+    query:widgetId [integer] (optional) - Filter by widget ID
+    query:status [string] (optional) - Filter by conversation status
+    query:limit [integer] (optional)
+  Responses:
+    200: Matching conversations with contact info
+      conversations: array
+    401: Not authenticated
+
+GET /api/v1/conversations/{id}
+  Summary: Get a conversation by ID
+  Description: Get detailed information about a specific conversation including contact details
+  Parameters:
+    path:id [integer] (required) - Conversation ID
+  Responses:
+    200: Conversation details with contact info
+      conversation: any
+      contact: any
+    401: Not authenticated
+    404: Conversation not found
+
+POST /api/v1/conversations/{id}/reopen
+  Summary: Reopen a conversation
+  Description: Reopen a closed conversation and optionally release human takeover
+  Parameters:
+    path:id [integer] (required)
+  Request Body (JSON):
+    releaseHumanTakeover: boolean (optional) - Also release human takeover flag
+  Responses:
+    200: Conversation reopened
+    401: Not authenticated
+    404: Conversation not found
+
+POST /api/v1/conversations/{id}/takeover
+  Summary: Take over a conversation
+  Description: Mark a conversation for human agent takeover
+  Parameters:
+    path:id [integer] (required)
+  Responses:
+    200: Conversation taken over successfully
+    401: Not authenticated
+    404: Conversation not found
+
+POST /api/v1/conversations/{id}/close
+  Summary: Close a conversation
+  Description: Mark a conversation as closed
+  Parameters:
+    path:id [integer] (required)
+  Responses:
+    200: Conversation closed successfully
+    401: Not authenticated
+    404: Conversation not found
+
+--------------------------------------------------
+Messages
+--------------------------------------------------
+
+GET /api/v1/conversations/{id}/messages
+  Summary: Get messages for a conversation
+  Description: Get all messages in a specific conversation
+  Parameters:
+    path:id [integer] (required) - Conversation ID
+    query:limit [integer] (optional) - Maximum messages to return
+  Responses:
+    200: List of messages
+      messages: array
+    401: Not authenticated
+    404: Conversation not found
+
+POST /api/v1/conversations/{id}/messages
+  Summary: Send a message to a conversation
+  Description: Send a new message to an existing conversation
+  Parameters:
+    path:id [integer] (required)
+  Request Body (JSON):
+    content: string (required)
+    role: string [assistant, system] (optional)
+  Responses:
+    201: Message sent successfully
+    401: Not authenticated
+    404: Conversation not found
+
+--------------------------------------------------
+Forms
+--------------------------------------------------
+
+GET /api/v1/forms
+  Summary: List all forms
+  Description: Get all forms for the authenticated user. Each form object includes an `id` field that can be used with `/api/v1/forms/{id}` and `/api/v1/forms/{id}/submissions`.
+  Responses:
+    200: List of forms
+      forms: array
+    401: Not authenticated
+
+POST /api/v1/forms
+  Summary: Create a new form
+  Description: Create a new form with field definitions
+  Request Body (JSON):
+    name: string (required) - Form name
+    description: string (optional) - Form description
+    widgetId: integer (optional) - Associate with a widget
+    formFields: array (optional) - Field definitions
+    successMessage: string (optional)
+    submitButtonText: string (optional)
+  Responses:
+    201: Form created successfully
+      Returns: Form
+    400: Invalid request
+    401: Not authenticated
+
+GET /api/v1/forms/{id}
+  Summary: Get form details
+  Description: Get detailed information about a specific form
+  Parameters:
+    path:id [integer] (required) - Form ID — obtain this from the `id` field in the response of GET /api/v1/forms
+  Responses:
+    200: Form details
+      id: integer - Unique form ID
+      name: string
+      description: string
+      formFields: array
+      isActive: boolean
+      successMessage: string
+      submitButtonText: string
+      publicId: string
+      createdAt: string
+      updatedAt: string
+    401: Not authenticated
+    404: Form not found
+
+PATCH /api/v1/forms/{id}
+  Summary: Update a form
+  Description: Update form settings, fields, or messages
+  Parameters:
+    path:id [integer] (required)
+  Request Body (JSON):
+    name: string (optional)
+    description: string (optional)
+    formFields: array (optional)
+    isActive: boolean (optional)
+    successMessage: string (optional)
+    submitButtonText: string (optional)
+    widgetId: integer (optional)
+  Responses:
+    200: Form updated successfully
+    401: Not authenticated
+    404: Form not found
+
+DELETE /api/v1/forms/{id}
+  Summary: Delete a form
+  Description: Permanently delete a form and its submissions
+  Parameters:
+    path:id [integer] (required)
+  Responses:
+    200: Form deleted successfully
+    401: Not authenticated
+    404: Form not found
+
+GET /api/v1/forms/{id}/submissions
+  Summary: Get form submissions
+  Description: Get all submissions for a specific form
+  Parameters:
+    path:id [integer] (required) - Form ID — obtain this from the `id` field in the response of GET /api/v1/forms
+    query:limit [integer] (optional)
+    query:offset [integer] (optional)
+  Responses:
+    200: List of submissions
+    401: Not authenticated
+    404: Form not found
+
+--------------------------------------------------
+Flows
+--------------------------------------------------
+
+GET /api/v1/flows
+  Summary: List all flows
+  Description: Get all flows for the authenticated user
+  Responses:
+    200: List of flows
+      flows: array
+    401: Not authenticated
+
+POST /api/v1/flows
+  Summary: Create a new flow
+  Description: Create a new automation flow. Starts with a basic start node. Use the flow builder in the dashboard for complex visual editing.
+  Request Body (JSON):
+    name: string (required) - Flow name
+    description: string (optional)
+    widgetId: integer (optional) - Associate with a widget
+    isActive: boolean (optional)
+  Responses:
+    201: Flow created successfully
+      Returns: Flow
+    400: Invalid request
+    401: Not authenticated
+
+GET /api/v1/flows/list
+  Summary: List all flows (for integrations)
+  Description: Returns a simple list of flows with their numeric IDs, names, and slugs. Useful for Zapier, Make, and other integration dropdowns.
+  Responses:
+    200: List of flows
+    401: Not authenticated
+
+GET /api/v1/flows/{id}
+  Summary: Get flow details
+  Description: Get detailed information about a specific flow
+  Parameters:
+    path:id [string] (required)
+  Responses:
+    200: Flow details
+    401: Not authenticated
+    404: Flow not found
+
+PATCH /api/v1/flows/{id}
+  Summary: Update a flow
+  Description: Update flow name, description, active status, or widget association
+  Parameters:
+    path:id [string] (required) - Flow ID (numeric) or slug
+  Request Body (JSON):
+    name: string (optional)
+    description: string (optional)
+    isActive: boolean (optional)
+    widgetId: integer (optional)
+  Responses:
+    200: Flow updated successfully
+    401: Not authenticated
+    404: Flow not found
+
+DELETE /api/v1/flows/{id}
+  Summary: Delete a flow
+  Description: Permanently delete a flow
+  Parameters:
+    path:id [string] (required) - Flow ID (numeric) or slug
+  Responses:
+    200: Flow deleted successfully
+    401: Not authenticated
+    404: Flow not found
+
+POST /api/v1/flows/{id}/toggle
+  Summary: Toggle flow active status
+  Description: Enable or disable a flow
+  Parameters:
+    path:id [string] (required)
+  Request Body (JSON):
+    isActive: boolean (optional)
+  Responses:
+    200: Flow status updated
+    401: Not authenticated
+    404: Flow not found
+
+GET /api/v1/flows/{id}/webhook
+  Summary: Get flow webhook configuration
+  Description: Get the webhook URL and configuration for a flow
+  Parameters:
+    path:id [string] (required)
+  Responses:
+    200: Webhook configuration
+      webhookEnabled: boolean
+      webhookUrl: string
+      webhookSecret: string
+    401: Not authenticated
+    404: Flow not found
+
+POST /api/v1/flows/{id}/webhook
+  Summary: Configure flow webhook
+  Description: Enable/disable webhook and regenerate secret
+  Parameters:
+    path:id [string] (required)
+  Request Body (JSON):
+    enabled: boolean (optional) - Enable or disable the webhook
+    regenerateSecret: boolean (optional) - Generate a new webhook secret
+  Responses:
+    200: Webhook configured
+    401: Not authenticated
+    404: Flow not found
+
+POST /api/v1/flows/{id}/trigger
+  Summary: Trigger a flow execution
+  Description: Manually trigger a flow for a specific contact. Provide contactId, or contactEmail/contactPhone to find or create a contact.
+  Parameters:
+    path:id [string] (required) - Flow ID (numeric) or slug
+  Request Body (JSON):
+    contactId: integer (optional) - Existing contact ID
+    contactEmail: string (optional) - Find or create contact by email
+    contactPhone: string (optional) - Find or create contact by phone
+    contactName: string (optional) - Name for new contacts
+    variables: object (optional) - Template variables available as {{variable_name}} in the flow
+    channel: string [webchat, sms, whatsapp, telegram, messenger, instagram] (optional)
+  Responses:
+    200: Flow triggered successfully
+      success: boolean
+      message: string
+      flowId: integer
+      contactId: integer
+    400: Missing contact identifier or flow not active
+    401: Not authenticated
+    404: Flow not found
+
+--------------------------------------------------
+Webhooks
+--------------------------------------------------
+
+POST /api/webhooks/flow/{flowId}/{webhookSecret}
+  Summary: Trigger flow via webhook
+  Description: External webhook endpoint for Make.com, Zapier, n8n to trigger flows
+  Parameters:
+    path:flowId [integer] (required) - The flow ID to trigger
+    path:webhookSecret [string] (required) - The webhook secret for authentication
+  Request Body (JSON):
+    contactEmail: string (optional) - Find/create contact by email
+    contactPhone: string (optional) - Find/create contact by phone
+    contactId: integer (optional) - Use existing contact ID
+    contactName: string (optional) - Name for new contacts
+    data: object (optional) - Custom data available as {{webhook_data.field}} in flow
+    channel: string [webchat, sms, whatsapp, telegram, messenger, instagram] (optional) - Channel to send messages on (default webchat)
+  Responses:
+    200: Flow triggered successfully
+      success: boolean
+      flowRunId: integer
+      contactId: integer
+      status: string
+      duration: integer
+    400: Bad request (missing contact identifier or flow inactive)
+    401: Invalid webhook secret
+    403: Webhook not enabled for this flow
+    404: Flow not found
+
+--------------------------------------------------
+Functions
+--------------------------------------------------
+
+GET /api/v1/functions
+  Summary: List all functions
+  Description: Get all AI functions for the authenticated user. Each function object includes an `id` field that can be used with `/api/v1/functions/{id}`.
+  Responses:
+    200: List of functions
+      functions: array
+    401: Not authenticated
+
+POST /api/v1/functions
+  Summary: Create a new function
+  Description: Create a new AI function definition
+  Request Body (JSON):
+    name: string (required) - Function name
+    description: string (optional) - What this function does
+    functionType: string [data_extraction, api_call, webhook] (required) - Type of function
+    widgetId: integer (optional) - Associate with a widget
+    isActive: boolean (optional)
+    parameters: object (optional) - Function parameter schema (JSON schema defining fields to extract)
+  Responses:
+    201: Function created successfully
+      Returns: Function
+    400: Invalid request
+    401: Not authenticated
+
+GET /api/v1/functions/{id}
+  Summary: Get function details
+  Description: Get detailed information about a specific function
+  Parameters:
+    path:id [integer] (required) - Function ID — obtain this from the `id` field in the response of GET /api/v1/functions
+  Responses:
+    200: Function details
+    401: Not authenticated
+    404: Function not found
+
+PATCH /api/v1/functions/{id}
+  Summary: Update a function
+  Description: Update function settings or parameter schema
+  Parameters:
+    path:id [integer] (required)
+  Request Body (JSON):
+    name: string (optional)
+    description: string (optional)
+    isActive: boolean (optional)
+    widgetId: integer (optional)
+    parameters: object (optional) - Function parameter schema (JSON schema defining fields to extract)
+  Responses:
+    200: Function updated successfully
+    401: Not authenticated
+    404: Function not found
+
+DELETE /api/v1/functions/{id}
+  Summary: Delete a function
+  Description: Permanently delete an AI function definition
+  Parameters:
+    path:id [integer] (required)
+  Responses:
+    200: Function deleted successfully
+    401: Not authenticated
+    404: Function not found
+
+--------------------------------------------------
+Tags
+--------------------------------------------------
+
+GET /api/v1/tags
+  Summary: List all tags
+  Description: Get all tags for the authenticated user
+  Responses:
+    200: List of tags
+      tags: array
+    401: Not authenticated
+
+POST /api/v1/tags
+  Summary: Create a new tag
+  Description: Create a new tag for organizing contacts
+  Request Body (JSON):
+    name: string (required)
+    color: string (optional)
+  Responses:
+    201: Tag created successfully
+    400: Invalid request
+    401: Not authenticated
+
+PATCH /api/v1/tags/{id}
+  Summary: Update a tag
+  Description: Update tag name or color
+  Parameters:
+    path:id [integer] (required)
+  Request Body (JSON):
+    name: string (optional)
+    color: string (optional)
+  Responses:
+    200: Tag updated successfully
+    401: Not authenticated
+    404: Tag not found
+
+DELETE /api/v1/tags/{id}
+  Summary: Delete a tag
+  Description: Permanently delete a tag
+  Parameters:
+    path:id [integer] (required)
+  Responses:
+    200: Tag deleted successfully
+    401: Not authenticated
+    404: Tag not found
+
+--------------------------------------------------
+Custom Fields
+--------------------------------------------------
+
+GET /api/v1/custom-fields
+  Summary: List all custom fields
+  Description: Get all custom field definitions for the authenticated user
+  Responses:
+    200: List of custom fields
+      customFields: array
+    401: Not authenticated
+
+POST /api/v1/custom-fields
+  Summary: Create a custom field
+  Description: Create a new custom field definition
+  Request Body (JSON):
+    name: string (required)
+    fieldType: string [text, number, date, email, phone, url, textarea, select, checkbox] (required)
+    isRequired: boolean (optional)
+    options: array (optional) - Options for select field type
+  Responses:
+    201: Custom field created successfully
+    400: Invalid request
+    401: Not authenticated
+
+PATCH /api/v1/custom-fields/{id}
+  Summary: Update a custom field
+  Description: Update custom field definition
+  Parameters:
+    path:id [integer] (required)
+  Request Body (JSON):
+    name: string (optional)
+    isRequired: boolean (optional)
+    options: array (optional)
+  Responses:
+    200: Custom field updated successfully
+    401: Not authenticated
+    404: Custom field not found
+
+DELETE /api/v1/custom-fields/{id}
+  Summary: Delete a custom field
+  Description: Permanently delete a custom field and all its values
+  Parameters:
+    path:id [integer] (required)
+  Responses:
+    200: Custom field deleted successfully
+    401: Not authenticated
+    404: Custom field not found
+
+GET /api/v1/contacts/{id}/fields
+  Summary: Get contact field values
+  Description: Get all custom field values for a specific contact
+  Parameters:
+    path:id [string] (required) - Contact ID (numeric ID or alphanumeric contactId e.g. nfvqBZmd)
+  Responses:
+    200: Contact field values
+    401: Not authenticated
+    404: Contact not found
+
+PUT /api/v1/contacts/{id}/fields
+  Summary: Update contact field values
+  Description: Set or update custom field values for a contact
+  Parameters:
+    path:id [string] (required) - Contact ID (numeric ID or alphanumeric contactId e.g. nfvqBZmd)
+  Request Body (JSON):
+    fields: array (optional)
+  Responses:
+    200: Field values updated successfully
+    401: Not authenticated
+    404: Contact not found
+
+--------------------------------------------------
+Pipelines
+--------------------------------------------------
+
+GET /api/v1/pipelines
+  Summary: List all pipelines
+  Description: Get all sales/deal pipelines for the authenticated user
+  Responses:
+    200: List of pipelines
+      pipelines: array
+    401: Not authenticated
+
+POST /api/v1/pipelines
+  Summary: Create a new pipeline
+  Description: Create a new sales/deal pipeline with optional default stages
+  Request Body (JSON):
+    name: string (required) - Pipeline name
+    description: string (optional)
+    color: string (optional)
+    widgetId: integer (optional) - Link to a widget/agent
+    stages: array (optional) - Initial stages (if omitted, defaults are created)
+  Responses:
+    201: Pipeline created with stages
+      pipeline: any
+      stages: array
+    400: Invalid request
+    401: Not authenticated
+
+GET /api/v1/pipelines/{id}
+  Summary: Get pipeline details
+  Description: Get detailed information about a specific pipeline including stages
+  Parameters:
+    path:id [integer] (required)
+  Responses:
+    200: Pipeline details
+    401: Not authenticated
+    404: Pipeline not found
+
+PATCH /api/v1/pipelines/{id}
+  Summary: Update a pipeline
+  Description: Update pipeline name, description, color, or linked agent
+  Parameters:
+    path:id [integer] (required)
+  Request Body (JSON):
+    name: string (optional)
+    description: string (optional)
+    color: string (optional)
+    widgetId: integer (optional) - Link to a widget/agent (null to unlink)
+    isActive: boolean (optional)
+  Responses:
+    200: Pipeline updated successfully
+    401: Not authenticated
+    404: Pipeline not found
+
+DELETE /api/v1/pipelines/{id}
+  Summary: Delete a pipeline
+  Description: Soft-delete a pipeline (moves to trash)
+  Parameters:
+    path:id [integer] (required)
+  Responses:
+    200: Pipeline deleted successfully
+    401: Not authenticated
+    404: Pipeline not found
+
+GET /api/v1/pipelines/{id}/stages
+  Summary: List pipeline stages
+  Description: Get all stages for a pipeline
+  Parameters:
+    path:id [integer] (required)
+  Responses:
+    200: List of stages
+      stages: array
+    401: Not authenticated
+    404: Pipeline not found
+
+--------------------------------------------------
+Landing Pages
+--------------------------------------------------
+
+GET /api/v1/landing-pages
+  Summary: List all landing pages
+  Description: Get all landing pages for the authenticated user
+  Parameters:
+    query:limit [integer] (optional)
+    query:offset [integer] (optional)
+  Responses:
+    200: List of landing pages
+      landingPages: array
+    401: Not authenticated
+
+POST /api/v1/landing-pages
+  Summary: Create a new landing page
+  Description: Create a new landing page with basic settings
+  Request Body (JSON):
+    title: string (required) - Page title
+    name: string (optional) - Internal name (defaults to title)
+    slug: string (required) - URL slug
+    description: string (optional)
+    widgetId: integer (optional) - Associated widget ID
+    theme: string [light, dark, custom] (optional)
+    primaryColor: string (optional)
+  Responses:
+    201: Landing page created successfully
+      Returns: LandingPage
+    400: Invalid request
+    401: Not authenticated
+
+GET /api/v1/landing-pages/{id}
+  Summary: Get landing page details
+  Description: Get detailed information about a specific landing page
+  Parameters:
+    path:id [string] (required) - Landing page ID (numeric ID, shortId e.g. lp-mmknq4xz-o1a7, or slug)
+  Responses:
+    200: Landing page details
+    401: Not authenticated
+    404: Landing page not found
+
+PATCH /api/v1/landing-pages/{id}
+  Summary: Update a landing page
+  Description: Update landing page title, content, or settings
+  Parameters:
+    path:id [string] (required) - Landing page ID (numeric, shortId, or slug)
+  Request Body (JSON):
+    name: string (optional)
+    title: string (optional)
+    description: string (optional)
+    slug: string (optional)
+  Responses:
+    200: Landing page updated
+    401: Not authenticated
+    404: Landing page not found
+
+DELETE /api/v1/landing-pages/{id}
+  Summary: Delete a landing page
+  Description: Permanently delete a landing page
+  Parameters:
+    path:id [string] (required) - Landing page ID (numeric, shortId, or slug)
+  Responses:
+    200: Landing page deleted
+    401: Not authenticated
+    404: Landing page not found
+
+POST /api/v1/landing-pages/{id}/publish
+  Summary: Publish or unpublish a landing page
+  Description: Toggle the published status of a landing page
+  Parameters:
+    path:id [string] (required) - Landing page ID (numeric ID, shortId e.g. lp-mmknq4xz-o1a7, or slug)
+  Request Body (JSON):
+    isPublished: boolean (optional)
+  Responses:
+    200: Landing page publish status updated
+    401: Not authenticated
+    404: Landing page not found
+
+--------------------------------------------------
+Commerce
+--------------------------------------------------
+
+GET /api/v1/stores
+  Summary: List all stores
+  Description: Get all commerce stores for the authenticated user
+  Responses:
+    200: List of stores
+      stores: array
+    401: Not authenticated
+
+POST /api/v1/stores
+  Summary: Create a new store
+  Description: Create a new commerce store
+  Request Body (JSON):
+    name: string (required) - Store name
+    description: string (optional)
+    currency: string (optional)
+  Responses:
+    201: Store created successfully
+    400: Invalid request
+    401: Not authenticated
+
+GET /api/v1/stores/{id}
+  Summary: Get store details
+  Description: Get detailed information about a specific store
+  Parameters:
+    path:id [integer] (required)
+  Responses:
+    200: Store details
+    401: Not authenticated
+    404: Store not found
+
+PATCH /api/v1/stores/{id}
+  Summary: Update a store
+  Description: Update store settings
+  Parameters:
+    path:id [integer] (required)
+  Request Body (JSON):
+    name: string (optional)
+    description: string (optional)
+    isActive: boolean (optional)
+  Responses:
+    200: Store updated successfully
+    401: Not authenticated
+    404: Store not found
+
+DELETE /api/v1/stores/{id}
+  Summary: Delete a store
+  Description: Permanently delete a commerce store
+  Parameters:
+    path:id [integer] (required)
+  Responses:
+    200: Store deleted successfully
+    401: Not authenticated
+    404: Store not found
+
+--------------------------------------------------
+Pipeline Deals
+--------------------------------------------------
+
+GET /api/v1/pipelines/{id}/deals
+  Summary: List deals in a pipeline
+  Description: Get all contacts/deals in a pipeline with their stage info
+  Parameters:
+    path:id [integer] (required) - Pipeline ID
+    query:stageId [integer] (optional) - Filter by stage ID
+  Responses:
+    200: List of deals
+      deals: array
+    401: Not authenticated
+    404: Pipeline not found
+
+POST /api/v1/pipelines/{id}/deals
+  Summary: Add a contact to a pipeline
+  Description: Add a contact as a deal in a specific pipeline stage
+  Parameters:
+    path:id [integer] (required) - Pipeline ID
+  Request Body (JSON):
+    contactId: integer (required) - Contact ID to add
+    stageId: integer (required) - Stage ID to place the contact in
+    notes: string (optional)
+    dealValue: integer (optional) - Deal value in cents
+  Responses:
+    201: Deal created successfully
+      Returns: PipelineDeal
+    400: Invalid request or contact already in pipeline
+    401: Not authenticated
+    404: Pipeline not found
+
+PATCH /api/v1/pipelines/{id}/deals/{dealId}
+  Summary: Update a deal (move stage, update notes/value)
+  Description: Move a contact to a different stage or update deal details
+  Parameters:
+    path:id [integer] (required) - Pipeline ID
+    path:dealId [integer] (required) - Deal ID
+  Request Body (JSON):
+    stageId: integer (optional) - Move to a different stage
+    notes: string (optional)
+    dealValue: integer (optional) - Deal value in cents
+  Responses:
+    200: Deal updated successfully
+    401: Not authenticated
+    404: Deal not found
+
+DELETE /api/v1/pipelines/{id}/deals/{dealId}
+  Summary: Remove a deal from a pipeline
+  Description: Remove a contact/deal from a pipeline (does not delete the contact)
+  Parameters:
+    path:id [integer] (required) - Pipeline ID
+    path:dealId [integer] (required) - Deal ID
+  Responses:
+    200: Deal removed successfully
+    401: Not authenticated
+    404: Deal not found
+
+--------------------------------------------------
+Commerce Products
+--------------------------------------------------
+
+GET /api/v1/stores/{id}/products
+  Summary: List store products
+  Description: Get all products for a specific store. Products are sourced from the connected Google Sheet catalog.
+  Parameters:
+    path:id [integer] (required) - Store ID
+    query:category [string] (optional) - Filter products by category
+    query:maxItems [integer] (optional) - Maximum number of products to return
+  Responses:
+    200: List of products
+      products: array
+      totalRows: integer - Total number of product rows in the catalog
+    401: Not authenticated
+    404: Store not found
+
+POST /api/v1/stores/{id}/products
+  Summary: Add a product
+  Description: Add a new product to the store's Google Sheet catalog
+  Parameters:
+    path:id [integer] (required) - Store ID
+  Request Body (JSON):
+    name: string (required) - Product name
+    description: string (optional) - Product description
+    price: number (required) - Product price
+    imageUrl: string (optional) - Product image URL
+    category: string (optional) - Product category
+    sku: string (optional) - Stock keeping unit
+    inStock: boolean (optional)
+    externalCheckoutUrl: string (optional) - External checkout URL (overrides built-in cart)
+    buyNowText: string (optional) - Custom buy now button text
+    addToCartText: string (optional) - Custom add to cart button text
+  Responses:
+    201: Product added successfully
+      Returns: Product
+    400: Invalid request (missing name or invalid price)
+    401: Not authenticated
+    404: Store not found
+
+PATCH /api/v1/stores/{id}/products/{productId}
+  Summary: Update a product
+  Description: Update a product in the store's Google Sheet catalog. Requires originalName to locate the row since Google Sheets rows don't have persistent IDs.
+  Parameters:
+    path:id [integer] (required) - Store ID
+    path:productId [string] (required) - Product ID
+  Request Body (JSON):
+    originalName: string (required) - Current product name (used to find the row in Google Sheets)
+    name: string (optional) - New product name
+    description: string (optional)
+    price: number (optional)
+    imageUrl: string (optional)
+    category: string (optional)
+    sku: string (optional)
+    inStock: boolean (optional)
+    externalCheckoutUrl: string (optional)
+    buyNowText: string (optional)
+    addToCartText: string (optional)
+  Responses:
+    200: Product updated successfully
+      Returns: Product
+    400: Invalid request
+    401: Not authenticated
+    404: Store not found
+
+DELETE /api/v1/stores/{id}/products/{productId}
+  Summary: Delete a product
+  Description: Delete a product from the store's Google Sheet catalog. Requires productName in the request body to locate the row.
+  Parameters:
+    path:id [integer] (required) - Store ID
+    path:productId [string] (required) - Product ID
+  Request Body (JSON):
+    productName: string (required) - Product name to delete (used to find the row in Google Sheets)
+  Responses:
+    200: Product deleted successfully
+      success: boolean
+      message: string
+    400: Invalid request
+    401: Not authenticated
+    404: Store not found
+
+POST /api/v1/stores/{id}/sync
+  Summary: Sync products from Google Sheet
+  Description: Manually trigger a sync of products from the connected Google Sheet to update the product count
+  Parameters:
+    path:id [integer] (required) - Store ID
+  Responses:
+    200: Sync completed
+      success: boolean
+      message: string
+      productCount: integer - Number of products synced
+      headers: array - Column headers from the spreadsheet
+    400: No Google Sheet connected
+    401: Not authenticated
+    404: Store not found
+
+--------------------------------------------------
+Commerce Public
+--------------------------------------------------
+
+GET /api/v1/stores/{idOrSlug}/public
+  Summary: Get public store info
+  Description: Get public-facing store configuration by ID or slug. No authentication required — designed for customer-facing storefronts and external integrations.
+  Parameters:
+    path:idOrSlug [string] (required) - Store ID (numeric) or URL slug
+  Responses:
+    200: Public store configuration
+      id: integer
+      slug: string
+      name: string
+      description: string
+      currency: string
+      primaryColor: string
+      defaultViewMode: string
+      paymentProvider: string
+      logoUrl: string
+      language: string
+    404: Store not found
+
+GET /api/v1/stores/{idOrSlug}/products/public
+  Summary: Get public product catalog
+  Description: Get the public product catalog for a store. No authentication required — designed for customer-facing storefronts and external integrations like Claude landing pages.
+  Parameters:
+    path:idOrSlug [string] (required) - Store ID (numeric) or URL slug
+    query:category [string] (optional) - Filter products by category
+    query:maxItems [integer] (optional) - Maximum number of products to return
+  Responses:
+    200: Public product catalog
+      products: array
+      totalRows: integer
+    404: Store not found
+
+--------------------------------------------------
+Commerce Checkout
+--------------------------------------------------
+
+POST /api/commerce/checkout/create-payment-intent
+  Summary: Create checkout payment intent
+  Description: Validate cart items against the server-side catalog and create a Stripe Payment Intent. No authentication required — this is a customer-facing checkout endpoint. The store owner's Stripe keys are used for payment processing. Note — this endpoint uses /api/commerce/ prefix, not /api/v1/.
+  Request Body (JSON):
+    storeId: integer (required) - Store ID
+    items: array (required) - Cart items to checkout
+  Responses:
+    200: Payment intent created
+      clientSecret: string - Stripe client secret for confirming payment on the frontend
+      paymentIntentId: string - Stripe Payment Intent ID
+      validatedTotal: number - Server-validated cart total (including tax if applicable)
+      currency: string
+      stripePublishableKey: string - Store owner's Stripe publishable key for frontend use
+      subtotal: number
+      taxAmount: number
+      taxRate: number
+    400: Invalid cart items or store not configured for payments
+    404: Store not found
+
+POST /api/commerce/checkout/confirm
+  Summary: Confirm checkout payment
+  Description: Confirm a completed payment, create/update the customer contact, and record the order. Call this after the Stripe payment succeeds on the frontend. Note — this endpoint uses /api/commerce/ prefix, not /api/v1/.
+  Request Body (JSON):
+    paymentIntentId: string (required) - Stripe Payment Intent ID from the create step
+    storeId: integer (required) - Store ID
+    items: array (optional) - Cart items that were purchased
+    customerName: string (required) - Customer's full name
+    customerEmail: string (required) - Customer's email address
+  Responses:
+    200: Payment confirmed and order recorded
+      success: boolean
+      paymentId: integer - Internal payment record ID
+      contactId: integer - Customer contact ID
+      message: string
+    400: Payment not completed or invalid request
+    404: Store not found
+
+--------------------------------------------------
+Commerce Purchases
+--------------------------------------------------
+
+GET /api/commerce/stores/{id}/purchases
+  Summary: List store purchases
+  Description: Retrieve all purchase records for a specific commerce store. Only the store owner can access this endpoint. Supports optional filtering by payment status. Note — this endpoint uses /api/commerce/ prefix, not /api/v1/.
+  Parameters:
+    path:id [integer] (required) - Commerce store ID
+    query:status [string] (optional) - Filter purchases by payment status
+  Responses:
+    200: List of purchases for the store
+      storeId: integer
+      storeName: string
+      totalPurchases: integer
+      purchases: array
+    401: Authentication required
+    403: Access denied — not the store owner
+    404: Store not found
+
+GET /api/commerce/stores/{id}/purchases/{purchaseId}
+  Summary: Get single purchase
+  Description: Retrieve details of a specific purchase by ID for a given commerce store. Only the store owner can access this endpoint. Note — this endpoint uses /api/commerce/ prefix, not /api/v1/.
+  Parameters:
+    path:id [integer] (required) - Commerce store ID
+    path:purchaseId [integer] (required) - Purchase record ID
+  Responses:
+    200: Purchase details
+      Returns: CommerceStorePayment
+    401: Authentication required
+    403: Access denied — not the store owner
+    404: Store or purchase not found
+
+--------------------------------------------------
+Keywords
+--------------------------------------------------
+
+GET /api/v1/keywords
+  Summary: List all keyword rules
+  Description: Get all keyword trigger rules for the authenticated user
+  Parameters:
+    query:widgetId [integer] (optional) - Filter by widget ID
+  Responses:
+    200: List of keyword rules
+      keywords: array
+    401: Not authenticated
+
+POST /api/v1/keywords
+  Summary: Create a keyword rule
+  Description: Create a new keyword trigger rule that responds with text or triggers a flow
+  Request Body (JSON):
+    keywords: array (required) - Trigger keywords
+    responseType: string [text, flow] (required)
+    responseText: string (optional) - Text response (required if responseType is text)
+    flowId: integer (optional) - Flow to trigger (required if responseType is flow)
+    widgetId: integer (optional) - Scope to a specific widget
+  Responses:
+    201: Keyword rule created
+      Returns: Keyword
+    400: Invalid request
+    401: Not authenticated
+
+GET /api/v1/keywords/{id}
+  Summary: Get keyword rule details
+  Description: Get details of a specific keyword rule
+  Parameters:
+    path:id [integer] (required)
+  Responses:
+    200: Keyword rule details
+      Returns: Keyword
+    401: Not authenticated
+    404: Not found
+
+PATCH /api/v1/keywords/{id}
+  Summary: Update a keyword rule
+  Description: Update keyword triggers, response, or active status
+  Parameters:
+    path:id [integer] (required)
+  Request Body (JSON):
+    keywords: array (optional)
+    responseType: string [text, flow] (optional)
+    responseText: string (optional)
+    flowId: integer (optional)
+    widgetId: integer (optional)
+    isActive: boolean (optional)
+  Responses:
+    200: Keyword rule updated
+    401: Not authenticated
+    404: Not found
+
+DELETE /api/v1/keywords/{id}
+  Summary: Delete a keyword rule
+  Description: Permanently delete a keyword trigger rule
+  Parameters:
+    path:id [integer] (required)
+  Responses:
+    200: Keyword rule deleted
+    401: Not authenticated
+    404: Not found
+
+--------------------------------------------------
+Automations
+--------------------------------------------------
+
+GET /api/v1/automations
+  Summary: List all automations
+  Description: Get all automation rules for the authenticated user
+  Responses:
+    200: List of automations
+      automations: array
+    401: Not authenticated
+
+GET /api/v1/automations/{id}
+  Summary: Get automation details
+  Description: Get detailed information about a specific automation including trigger and action configuration
+  Parameters:
+    path:id [integer] (required)
+  Responses:
+    200: Automation details
+      Returns: Automation
+    401: Not authenticated
+    404: Not found
+
+POST /api/v1/automations/{id}/toggle
+  Summary: Toggle automation enabled/disabled
+  Description: Enable or disable an automation
+  Parameters:
+    path:id [integer] (required)
+  Request Body (JSON):
+    enabled: boolean (optional) - Set enabled status (omit to toggle)
+  Responses:
+    200: Automation toggled
+    401: Not authenticated
+    404: Not found
+
+--------------------------------------------------
+Widget Management
+--------------------------------------------------
+
+GET /api/manage/widgets
+  Summary: List all widgets
+  Description: Returns all widgets owned by the authenticated user with key configuration fields.
+  Responses:
+    200: List of widgets
+      widgets: array
+      total: integer
+    401: Not authenticated
+
+GET /api/manage/widgets/{id}
+  Summary: Get widget details
+  Description: Returns the full configuration for a specific widget.
+  Parameters:
+    path:id [integer] (required) - Widget ID
+  Responses:
+    200: Full widget configuration
+    401: Not authenticated
+    404: Widget not found
+
+PUT /api/manage/widgets/{id}
+  Summary: Update widget settings
+  Description: Update any combination of widget settings including name, prompt, AI model, voice, channels, and feature toggles. Only include fields you want to change.
+  Parameters:
+    path:id [integer] (required) - Widget ID
+  Request Body (JSON):
+    name: string (optional) - Widget name
+    welcomeMessage: string (optional) - Greeting shown when chat opens
+    systemPrompt: string (optional) - AI behavior instructions
+    primaryColor: string (optional) - Hex color (e.g. #4f46e5)
+    llmProvider: string [openai, anthropic, google, xai, deepseek, groq] (optional)
+    openAIModelId: string (optional)
+    anthropicModelId: string (optional)
+    googleModelId: string (optional)
+    useVoice: boolean (optional)
+    isPaused: boolean (optional) - Pause AI responses (human takeover mode)
+    functionCallingEnabled: boolean (optional)
+    enableWebSearch: boolean (optional)
+    enableUploads: boolean (optional)
+    webchatAiRepliesEnabled: boolean (optional)
+    telegramAiRepliesEnabled: boolean (optional)
+    discordAiRepliesEnabled: boolean (optional)
+    phoneAiRepliesEnabled: boolean (optional)
+    tiktokAiRepliesEnabled: boolean (optional)
+    maxAgentSteps: integer (optional)
+  Responses:
+    200: Updated widget
+    400: Invalid input
+    401: Not authenticated
+    404: Widget not found
+
+DELETE /api/manage/widgets/{id}
+  Summary: Delete a widget
+  Description: Permanently deletes a widget and all associated data.
+  Parameters:
+    path:id [integer] (required) - Widget ID
+  Responses:
+    200: Widget deleted
+      success: boolean
+      message: string
+      id: integer
+      name: string
+    401: Not authenticated
+    404: Widget not found
+
+POST /api/manage/widgets/{id}/pause
+  Summary: Pause widget AI
+  Description: Pauses automated AI responses on the widget (human agent takeover mode). No request body needed.
+  Parameters:
+    path:id [integer] (required) - Widget ID
+  Responses:
+    200: Widget paused
+      success: boolean
+      id: integer
+      isPaused: boolean
+    401: Not authenticated
+    404: Widget not found
+
+POST /api/manage/widgets/{id}/unpause
+  Summary: Unpause widget AI
+  Description: Resumes automated AI responses on the widget. No request body needed.
+  Parameters:
+    path:id [integer] (required) - Widget ID
+  Responses:
+    200: Widget unpaused
+      success: boolean
+      id: integer
+      isPaused: boolean
+    401: Not authenticated
+    404: Widget not found
+
+POST /api/manage/widgets/{id}/enable-ai
+  Summary: Enable or disable AI replies per channel
+  Description: Toggle AI auto-replies on a specific channel or all channels at once. Channels: webchat, telegram, discord, phone, tiktok, or all.
+  Parameters:
+    path:id [integer] (required) - Widget ID
+  Request Body (JSON):
+    channel: string [webchat, telegram, discord, phone, tiktok, all] (required) - Which channel to toggle AI replies on
+    enabled: boolean (required) - true to enable, false to disable
+  Responses:
+    200: AI replies toggled
+      success: boolean
+      id: integer
+      channel: string
+      enabled: boolean
+    400: Invalid input
+    401: Not authenticated
+    404: Widget not found
+
+GET /api/manage/widgets/{id}/functions
+  Summary: Get widget function assignments
+  Description: Returns the functions assigned to this widget and available functions that can be assigned.
+  Parameters:
+    path:id [integer] (required) - Widget ID
+  Responses:
+    200: Widget function assignments
+      functionCallingEnabled: boolean
+      assignedFunctionIds: array
+      assigned: array
+      available: array
+    401: Not authenticated
+    404: Widget not found
+
+PUT /api/manage/widgets/{id}/functions
+  Summary: Assign functions to a widget
+  Description: Set which functions are assigned to a widget. Pass the complete list of function IDs. Optionally enable/disable function calling.
+  Parameters:
+    path:id [integer] (required) - Widget ID
+  Request Body (JSON):
+    functionIds: array (required) - Array of function IDs to assign (replaces existing assignments)
+    functionCallingEnabled: boolean (optional) - Optionally enable/disable function calling on this widget
+  Responses:
+    200: Functions assigned
+      success: boolean
+      id: integer
+      assignedFunctionIds: array
+      functionCallingEnabled: boolean
+    400: Invalid input or function IDs not found
+    401: Not authenticated
+    404: Widget not found
+
+GET /api/manage/functions
+  Summary: List all functions
+  Description: Returns all data extraction functions owned by the authenticated user.
+  Responses:
+    200: List of functions
+      functions: array
+      total: integer
+    401: Not authenticated
+
+GET /api/manage/functions/{id}
+  Summary: Get function details
+  Description: Returns the full configuration for a specific function.
+  Parameters:
+    path:id [integer] (required) - Function ID
+  Responses:
+    200: Full function configuration
+    401: Not authenticated
+    404: Function not found
+
+PUT /api/manage/functions/{id}
+  Summary: Update a function
+  Description: Update function settings including name, description, schema, active status, widget assignment, and output message. Only include fields you want to change.
+  Parameters:
+    path:id [integer] (required) - Function ID
+  Request Body (JSON):
+    name: string (optional) - Function name
+    description: string (optional)
+    isActive: boolean (optional) - Enable or disable the function
+    widgetId: integer (optional) - Assign to a specific widget (null for all widgets)
+    schema: object (optional) - Field schema with properties and required arrays
+    outputMessage: string (optional) - Success message (supports {{field}} variables)
+    saveToContact: boolean (optional)
+  Responses:
+    200: Updated function
+    400: Invalid input
+    401: Not authenticated
+    404: Function not found
+
+DELETE /api/manage/functions/{id}
+  Summary: Delete a function
+  Description: Permanently deletes a function and removes it from any widget assignments.
+  Parameters:
+    path:id [integer] (required) - Function ID
+  Responses:
+    200: Function deleted
+      success: boolean
+      message: string
+      id: integer
+      name: string
+    401: Not authenticated
+    404: Function not found
+
+POST /api/manage/functions/{id}/toggle
+  Summary: Toggle function active state
+  Description: Flips the function between active and inactive. No request body needed.
+  Parameters:
+    path:id [integer] (required) - Function ID
+  Responses:
+    200: Function toggled
+      success: boolean
+      id: integer
+      name: string
+      isActive: boolean
+    401: Not authenticated
+    404: Function not found
+
+POST /api/manage/functions/{id}/enable
+  Summary: Enable a function
+  Description: Sets the function to active. No request body needed.
+  Parameters:
+    path:id [integer] (required) - Function ID
+  Responses:
+    200: Function enabled
+      success: boolean
+      id: integer
+      name: string
+      isActive: boolean
+    401: Not authenticated
+    404: Function not found
+
+POST /api/manage/functions/{id}/disable
+  Summary: Disable a function
+  Description: Sets the function to inactive. No request body needed.
+  Parameters:
+    path:id [integer] (required) - Function ID
+  Responses:
+    200: Function disabled
+      success: boolean
+      id: integer
+      name: string
+      isActive: boolean
+    401: Not authenticated
+    404: Function not found
+
+--------------------------------------------------
+Wallet
+--------------------------------------------------
+
+GET /api/wallet/program-types
+  Summary: List supported wallet pass types
+  Description: Returns all available wallet pass program types (membership, punch_card, points, coupon, event_ticket, prepaid_balance, business_card)
+  Responses:
+    200: List of program types
+      types: array
+    401: Not authenticated
+
+GET /api/wallet/programs
+  Summary: List wallet programs
+  Description: Returns all wallet pass programs owned by the authenticated user
+  Responses:
+    200: List of programs
+      programs: array
+    401: Not authenticated
+
+POST /api/wallet/programs
+  Summary: Create a wallet program
+  Description: Create a new wallet pass program (membership, punch card, points, coupon, event ticket, prepaid balance, or business card)
+  Request Body (JSON):
+    name: string (required) - Program display name
+    type: string [membership, punch_card, points, coupon, event_ticket, prepaid_balance, business_card] (required)
+    description: string (optional) - Program description
+    config: object (optional) - Type-specific configuration (e.g. maxPunches for punch_card)
+    widgetId: integer (optional) - Link to an AI agent for CRM contact attribution
+  Responses:
+    201: Program created
+    400: Validation error
+    401: Not authenticated
+
+GET /api/wallet/programs/{id}
+  Summary: Get a wallet program
+  Description: Returns details of a specific wallet pass program
+  Parameters:
+    path:id [integer] (required) - Program ID
+  Responses:
+    200: Program details
+      program: any
+    401: Not authenticated
+    404: Program not found
+
+PATCH /api/wallet/programs/{id}
+  Summary: Update a wallet program
+  Description: Update program configuration, branding, or settings
+  Parameters:
+    path:id [integer] (required)
+  Request Body (JSON):
+    name: string (optional)
+    description: string (optional)
+    config: object (optional)
+    brandOverrides: object (optional)
+    widgetId: integer (optional)
+  Responses:
+    200: Program updated
+    401: Not authenticated
+    404: Program not found
+
+POST /api/wallet/programs/bulk-delete
+  Summary: Bulk delete wallet programs
+  Description: Permanently deletes multiple wallet programs (and all their issued cards) in one call. Only programs owned by the authenticated user are deleted; unknown or unauthorized IDs are silently skipped.
+  Request Body (JSON):
+    ids: array (required) - Wallet program IDs to delete
+  Responses:
+    200: Bulk delete result
+      success: boolean
+      deletedCount: integer
+      errors: array
+    400: No program IDs provided
+    401: Not authenticated
+
+GET /api/wallet/programs/{id}/cards
+  Summary: List cards in a program
+  Description: Returns all issued wallet pass cards for a specific program
+  Parameters:
+    path:id [integer] (required) - Program ID
+  Responses:
+    200: List of cards
+      cards: array
+    401: Not authenticated
+    404: Program not found
+
+POST /api/wallet/programs/{id}/cards
+  Summary: Issue a wallet pass card
+  Description: Issue a new wallet pass card to a customer. Handles deduplication — if a card already exists for the same email/phone, returns the existing card instead of creating a duplicate.
+  Parameters:
+    path:id [integer] (required) - Program ID
+  Request Body (JSON):
+    customerName: string (required)
+    customerEmail: string (optional)
+    customerPhone: string (optional)
+    contactId: integer (optional) - Existing CRM contact ID to link
+  Responses:
+    200: Existing card returned (duplicate)
+    201: Card issued
+      card: any
+      googleSaveUrl: string
+      duplicate: boolean
+    401: Not authenticated
+    404: Program not found
+    409: Event sold out (event_ticket only)
+
+DELETE /api/wallet/cards/{serial}
+  Summary: Revoke a wallet pass card
+  Description: Deactivate and delete a wallet pass card. Also removes it from Google Wallet if applicable.
+  Parameters:
+    path:serial [string] (required) - Card serial number
+  Responses:
+    204: Card revoked
+    401: Not authenticated
+    404: Card not found
+
+POST /api/wallet/cards/{serial}/action
+  Summary: Perform an action on a card
+  Description: Execute a type-specific action on a wallet pass card. Actions include:
+- **Punch card**: add_punch, remove_punch, redeem, set_punches
+- **Points**: add_points, remove_points, set_balance
+- **Coupon**: redeem
+- **Event ticket**: check_in, un_check_in
+- **Prepaid balance**: deduct_balance, load_balance, refund_balance
+- **Membership**: set_tier
+
+  Parameters:
+    path:serial [string] (required) - Card serial number
+  Request Body (JSON):
+    action: string [add_punch, remove_punch, redeem, set_punches, set_tier, add_points, remove_points, set_balance, check_in, un_check_in, deduct_balance, load_balance, refund_balance] (required)
+    payload: object (optional) - Action-specific data (e.g. points: 10 for add_points)
+    customMessage: string (optional) - Override the default push notification text
+    silent: boolean (optional) - Skip push notification
+  Responses:
+    200: Action executed
+      card: any
+      pushed: integer
+      message: string
+    401: Not authenticated
+    404: Card not found
+
+POST /api/wallet/cards/{serial}/push
+  Summary: Send push notification to a card
+  Description: Send a custom push notification to a specific card holder's lock screen (Apple + Google Wallet)
+  Parameters:
+    path:serial [string] (required) - Card serial number
+  Request Body (JSON):
+    message: string (required) - Notification text. Supports template variables like {{customerName}}, {{programName}}, and type-specific vars.
+  Responses:
+    200: Notification sent
+      pushed: integer - Total devices notified
+      applePushed: integer
+      googlePushed: integer
+      message: string
+    401: Not authenticated
+    404: Card not found
+
+POST /api/wallet/programs/{id}/push
+  Summary: Broadcast push to all card holders
+  Description: Send a push notification to every active card holder in a program. Uses Google Wallet class-level messaging for Android and per-card APNs for Apple.
+  Parameters:
+    path:id [integer] (required) - Program ID
+  Request Body (JSON):
+    message: string (required) - Broadcast notification text. Supports template variables.
+  Responses:
+    200: Broadcast sent
+      pushed: integer
+      applePushed: integer
+      googleBroadcasted: boolean
+      cards: integer - Total active cards in program
+    401: Not authenticated
+    404: Program not found
+
+============================================================
+END OF API REFERENCE
+============================================================

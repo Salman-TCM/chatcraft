@@ -27,6 +27,9 @@ import {
   Radio,
   Share2,
   MessageCircle,
+  Mic,
+  Globe,
+  Server,
 } from "lucide-react";
 import { useState } from "react";
 import { signOut } from "next-auth/react";
@@ -49,6 +52,9 @@ const NAV = [
   { href: "/dashboard/broadcast",          label: "Broadcasts",        icon: Radio },
   { href: "/dashboard/social",             label: "Social",            icon: Share2 },
   { href: "/dashboard/comment-automation", label: "Comment Bots",      icon: MessageCircle },
+  { href: "/dashboard/voice-lab",     label: "Voice Lab",     icon: Mic },
+  { href: "/dashboard/browser-agent", label: "Browser Agent", icon: Globe },
+  { href: "/dashboard/settings/mcp",  label: "MCP Servers",   icon: Server },
   { href: "/dashboard/pipelines",     label: "Pipelines",     icon: Kanban },
   { href: "/dashboard/tags",         label: "Tags",          icon: Tag },
   { href: "/dashboard/usage",        label: "Usage",         icon: Zap },

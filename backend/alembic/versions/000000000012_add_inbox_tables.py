@@ -19,17 +19,26 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
+    # Create enum types explicitly first (asyncpg does not auto-create them)
+    op.execute(
+        "CREATE TYPE conversation_channel AS ENUM "
+        "('web','facebook','instagram','whatsapp','telegram','discord','sms','phone','twitter','tiktok','email')"
+    )
+    op.execute(
+        "CREATE TYPE conversation_status AS ENUM "
+        "('active','closed','human_takeover')"
+    )
+
     # ── Extend conversations ───────────────────────────────────────────────────
     op.add_column("conversations", sa.Column(
         "channel",
-        sa.Enum("web", "facebook", "instagram", "whatsapp", "telegram", "discord",
-                "sms", "phone", "twitter", "tiktok", "email", name="conversation_channel"),
+        sa.Enum(name="conversation_channel", create_type=False),
         nullable=False,
         server_default="web",
     ))
     op.add_column("conversations", sa.Column(
         "status",
-        sa.Enum("active", "closed", "human_takeover", name="conversation_status"),
+        sa.Enum(name="conversation_status", create_type=False),
         nullable=False,
         server_default="active",
     ))
