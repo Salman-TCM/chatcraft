@@ -159,6 +159,8 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+    healthcheck:
+      disable: true
 
   # ---------------------------------------------------------------------------
   # Next.js frontend — hot reload in dev
