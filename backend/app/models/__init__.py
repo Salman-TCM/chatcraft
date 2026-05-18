@@ -30,6 +30,7 @@ from app.models.automation import (  # noqa: F401
 from app.models.form import Form, FormSubmission, LandingPage  # noqa: F401
 from app.models.commerce import CommerceStore, CommerceProduct, CommercePayment  # noqa: F401
 from app.models.wallet import WalletProgram, WalletCard, WalletPushSubscription  # noqa: F401
+from app.models.broadcast import BroadcastCampaign, SocialAccount, SocialPost, CommentAutomation  # noqa: F401
 from app.models.crm import (  # noqa: F401
     Contact,
     Tag,

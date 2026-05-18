@@ -1,0 +1,236 @@
+"""
+Broadcast delivery engine.
+
+Resolves recipients from target_filter, renders message_template with
+personalization variables, and delivers via the appropriate channel.
+"""
+import re
+from datetime import datetime, timezone
+from typing import Any
+
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+
+def _render(template: str, ctx: dict) -> str:
+    """Replace {{key}} placeholders with context values."""
+    def _replace(m: re.Match) -> str:
+        return str(ctx.get(m.group(1).strip(), ""))
+    return re.sub(r"\{\{(.+?)\}\}", _replace, template)
+
+
+async def _resolve_recipients(campaign: Any, db: AsyncSession) -> list[dict]:
+    """Return list of {email, phone, name, telegram_id, ...} dicts."""
+    from app.models.crm import Contact, ContactTag, Tag
+    from sqlalchemy import or_
+
+    filt = campaign.target_filter or {}
+    segment = filt.get("segment", "all")
+
+    if segment == "all":
+        q = select(Contact).where(Contact.user_id == campaign.user_id)
+    elif segment == "contacts":
+        q = select(Contact).where(Contact.user_id == campaign.user_id)
+    else:
+        q = select(Contact).where(Contact.user_id == campaign.user_id)
+
+    # Tag filter
+    tag_names: list[str] = filt.get("tags", [])
+    if tag_names:
+        tag_ids_result = await db.execute(
+            select(Tag.id).where(Tag.user_id == campaign.user_id, Tag.name.in_(tag_names))
+        )
+        tag_ids = [r[0] for r in tag_ids_result.all()]
+        if tag_ids:
+            contact_ids_result = await db.execute(
+                select(ContactTag.contact_id).where(ContactTag.tag_id.in_(tag_ids)).distinct()
+            )
+            cids = [r[0] for r in contact_ids_result.all()]
+            q = q.where(Contact.id.in_(cids))
+
+    contacts = (await db.execute(q)).scalars().all()
+    return [
+        {
+            "name": f"{c.first_name or ''} {c.last_name or ''}".strip() or "Friend",
+            "first_name": c.first_name or "",
+            "last_name": c.last_name or "",
+            "email": c.email,
+            "phone": c.phone,
+        }
+        for c in contacts
+    ]
+
+
+async def _send_email(campaign: Any, recipients: list[dict]) -> tuple[int, int]:
+    """AWS SES bulk send."""
+    try:
+        import boto3
+        from app.core.config import settings
+
+        ses = boto3.client(
+            "ses",
+            region_name=settings.AWS_REGION,
+            aws_access_key_id=settings.AWS_ACCESS_KEY_ID,
+            aws_secret_access_key=settings.AWS_SECRET_ACCESS_KEY,
+        )
+        sent = failed = 0
+        for r in recipients:
+            if not r.get("email"):
+                continue
+            body = _render(campaign.message_template, r)
+            html = _render(campaign.html_content or body, r)
+            subj = _render(campaign.subject or campaign.name, r)
+            try:
+                ses.send_email(
+                    Source=settings.EMAIL_FROM,
+                    Destination={"ToAddresses": [r["email"]]},
+                    Message={
+                        "Subject": {"Data": subj},
+                        "Body": {
+                            "Text": {"Data": body},
+                            "Html": {"Data": f"<html><body>{html}</body></html>"},
+                        },
+                    },
+                )
+                sent += 1
+            except Exception:
+                failed += 1
+        return sent, failed
+    except Exception:
+        return 0, len(recipients)
+
+
+async def _send_sms(campaign: Any, recipients: list[dict]) -> tuple[int, int]:
+    """Twilio bulk SMS."""
+    try:
+        from twilio.rest import Client
+        from app.core.config import settings
+
+        client = Client(settings.TWILIO_ACCOUNT_SID, settings.TWILIO_AUTH_TOKEN)
+        sent = failed = 0
+        for r in recipients:
+            if not r.get("phone"):
+                continue
+            body = _render(campaign.message_template, r)
+            try:
+                client.messages.create(
+                    body=body,
+                    from_=settings.TWILIO_PHONE_NUMBER,
+                    to=r["phone"],
+                )
+                sent += 1
+            except Exception:
+                failed += 1
+        return sent, failed
+    except Exception:
+        return 0, len(recipients)
+
+
+async def _send_telegram(campaign: Any, db: AsyncSession) -> tuple[int, int]:
+    """Send to all Telegram subscribers (active conversations on Telegram channel)."""
+    try:
+        import httpx
+        from app.models.conversation import Conversation
+        from app.models.channel_integration import ChannelIntegration
+        from app.models.inbox import ConversationChannel, ConversationStatus
+        from sqlalchemy import and_
+
+        # Find all active telegram conversations for this user
+        convs_result = await db.execute(
+            select(Conversation).where(
+                Conversation.user_id == campaign.user_id,
+                Conversation.channel == ConversationChannel.telegram,
+                Conversation.status != ConversationStatus.closed,
+            )
+        )
+        convs = convs_result.scalars().all()
+
+        # Get bot token from any telegram integration
+        integ_result = await db.execute(
+            select(ChannelIntegration).where(
+                ChannelIntegration.user_id == campaign.user_id,
+                ChannelIntegration.channel == "telegram",
+            ).limit(1)
+        )
+        integ = integ_result.scalar_one_or_none()
+        if not integ:
+            return 0, 0
+
+        token = integ.config.get("bot_token", "")
+        sent = failed = 0
+
+        async with httpx.AsyncClient(timeout=10) as client:
+            for conv in convs:
+                if not conv.contact_id:
+                    continue
+                body = _render(campaign.message_template, {"name": "Friend", "first_name": ""})
+                try:
+                    resp = await client.post(
+                        f"https://api.telegram.org/bot{token}/sendMessage",
+                        json={"chat_id": str(conv.contact_id), "text": body},
+                    )
+                    if resp.status_code == 200:
+                        sent += 1
+                    else:
+                        failed += 1
+                except Exception:
+                    failed += 1
+
+        return sent, failed
+    except Exception:
+        return 0, 0
+
+
+async def _send_whatsapp(campaign: Any, recipients: list[dict]) -> tuple[int, int]:
+    """Meta WhatsApp template messages."""
+    try:
+        import httpx
+        from app.core.config import settings
+        from app.models.channel_integration import ChannelIntegration
+
+        sent = failed = 0
+        template_name = campaign.target_filter.get("whatsapp_template", "")
+        if not template_name:
+            return 0, len(recipients)
+
+        for r in recipients:
+            if not r.get("phone"):
+                continue
+            try:
+                async with httpx.AsyncClient(timeout=10) as client:
+                    await client.post(
+                        f"https://graph.facebook.com/v19.0/{settings.WHATSAPP_PHONE_NUMBER_ID}/messages",
+                        headers={"Authorization": f"Bearer {settings.WHATSAPP_ACCESS_TOKEN}"},
+                        json={
+                            "messaging_product": "whatsapp",
+                            "to": r["phone"],
+                            "type": "template",
+                            "template": {
+                                "name": template_name,
+                                "language": {"code": "en_US"},
+                            },
+                        },
+                    )
+                sent += 1
+            except Exception:
+                failed += 1
+        return sent, failed
+    except Exception:
+        return 0, len(recipients)
+
+
+async def deliver(campaign: Any, db: AsyncSession) -> tuple[int, int]:
+    """Route delivery to appropriate channel sender. Returns (sent, failed)."""
+    channel = campaign.channel
+    recipients = await _resolve_recipients(campaign, db)
+
+    if channel == "email":
+        return await _send_email(campaign, recipients)
+    elif channel == "sms":
+        return await _send_sms(campaign, recipients)
+    elif channel == "telegram":
+        return await _send_telegram(campaign, db)
+    elif channel == "whatsapp":
+        return await _send_whatsapp(campaign, recipients)
+    else:
+        return 0, 0

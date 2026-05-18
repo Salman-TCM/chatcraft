@@ -24,6 +24,9 @@ import {
   LayoutTemplate,
   ShoppingBag,
   Wallet,
+  Radio,
+  Share2,
+  MessageCircle,
 } from "lucide-react";
 import { useState } from "react";
 import { signOut } from "next-auth/react";
@@ -42,7 +45,10 @@ const NAV = [
   { href: "/dashboard/forms",         label: "Forms",         icon: FileText },
   { href: "/dashboard/landing-pages", label: "Landing Pages", icon: LayoutTemplate },
   { href: "/dashboard/stores",        label: "Stores",        icon: ShoppingBag },
-  { href: "/dashboard/wallet",        label: "Wallet",        icon: Wallet },
+  { href: "/dashboard/wallet",             label: "Wallet",            icon: Wallet },
+  { href: "/dashboard/broadcast",          label: "Broadcasts",        icon: Radio },
+  { href: "/dashboard/social",             label: "Social",            icon: Share2 },
+  { href: "/dashboard/comment-automation", label: "Comment Bots",      icon: MessageCircle },
   { href: "/dashboard/pipelines",     label: "Pipelines",     icon: Kanban },
   { href: "/dashboard/tags",         label: "Tags",          icon: Tag },
   { href: "/dashboard/usage",        label: "Usage",         icon: Zap },

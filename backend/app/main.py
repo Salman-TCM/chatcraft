@@ -30,6 +30,7 @@ from app.api.forms import router as forms_router
 from app.api.landing_pages import router as landing_pages_router
 from app.api.commerce import router as commerce_router
 from app.api.wallet import router as wallet_router
+from app.api.broadcast import router as broadcast_router
 from app.core.security_headers import SecurityHeadersMiddleware
 from app.core.ip_abuse import IPAbuseMiddleware
 from app.core.config import settings
@@ -99,6 +100,7 @@ app.include_router(forms_router)
 app.include_router(landing_pages_router)
 app.include_router(commerce_router)
 app.include_router(wallet_router)
+app.include_router(broadcast_router)
 
 
 @app.get("/", tags=["health"])
