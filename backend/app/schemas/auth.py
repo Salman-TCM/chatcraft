@@ -47,6 +47,7 @@ class TokenData(BaseModel):
     access_token: str
     token_type: str = "bearer"
     user: UserResponse
+    refresh_token: str | None = None
 
 
 class LoginResponse(BaseModel):
