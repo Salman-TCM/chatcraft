@@ -487,7 +487,7 @@ async def _publish_to_platform(account: SocialAccount, content: str, image_url: 
         from app.core.config import settings
         # OAuth 1.0a
         oauth_params = {
-            "oauth_consumer_key": settings.X_API_KEY,
+            "oauth_consumer_key": settings.x_api_key,
             "oauth_nonce": base64.urlsafe_b64encode(os.urandom(16)).decode(),
             "oauth_signature_method": "HMAC-SHA1",
             "oauth_timestamp": str(int(time.time())),
@@ -498,7 +498,7 @@ async def _publish_to_platform(account: SocialAccount, content: str, image_url: 
         base_params = {**oauth_params}
         param_str = "&".join(f"{urllib.parse.quote(k)}={urllib.parse.quote(v)}" for k, v in sorted(base_params.items()))
         base_str = f"POST&{urllib.parse.quote(url)}&{urllib.parse.quote(param_str)}"
-        signing_key = f"{urllib.parse.quote(settings.X_API_SECRET)}&{urllib.parse.quote(account.page_access_token or '')}"
+        signing_key = f"{urllib.parse.quote(settings.x_api_secret)}&{urllib.parse.quote(account.page_access_token or '')}"
         sig = base64.b64encode(hmac.new(signing_key.encode(), base_str.encode(), hashlib.sha1).digest()).decode()
         oauth_params["oauth_signature"] = sig
         auth_header = "OAuth " + ", ".join(f'{k}="{urllib.parse.quote(v)}"' for k, v in sorted(oauth_params.items()))

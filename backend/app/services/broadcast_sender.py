@@ -69,9 +69,9 @@ async def _send_email(campaign: Any, recipients: list[dict]) -> tuple[int, int]:
 
         ses = boto3.client(
             "ses",
-            region_name=settings.AWS_REGION,
-            aws_access_key_id=settings.AWS_ACCESS_KEY_ID,
-            aws_secret_access_key=settings.AWS_SECRET_ACCESS_KEY,
+            region_name=settings.aws_region,
+            aws_access_key_id=settings.aws_access_key_id,
+            aws_secret_access_key=settings.aws_secret_access_key,
         )
         sent = failed = 0
         for r in recipients:
@@ -82,7 +82,7 @@ async def _send_email(campaign: Any, recipients: list[dict]) -> tuple[int, int]:
             subj = _render(campaign.subject or campaign.name, r)
             try:
                 ses.send_email(
-                    Source=settings.EMAIL_FROM,
+                    Source=settings.email_from,
                     Destination={"ToAddresses": [r["email"]]},
                     Message={
                         "Subject": {"Data": subj},
@@ -106,7 +106,7 @@ async def _send_sms(campaign: Any, recipients: list[dict]) -> tuple[int, int]:
         from twilio.rest import Client
         from app.core.config import settings
 
-        client = Client(settings.TWILIO_ACCOUNT_SID, settings.TWILIO_AUTH_TOKEN)
+        client = Client(settings.twilio_account_sid, settings.twilio_auth_token)
         sent = failed = 0
         for r in recipients:
             if not r.get("phone"):
@@ -115,7 +115,7 @@ async def _send_sms(campaign: Any, recipients: list[dict]) -> tuple[int, int]:
             try:
                 client.messages.create(
                     body=body,
-                    from_=settings.TWILIO_PHONE_NUMBER,
+                    from_=settings.twilio_phone_number,
                     to=r["phone"],
                 )
                 sent += 1
@@ -161,13 +161,21 @@ async def _send_telegram(campaign: Any, db: AsyncSession) -> tuple[int, int]:
 
         async with httpx.AsyncClient(timeout=10) as client:
             for conv in convs:
-                if not conv.contact_id:
+                # contact.contact_id holds the Telegram numeric chat_id (string)
+                if not conv.contact or not conv.contact.contact_id:
                     continue
-                body = _render(campaign.message_template, {"name": "Friend", "first_name": ""})
+                ctx = {
+                    "name": f"{conv.contact.first_name or ''} {conv.contact.last_name or ''}".strip() or "Friend",
+                    "first_name": conv.contact.first_name or "",
+                    "last_name": conv.contact.last_name or "",
+                    "email": conv.contact.email or "",
+                    "phone": conv.contact.phone or "",
+                }
+                body = _render(campaign.message_template, ctx)
                 try:
                     resp = await client.post(
                         f"https://api.telegram.org/bot{token}/sendMessage",
-                        json={"chat_id": str(conv.contact_id), "text": body},
+                        json={"chat_id": conv.contact.contact_id, "text": body},
                     )
                     if resp.status_code == 200:
                         sent += 1
@@ -199,8 +207,8 @@ async def _send_whatsapp(campaign: Any, recipients: list[dict]) -> tuple[int, in
             try:
                 async with httpx.AsyncClient(timeout=10) as client:
                     await client.post(
-                        f"https://graph.facebook.com/v19.0/{settings.WHATSAPP_PHONE_NUMBER_ID}/messages",
-                        headers={"Authorization": f"Bearer {settings.WHATSAPP_ACCESS_TOKEN}"},
+                        f"https://graph.facebook.com/v19.0/{settings.whatsapp_phone_number_id}/messages",
+                        headers={"Authorization": f"Bearer {settings.whatsapp_access_token}"},
                         json={
                             "messaging_product": "whatsapp",
                             "to": r["phone"],
