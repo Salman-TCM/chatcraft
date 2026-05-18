@@ -49,7 +49,12 @@ COPY --from=builder /install /usr/local
 # Copy application source
 COPY --chown=appuser:appgroup . .
 
+# Entrypoint: run migrations then exec the given command
+RUN chmod +x /app/start.sh
+
 USER appuser
+
+ENTRYPOINT ["/app/start.sh"]
 
 # Expose API port
 EXPOSE 8000
