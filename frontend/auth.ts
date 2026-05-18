@@ -24,7 +24,6 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
               email: credentials.email,
               password: credentials.password,
             }),
-            credentials: "include",
           });
           if (!res.ok) return null;
           const { data } = await res.json();
@@ -35,6 +34,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
             image: data.user.avatar_url ?? null,
             role: data.user.role,
             accessToken: data.access_token,
+            refreshToken: data.refresh_token ?? "",
             trialEndsAt: data.user.trial_ends_at ?? null,
           };
         } catch {
@@ -64,10 +64,11 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
           });
           if (!res.ok) return false;
           const { data } = await res.json();
-          // Attach backend token so jwt callback can store it
+          // Attach backend tokens so jwt callback can store them
           user.id = data.user.id;
           user.role = data.user.role;
           user.accessToken = data.access_token;
+          user.refreshToken = data.refresh_token ?? "";
           user.trialEndsAt = data.user.trial_ends_at ?? null;
         } catch {
           return false;
@@ -81,20 +82,30 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         token.id = user.id;
         token.role = user.role;
         token.accessToken = user.accessToken;
+        token.refreshToken = user.refreshToken;
         token.accessTokenExpiry = Date.now() + ACCESS_TOKEN_LIFETIME_MS;
         token.trialEndsAt = user.trialEndsAt ?? null;
       }
       // Proactively refresh the backend access token when it nears expiry
       if (Date.now() < token.accessTokenExpiry) return token;
 
+      // No refresh token stored — can't refresh
+      if (!token.refreshToken) {
+        token.error = "RefreshTokenError";
+        return token;
+      }
+
       try {
+        // Send the refresh token as a header — server-side Node.js fetch cannot
+        // access the browser's httpOnly cookies, so we pass it explicitly.
         const res = await fetch(`${API_URL}/api/auth/refresh`, {
           method: "POST",
-          credentials: "include",
+          headers: { "X-Refresh-Token": token.refreshToken },
         });
         if (!res.ok) throw new Error("refresh failed");
         const { data } = await res.json();
         token.accessToken = data.access_token;
+        token.refreshToken = data.refresh_token ?? token.refreshToken;
         token.accessTokenExpiry = Date.now() + ACCESS_TOKEN_LIFETIME_MS;
         delete token.error;
       } catch {
