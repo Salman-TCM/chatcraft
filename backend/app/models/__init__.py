@@ -24,6 +24,9 @@ from app.models.inbox import (  # noqa: F401
 )
 from app.models.channel_integration import ChannelIntegration  # noqa: F401
 from app.models.flow import Flow, FlowRun  # noqa: F401
+from app.models.automation import (  # noqa: F401
+    Automation, Sequence, SequenceEnrollment, Keyword,
+)
 from app.models.crm import (  # noqa: F401
     Contact,
     Tag,

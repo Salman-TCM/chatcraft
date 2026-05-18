@@ -76,6 +76,49 @@ async def process_incoming(
         if conv.status == "human_takeover":
             return
 
+        # ── keyword matching (before LLM) ────────────────────────────────────
+        from app.services.keyword_matcher import match as match_keyword
+        keyword_rule = await match_keyword(sanitized, bot.user_id, chatbot_id, db)
+        if keyword_rule:
+            if keyword_rule.response_type == "text" and keyword_rule.response_text:
+                reply_text = keyword_rule.response_text
+                asst_msg = Message(
+                    conversation_id=conv.id,
+                    role=MessageRole.assistant,
+                    content=reply_text,
+                )
+                db.add(asst_msg)
+                conv.last_message_at = datetime.now(timezone.utc)
+                await db.commit()
+                # Send outbound
+                from app.models.channel_integration import ChannelIntegration
+                from app.services.channels import get_sender
+                r = await db.execute(
+                    select(ChannelIntegration).where(
+                        ChannelIntegration.chatbot_id == chatbot_id,
+                        ChannelIntegration.channel == channel,
+                        ChannelIntegration.is_active.is_(True),
+                    )
+                )
+                integ = r.scalar_one_or_none()
+                if integ:
+                    try:
+                        await get_sender(channel, integ.config).send(sender_id, reply_text)
+                    except Exception:
+                        pass
+                return
+            elif keyword_rule.response_type == "flow" and keyword_rule.flow_id:
+                from app.models.flow import Flow
+                from app.services.flow.executor import start_run
+                flow = await db.get(Flow, keyword_rule.flow_id)
+                if flow and flow.is_active:
+                    await start_run(
+                        flow, db,
+                        contact_id=contact.id,
+                        conversation_id=conv.id,
+                    )
+                return
+
         # ── build LLM context ─────────────────────────────────────────────────
         history = await _load_history(db, conv.id, limit=20)
         rag = RAGService(db)

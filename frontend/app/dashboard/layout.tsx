@@ -17,6 +17,9 @@ import {
   Kanban,
   Inbox,
   GitFork,
+  Zap as ZapIcon,
+  List,
+  Hash,
 } from "lucide-react";
 import { useState } from "react";
 import { signOut } from "next-auth/react";
@@ -29,6 +32,9 @@ const NAV = [
   { href: "/dashboard/inbox",        label: "Inbox",         icon: Inbox },
   { href: "/dashboard/contacts",     label: "Contacts",      icon: Users },
   { href: "/dashboard/flows",         label: "Flows",         icon: GitFork },
+  { href: "/dashboard/automations",  label: "Automations",   icon: ZapIcon },
+  { href: "/dashboard/sequences",    label: "Sequences",     icon: List },
+  { href: "/dashboard/keywords",     label: "Keywords",      icon: Hash },
   { href: "/dashboard/pipelines",    label: "Pipelines",     icon: Kanban },
   { href: "/dashboard/tags",         label: "Tags",          icon: Tag },
   { href: "/dashboard/usage",        label: "Usage",         icon: Zap },
