@@ -440,7 +440,7 @@ async def create_payment_intent(body: dict, db: DBSession) -> dict:
     try:
         import stripe
         from app.core.config import settings
-        stripe.api_key = settings.STRIPE_SECRET_KEY
+        stripe.api_key = settings.stripe_secret_key
         intent = stripe.PaymentIntent.create(
             amount=total_cents,
             currency=store.currency.lower(),
@@ -491,7 +491,7 @@ async def confirm_payment(body: dict, db: DBSession) -> dict:
     try:
         import stripe
         from app.core.config import settings
-        stripe.api_key = settings.STRIPE_SECRET_KEY
+        stripe.api_key = settings.stripe_secret_key
         intent = stripe.PaymentIntent.retrieve(payment_intent_id)
         payment.status = intent.status  # succeeded / requires_payment_method / etc.
     except Exception as exc:

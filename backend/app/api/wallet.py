@@ -407,10 +407,10 @@ async def _send_apns(push_token: str, message: str) -> None:
 
         headers_jwt = {
             "alg": "ES256",
-            "kid": settings.APPLE_PUSH_KEY_ID,
+            "kid": settings.apple_push_key_id,
         }
-        claims = {"iss": settings.APPLE_TEAM_IDENTIFIER, "iat": int(time.time())}
-        token = pyjwt.encode(claims, settings.APPLE_PUSH_KEY_PEM, algorithm="ES256", headers=headers_jwt)
+        claims = {"iss": settings.apple_team_identifier, "iat": int(time.time())}
+        token = pyjwt.encode(claims, settings.apple_push_key_pem, algorithm="ES256", headers=headers_jwt)
 
         payload = json.dumps({"aps": {"alert": message, "sound": "default"}}).encode()
         host = "api.push.apple.com"
@@ -420,7 +420,7 @@ async def _send_apns(push_token: str, message: str) -> None:
                 content=payload,
                 headers={
                     "authorization": f"bearer {token}",
-                    "apns-topic": settings.APPLE_PASS_TYPE_IDENTIFIER,
+                    "apns-topic": settings.apple_pass_type_identifier,
                     "apns-push-type": "alert",
                     "content-type": "application/json",
                 },
@@ -504,7 +504,7 @@ async def download_pkpass(serial: str, db: DBSession) -> Response:
     from app.services.wallet.pkpass import build_pkpass
     from app.core.config import settings
 
-    pass_url = f"{settings.API_BASE_URL}/api/wallet"
+    pass_url = f"{settings.api_base_url}/api/wallet"
     try:
         data = build_pkpass(program, card, pass_url)
     except RuntimeError as e:

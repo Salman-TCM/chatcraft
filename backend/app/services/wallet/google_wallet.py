@@ -14,7 +14,7 @@ from app.core.config import settings
 def _credentials():
     try:
         from google.oauth2 import service_account
-        sa_info = json.loads(settings.GOOGLE_WALLET_SERVICE_ACCOUNT)
+        sa_info = json.loads(settings.google_wallet_service_account)
         return service_account.Credentials.from_service_account_info(
             sa_info,
             scopes=["https://www.googleapis.com/auth/wallet_object.issuer"],
@@ -29,11 +29,11 @@ def _client():
 
 
 def _class_id(program_id: str) -> str:
-    return f"{settings.GOOGLE_WALLET_ISSUER_ID}.{program_id}"
+    return f"{settings.google_wallet_issuer_id}.{program_id}"
 
 
 def _object_id(program_id: str, serial: str) -> str:
-    return f"{settings.GOOGLE_WALLET_ISSUER_ID}.{serial}"
+    return f"{settings.google_wallet_issuer_id}.{serial}"
 
 
 def _pass_type(program_type: str) -> str:
@@ -181,7 +181,7 @@ def add_pass_save_link(object_id: str) -> str:
         import json
         from datetime import datetime, timezone
 
-        sa_info = json.loads(settings.GOOGLE_WALLET_SERVICE_ACCOUNT)
+        sa_info = json.loads(settings.google_wallet_service_account)
         claims = {
             "iss": sa_info["client_email"],
             "aud": "google",

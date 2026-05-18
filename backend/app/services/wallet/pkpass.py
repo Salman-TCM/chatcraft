@@ -31,9 +31,9 @@ def _sign_manifest(manifest_json: bytes) -> bytes:
         from cryptography import x509
         import cryptography.hazmat.primitives.serialization.pkcs7 as pkcs7_mod
 
-        cert = load_pem_x509_certificate(settings.APPLE_PASS_CERT_PEM.encode(), default_backend())
-        key = serialization.load_pem_private_key(settings.APPLE_PASS_KEY_PEM.encode(), password=None, backend=default_backend())
-        wwdr = load_pem_x509_certificate(settings.APPLE_WWDR_PEM.encode(), default_backend())
+        cert = load_pem_x509_certificate(settings.apple_pass_cert_pem.encode(), default_backend())
+        key = serialization.load_pem_private_key(settings.apple_pass_key_pem.encode(), password=None, backend=default_backend())
+        wwdr = load_pem_x509_certificate(settings.apple_wwdr_pem.encode(), default_backend())
 
         signed = (
             pkcs7_mod.PKCS7SignatureBuilder()
@@ -122,9 +122,9 @@ def build_pkpass(
 
     pass_json: dict = {
         "formatVersion": 1,
-        "passTypeIdentifier": settings.APPLE_PASS_TYPE_IDENTIFIER,
+        "passTypeIdentifier": settings.apple_pass_type_identifier,
         "serialNumber": card.serial,
-        "teamIdentifier": settings.APPLE_TEAM_IDENTIFIER,
+        "teamIdentifier": settings.apple_team_identifier,
         "organizationName": program.name,
         "description": program.description or program.name,
         "backgroundColor": bg_color,
