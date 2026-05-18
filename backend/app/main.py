@@ -26,6 +26,8 @@ from app.api.webhooks import router as webhooks_router
 from app.api.integrations import router as integrations_router
 from app.api.flows import router as flows_router
 from app.api.automations import router as automations_router
+from app.api.forms import router as forms_router
+from app.api.landing_pages import router as landing_pages_router
 from app.core.security_headers import SecurityHeadersMiddleware
 from app.core.ip_abuse import IPAbuseMiddleware
 from app.core.config import settings
@@ -91,6 +93,8 @@ app.include_router(webhooks_router)
 app.include_router(integrations_router)
 app.include_router(flows_router)
 app.include_router(automations_router)
+app.include_router(forms_router)
+app.include_router(landing_pages_router)
 
 
 @app.get("/", tags=["health"])

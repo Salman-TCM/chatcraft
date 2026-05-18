@@ -20,6 +20,8 @@ import {
   Zap as ZapIcon,
   List,
   Hash,
+  FileText,
+  LayoutTemplate,
 } from "lucide-react";
 import { useState } from "react";
 import { signOut } from "next-auth/react";
@@ -34,8 +36,10 @@ const NAV = [
   { href: "/dashboard/flows",         label: "Flows",         icon: GitFork },
   { href: "/dashboard/automations",  label: "Automations",   icon: ZapIcon },
   { href: "/dashboard/sequences",    label: "Sequences",     icon: List },
-  { href: "/dashboard/keywords",     label: "Keywords",      icon: Hash },
-  { href: "/dashboard/pipelines",    label: "Pipelines",     icon: Kanban },
+  { href: "/dashboard/keywords",      label: "Keywords",      icon: Hash },
+  { href: "/dashboard/forms",         label: "Forms",         icon: FileText },
+  { href: "/dashboard/landing-pages", label: "Landing Pages", icon: LayoutTemplate },
+  { href: "/dashboard/pipelines",     label: "Pipelines",     icon: Kanban },
   { href: "/dashboard/tags",         label: "Tags",          icon: Tag },
   { href: "/dashboard/usage",        label: "Usage",         icon: Zap },
   { href: "/dashboard/settings",     label: "Settings",      icon: Settings },

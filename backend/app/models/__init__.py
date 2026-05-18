@@ -27,6 +27,7 @@ from app.models.flow import Flow, FlowRun  # noqa: F401
 from app.models.automation import (  # noqa: F401
     Automation, Sequence, SequenceEnrollment, Keyword,
 )
+from app.models.form import Form, FormSubmission, LandingPage  # noqa: F401
 from app.models.crm import (  # noqa: F401
     Contact,
     Tag,
