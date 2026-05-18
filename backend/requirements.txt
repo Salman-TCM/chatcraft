@@ -65,6 +65,9 @@ lxml==6.0.2
 # Security
 cryptography==46.0.5
 
+# WebSocket
+websockets==14.2
+
 # Utils
 python-dotenv==1.0.1
 

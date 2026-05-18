@@ -4,13 +4,14 @@ and exposes a uniform complete/stream interface used by the chat API.
 """
 from typing import AsyncIterator
 
+from app.core.config import settings
 from app.core.logging import logger
 from app.services.llm.base import ChatMessage, LLMProvider, LLMResponse, StreamChunk
 from app.services.llm.providers.anthropic import AnthropicProvider
 from app.services.llm.providers.gemini import GeminiProvider
 from app.services.llm.providers.openai import OpenAIProvider
+from app.services.llm.providers.openai_compat import OpenAICompatProvider
 
-# Models whose provider class and constructor kwarg are registered here.
 _ANTHROPIC_MODELS = {
     "claude-opus-4-7",
     "claude-sonnet-4-6",
@@ -19,11 +20,35 @@ _ANTHROPIC_MODELS = {
 _OPENAI_MODELS = {
     "gpt-4o",
     "gpt-4o-mini",
+    "gpt-5",
+    "gpt-5-mini",
 }
 _GEMINI_MODELS = {
     "gemini-1.5-pro",
     "gemini-1.5-flash",
     "gemini-2.0-flash",
+    "gemini-2.5-pro",
+    "gemini-2.5-flash",
+}
+_DEEPSEEK_MODELS = {
+    "deepseek-chat",
+    "deepseek-reasoner",
+}
+_GROQ_MODELS = {
+    "llama-3.3-70b-versatile",
+    "llama-3.1-8b-instant",
+    "mixtral-8x7b-32768",
+}
+_PERPLEXITY_MODELS = {
+    "sonar",
+    "sonar-pro",
+    "sonar-reasoning",
+}
+_XAI_MODELS = {
+    "grok-3",
+    "grok-3-fast",
+    "grok-3-mini",
+    "grok-3-mini-fast",
 }
 
 DEFAULT_MODEL = "claude-sonnet-4-6"
@@ -37,9 +62,44 @@ def get_provider(model: str) -> LLMProvider:
         return OpenAIProvider(model)
     if model in _GEMINI_MODELS:
         return GeminiProvider(model)
-    # Unknown model — fall back to default rather than hard-crash
+    if model in _DEEPSEEK_MODELS:
+        return OpenAICompatProvider(
+            model,
+            base_url="https://api.deepseek.com/v1",
+            api_key=settings.deepseek_api_key,
+        )
+    if model in _GROQ_MODELS:
+        return OpenAICompatProvider(
+            model,
+            base_url="https://api.groq.com/openai/v1",
+            api_key=settings.groq_api_key,
+        )
+    if model in _PERPLEXITY_MODELS:
+        return OpenAICompatProvider(
+            model,
+            base_url="https://api.perplexity.ai",
+            api_key=settings.perplexity_api_key,
+        )
+    if model in _XAI_MODELS:
+        return OpenAICompatProvider(
+            model,
+            base_url="https://api.x.ai/v1",
+            api_key=settings.xai_api_key,
+        )
     logger.warning(f"Unknown model '{model}', falling back to {DEFAULT_MODEL}")
     return AnthropicProvider(DEFAULT_MODEL)
+
+
+def all_models() -> list[str]:
+    return sorted(
+        _ANTHROPIC_MODELS
+        | _OPENAI_MODELS
+        | _GEMINI_MODELS
+        | _DEEPSEEK_MODELS
+        | _GROQ_MODELS
+        | _PERPLEXITY_MODELS
+        | _XAI_MODELS
+    )
 
 
 class LLMRouter:
