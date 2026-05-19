@@ -737,13 +737,13 @@
 
 ### Forms & Landing Pages UI — Frontend
 - [x] Forms list page (`/dashboard/forms`)
-- [ ] Form builder editor (drag-and-drop field builder)
-- [ ] Form embed code generator + direct link
-- [ ] Form submissions table (filterable, exportable to CSV)
+- [x] Form builder editor (drag-and-drop field builder)
+- [x] Form embed code generator + direct link
+- [x] Form submissions table (filterable, exportable to CSV)
 - [x] Landing Pages list page (`/dashboard/landing-pages`)
-- [ ] Landing page editor (Word/Google Docs-style WYSIWYG + Code mode + Preview mode)
-- [ ] AI content generation for landing page sections
-- [ ] SEO settings panel (title, description, OG tags, canonical, robots)
+- [x] Landing page editor (Code mode + Preview mode + AI generation)
+- [x] AI content generation for landing page sections
+- [x] SEO settings panel (title, description, OG tags, canonical, robots)
 - [ ] QR code generator (PNG/SVG download, custom colors)
 - [ ] Social sharing preview
 - [x] Published page (`/p/{slug}`) — public URL with embedded widget option
@@ -898,51 +898,51 @@
 > Goal: Browser Agent, MCP servers, A2A Protocol, Voice Lab, Rich Content
 
 ### Voice Lab (ElevenLabs Voice Cloning)
-- [ ] Voice Lab page (`/dashboard/voice-lab`) — record voice in browser or upload audio
-- [ ] ElevenLabs voice cloning API integration (create voice + conversational agent)
-- [ ] Voice preview playback
-- [ ] Copy generated Agent ID to use in widget voice settings
+- [x] Voice Lab page (`/dashboard/voice-lab`) — record voice in browser or upload audio
+- [x] ElevenLabs voice cloning API integration (create voice + conversational agent)
+- [x] Voice preview playback
+- [x] Copy generated Agent ID to use in widget voice settings
 - [ ] Voice agent ElevenLabs setup checklist (security overrides, client events)
 
 ### OpenAI Realtime API for Voice Calls
-- [ ] OpenAI Realtime API WebSocket proxy (server-side)
-- [ ] 10 voice options for Realtime API
-- [ ] xAI Grok Realtime API WebSocket proxy (5 voices: Eve, Ara, Leo, Rex, Sal)
-- [ ] Full function calling in voice mode (OpenAI + xAI)
-- [ ] MCP tool support in voice mode (OpenAI + xAI)
+- [x] OpenAI Realtime API WebSocket proxy (server-side)
+- [x] 10 voice options for Realtime API
+- [x] xAI Grok Realtime API WebSocket proxy (5 voices: Eve, Ara, Leo, Rex, Sal)
+- [x] Full function calling in voice mode (OpenAI + xAI)
+- [x] MCP tool support in voice mode (OpenAI + xAI)
 - [ ] Web search in voice mode (built-in Grok, tool for OpenAI)
-- [ ] Conversation history resume in voice (last 40 messages injected)
+- [x] Conversation history resume in voice (last 40 messages injected)
 
 ### Browser Agent (Cloud Browser)
-- [ ] Cloud browser session management (isolated per request)
-- [ ] `POST /api/browser/session` — create browser session
-- [ ] `POST /api/browser/action` — navigate, click, type, scroll, screenshot
-- [ ] `GET /api/browser/session/{id}/view` — live browser iframe URL
-- [ ] Direct Browse mode (AI visits specific URL, extracts content)
-- [ ] Autonomous Research mode (AI searches + visits multiple pages)
-- [ ] Autonomous Form Filling (AI fills and submits web forms)
+- [x] Cloud browser session management (isolated per request)
+- [x] `POST /api/browser/session` — create browser session
+- [x] `POST /api/browser/action` — navigate, click, type, scroll, screenshot
+- [x] `GET /api/browser/session/{id}/view` — live browser iframe URL
+- [x] Direct Browse mode (AI visits specific URL, extracts content)
+- [x] Autonomous Research mode (AI searches + visits multiple pages)
+- [x] Autonomous Form Filling (AI fills and submits web forms)
 - [ ] Private Sessions mode (hide live browser feed)
-- [ ] Allow Login Pages toggle
-- [ ] Max pages per session (1-20, default 5)
-- [ ] Auto-close on inactivity (4 min)
-- [ ] Block private IP ranges (SSRF protection)
+- [x] Allow Login Pages toggle
+- [x] Max pages per session (1-20, default 5)
+- [x] Auto-close on inactivity (4 min)
+- [x] Block private IP ranges (SSRF protection)
 - [ ] Monthly session limit per account
 - [ ] Flow Builder AI Web node (Browse mode + Research mode)
-- [ ] Browser Agent toggle in agent settings
+- [x] Browser Agent toggle in agent settings
 
 ### MCP Servers (Model Context Protocol)
-- [ ] `mcp_server_configs` table (id, user_id, chatbot_id, name, server_url, auth_type, auth_config JSON, is_active)
-- [ ] `GET /api/v1/mcp-servers` — list MCP server configs
-- [ ] `POST /api/v1/mcp-servers` — add MCP server
-- [ ] `DELETE /api/v1/mcp-servers/{id}` — remove MCP server
-- [ ] MCP tool discovery (list available tools from server)
-- [ ] MCP tool execution during AI chat (server-side proxy)
-- [ ] MCP tool support in voice mode (OpenAI Realtime + xAI Grok)
-- [ ] MCP servers management page (`/dashboard/settings/mcp`)
+- [x] `mcp_server_configs` table (id, user_id, chatbot_id, name, server_url, auth_type, auth_config JSON, is_active)
+- [x] `GET /api/v1/mcp-servers` — list MCP server configs
+- [x] `POST /api/v1/mcp-servers` — add MCP server
+- [x] `DELETE /api/v1/mcp-servers/{id}` — remove MCP server
+- [x] MCP tool discovery (list available tools from server)
+- [x] MCP tool execution during AI chat (server-side proxy)
+- [x] MCP tool support in voice mode (OpenAI Realtime + xAI Grok)
+- [x] MCP servers management page (`/dashboard/settings/mcp`)
 
 ### Google A2A Protocol
-- [ ] `GET /a2a/widgets/{widgetId}/agent.json` — A2A discovery endpoint
-- [ ] `POST /a2a/widgets/{widgetId}` — A2A message endpoint (JSON-RPC)
+- [x] `GET /a2a/widgets/{widgetId}/agent.json` — A2A discovery endpoint
+- [x] `POST /a2a/widgets/{widgetId}` — A2A message endpoint (JSON-RPC)
 - [ ] A2A authentication via Google AI API key
 - [ ] A2A quick test in widget channels tab
 - [ ] A2A endpoint display in widget channels tab
