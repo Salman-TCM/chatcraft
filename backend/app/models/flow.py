@@ -70,3 +70,26 @@ class FlowRun(Base):
     error: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
     flow: Mapped["Flow"] = relationship("Flow", back_populates="runs")
+    variables: Mapped[list["FlowVariable"]] = relationship(
+        "FlowVariable", back_populates="run", cascade="all, delete-orphan"
+    )
+
+
+class FlowVariable(Base):
+    __tablename__ = "flow_variables"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True,
+        server_default="gen_random_uuid()",
+    )
+    flow_run_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("flow_runs.id", ondelete="CASCADE"),
+        nullable=False, index=True,
+    )
+    key: Mapped[str] = mapped_column(String(100), nullable=False)
+    value: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default="now()",
+    )
+
+    run: Mapped["FlowRun"] = relationship("FlowRun", back_populates="variables")

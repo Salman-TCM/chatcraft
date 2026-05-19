@@ -27,6 +27,23 @@ from app.models.flow import Flow, FlowRun
 router = APIRouter(tags=["flows"])
 
 
+# ── Simplified list (must be registered before /{flow_id} to avoid UUID parse) ─
+
+@router.get("/api/v1/flows/list", response_model=dict)
+async def list_flows_simple(user: CurrentUser, db: DBSession) -> dict:
+    """Minimal list for integrations — id, name, is_active only."""
+    result = await db.execute(
+        select(Flow)
+        .where(Flow.user_id == user.id)
+        .order_by(Flow.name)
+    )
+    flows = result.scalars().all()
+    return {
+        "success": True,
+        "data": [{"id": str(f.id), "name": f.name, "is_active": f.is_active} for f in flows],
+    }
+
+
 def _flow_dict(f: Flow, include_graph: bool = True) -> dict:
     d: dict = {
         "id": str(f.id),
@@ -175,6 +192,41 @@ async def toggle_flow(flow_id: uuid.UUID, user: CurrentUser, db: DBSession) -> d
     flow.is_active = not flow.is_active
     await db.commit()
     return {"success": True, "data": {"is_active": flow.is_active}}
+
+
+# ── Webhook config ────────────────────────────────────────────────────────────
+
+@router.get("/api/v1/flows/{flow_id}/webhook", response_model=dict)
+async def get_webhook_config(flow_id: uuid.UUID, user: CurrentUser, db: DBSession) -> dict:
+    flow = await _get_owned_flow(flow_id, user.id, db)
+    base = ""  # resolved client-side; secret is sufficient
+    return {
+        "success": True,
+        "data": {
+            "webhook_secret": flow.webhook_secret,
+            "webhook_enabled": flow.is_active,
+            "flow_id": str(flow.id),
+        },
+    }
+
+
+@router.post("/api/v1/flows/{flow_id}/webhook", response_model=dict)
+async def configure_webhook(flow_id: uuid.UUID, body: dict, user: CurrentUser, db: DBSession) -> dict:
+    flow = await _get_owned_flow(flow_id, user.id, db)
+    if body.get("regenerate"):
+        flow.webhook_secret = secrets.token_urlsafe(32)
+    if "enabled" in body:
+        flow.is_active = bool(body["enabled"])
+    await db.commit()
+    await db.refresh(flow)
+    return {
+        "success": True,
+        "data": {
+            "webhook_secret": flow.webhook_secret,
+            "webhook_enabled": flow.is_active,
+            "flow_id": str(flow.id),
+        },
+    }
 
 
 # ── Manual trigger ─────────────────────────────────────────────────────────────
