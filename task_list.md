@@ -455,8 +455,8 @@
 - [x] Internal notes (not sent to customer)
 - [x] Real-time updates via polling (5s interval, new messages from all channels)
 - [x] Unread message count badges
-- [ ] Round-robin assignment
-- [ ] Contact quick-edit panel in inbox sidebar
+- [x] Round-robin assignment
+- [x] Contact quick-edit panel in inbox sidebar
 
 ---
 ---
