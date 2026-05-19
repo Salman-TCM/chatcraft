@@ -9,6 +9,8 @@ import { ConversationSidebar } from "@/components/chat/conversation-sidebar";
 import { apiClient } from "@/lib/api";
 import type { ChatbotConfig } from "@/components/chat/types";
 
+const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
+
 export default function ChatPage() {
   const { chatbotId } = useParams<{ chatbotId: string }>();
   const [chatbot, setChatbot] = useState<ChatbotConfig | null>(null);
@@ -20,34 +22,48 @@ export default function ChatPage() {
     loadChatbot();
   }, [chatbotId]);
 
+  function mapBot(b: any): ChatbotConfig {
+    return {
+      id: b.id,
+      name: b.name,
+      defaultModel: b.default_model ?? "claude-sonnet-4-6",
+      fallbackModel: b.fallback_model ?? null,
+      allowModelSwitch: b.allow_model_switch ?? false,
+      published: b.published ?? true,
+      systemPrompt: b.system_prompt ?? null,
+      logoUrl: b.logo_url ?? null,
+      primaryColour: b.primary_colour ?? "#6366f1",
+      secondaryColour: b.secondary_colour ?? "#8b5cf6",
+      backgroundColour: b.background_colour ?? "#ffffff",
+      fontFamily: b.font_family ?? "Inter",
+      welcomeMessage: b.welcome_message ?? null,
+      placeholderText: b.placeholder_text ?? "Type a message…",
+      bubbleStyle: b.bubble_style ?? "rounded",
+      darkMode: b.dark_mode ?? false,
+      ttsEnabled: b.tts_enabled ?? false,
+      sttEnabled: b.stt_enabled ?? false,
+      autoPlayTts: b.auto_play_tts ?? false,
+      voiceId: b.voice_id ?? null,
+      voiceStability: b.voice_stability ?? 0.5,
+      voiceSimilarityBoost: b.voice_similarity_boost ?? 0.75,
+    };
+  }
+
   async function loadChatbot() {
+    // 1. Try the public widget config endpoint (no auth, works for published bots)
+    try {
+      const res = await fetch(`${API_BASE}/api/widget/${chatbotId}/config`);
+      if (res.ok) {
+        const json = await res.json();
+        setChatbot(mapBot(json.data));
+        return;
+      }
+    } catch {}
+
+    // 2. Fall back to owner-auth endpoint (owner preview of unpublished bots)
     try {
       const { data } = await apiClient.get(`/api/chatbots/${chatbotId}`);
-      const b = data.data;
-      setChatbot({
-        id: b.id,
-        name: b.name,
-        defaultModel: b.default_model,
-        fallbackModel: b.fallback_model,
-        allowModelSwitch: b.allow_model_switch,
-        published: b.published,
-        systemPrompt: b.system_prompt,
-        logoUrl: b.logo_url ?? null,
-        primaryColour: b.primary_colour ?? "#6366f1",
-        secondaryColour: b.secondary_colour ?? "#8b5cf6",
-        backgroundColour: b.background_colour ?? "#ffffff",
-        fontFamily: b.font_family ?? "Inter",
-        welcomeMessage: b.welcome_message ?? null,
-        placeholderText: b.placeholder_text ?? "Type a message…",
-        bubbleStyle: b.bubble_style ?? "rounded",
-        darkMode: b.dark_mode ?? false,
-        ttsEnabled: b.tts_enabled ?? false,
-        sttEnabled: b.stt_enabled ?? false,
-        autoPlayTts: b.auto_play_tts ?? false,
-        voiceId: b.voice_id ?? null,
-        voiceStability: b.voice_stability ?? 0.5,
-        voiceSimilarityBoost: b.voice_similarity_boost ?? 0.75,
-      });
+      setChatbot(mapBot(data.data));
     } catch {
       setError("Chatbot not found or unavailable.");
     }

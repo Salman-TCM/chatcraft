@@ -64,7 +64,7 @@ async def update_chatbot(
     db: DBSession,
 ) -> dict:
     bot = await _get_owned_bot(chatbot_id, user.id, db)
-    for field, value in body.model_dump(exclude_none=True).items():
+    for field, value in body.model_dump(exclude_unset=True).items():
         setattr(bot, field, value)
     await db.commit()
     await db.refresh(bot)
