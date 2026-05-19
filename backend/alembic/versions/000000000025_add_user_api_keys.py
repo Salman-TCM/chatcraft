@@ -24,7 +24,6 @@ def upgrade() -> None:
         sa.Column("api_key_encrypted", sa.String(1000), nullable=False),
         sa.UniqueConstraint("user_id", "provider", name="uq_user_api_key_provider"),
     )
-    op.create_index("ix_user_api_keys_user_id", "user_api_keys", ["user_id"])
 
 
 def downgrade() -> None:
