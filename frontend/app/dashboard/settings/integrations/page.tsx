@@ -46,12 +46,14 @@ export default function IntegrationsPage() {
   }, []);
 
   async function load() {
-    const [metaRes, statusRes] = await Promise.all([
-      apiClient.get("/api/settings/model-keys/providers"),
-      apiClient.get("/api/settings/model-keys"),
-    ]);
+    const metaRes = await apiClient.get("/api/settings/model-keys/providers");
     setMeta(metaRes.data.data);
-    setStatuses(statusRes.data.data);
+    try {
+      const statusRes = await apiClient.get("/api/settings/model-keys");
+      setStatuses(statusRes.data.data);
+    } catch {
+      // not authenticated yet — show cards with no configured status
+    }
   }
 
   async function handleSave(provider: string) {
