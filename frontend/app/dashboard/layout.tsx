@@ -13,6 +13,7 @@ import {
 import { useEffect, useState } from "react";
 import { signOut } from "next-auth/react";
 import { useAppStore } from "@/store";
+import { ImpersonationBanner } from "@/components/impersonation-banner";
 
 // ─── Brand colour ─────────────────────────────────────────────────────────────
 const INDIGO = "#3B52D4";
@@ -348,6 +349,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
 
   return (
     <div className="flex h-screen overflow-hidden bg-background">
+      <ImpersonationBanner />
 
       {/* Desktop sidebar */}
       <div className="hidden md:flex shrink-0">
