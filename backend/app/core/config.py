@@ -95,6 +95,11 @@ class Settings(BaseSettings):
     browserbase_api_key: str = ""
     browserbase_project_id: str = ""
 
+    # Web Push (VAPID)
+    vapid_public_key: str = ""
+    vapid_private_key: str = ""
+    vapid_email: str = "mailto:admin@chatcraft.ai"
+
     jwt_algorithm: str = "HS256"
     access_token_expire_minutes: int = 15
     refresh_token_expire_days: int = 7
