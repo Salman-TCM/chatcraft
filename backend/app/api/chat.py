@@ -49,6 +49,7 @@ from app.services.llm import (
     sanitize,
 )
 from app.services.llm.key_store import get_all_keys
+from app.services.llm.router import get_model_provider
 
 router = APIRouter(prefix="/api/chat", tags=["chat"])
 
@@ -172,13 +173,15 @@ async def stream_chat(
     # Load the chatbot owner's API keys (BYOK)
     owner_id = bot.user_id
     api_keys = await get_all_keys(owner_id, db)
-    if not api_keys:
+    provider_name = get_model_provider(model_id)
+    if not api_keys.get(provider_name):
         raise HTTPException(
             status_code=status.HTTP_402_PAYMENT_REQUIRED,
             detail={
                 "success": False,
-                "error": "No AI model API key configured. Go to Settings → Integrations and add your API key.",
+                "error": f"No {provider_name.title()} API key configured. Go to Settings → Integrations to add your key.",
                 "code": "NO_API_KEY",
+                "provider": provider_name,
             },
         )
 
