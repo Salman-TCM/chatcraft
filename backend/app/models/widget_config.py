@@ -44,6 +44,9 @@ class WidgetConfig(TimestampMixin, Base):
     chatbot: Mapped["ChatbotConfig"] = relationship(  # type: ignore[name-defined]
         "ChatbotConfig", back_populates="widget_config"
     )
+    licenses: Mapped[list["WidgetLicense"]] = relationship(  # type: ignore[name-defined]
+        "WidgetLicense", back_populates="widget_config", cascade="all, delete-orphan"
+    )
 
     def __repr__(self) -> str:
         return f"<WidgetConfig chatbot_id={self.chatbot_id}>"
