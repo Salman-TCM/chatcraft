@@ -7,6 +7,8 @@ Endpoints (no auth — public, verified via channel-specific secrets):
   POST /webhooks/whatsapp/{chatbot_id}
   GET  /webhooks/facebook/{chatbot_id}   ← Meta hub verification
   POST /webhooks/facebook/{chatbot_id}
+  GET  /webhooks/instagram/{chatbot_id}  ← Meta hub verification
+  POST /webhooks/instagram/{chatbot_id}
   POST /webhooks/sms/{chatbot_id}        ← Twilio
 """
 import hashlib
@@ -186,6 +188,58 @@ async def facebook_webhook(
             process_incoming,
             chatbot_id=chatbot_id,
             channel="facebook",
+            sender_id=sender_id,
+            text=text,
+        )
+    except (KeyError, IndexError):
+        pass
+
+    return {"ok": True}
+
+
+# ── Instagram DM ─────────────────────────────────────────────────────────────
+
+@router.get("/instagram/{chatbot_id}")
+async def instagram_verify(
+    chatbot_id: uuid.UUID,
+    db: DBSession,
+    hub_mode: str = Query(default="", alias="hub.mode"),
+    hub_verify_token: str = Query(default="", alias="hub.verify_token"),
+    hub_challenge: str = Query(default="", alias="hub.challenge"),
+) -> PlainTextResponse:
+    integration = await _get_integration(db, chatbot_id, "instagram")
+    expected = integration.config.get("verify_token", "") or integration.webhook_secret or ""
+    if hub_mode == "subscribe" and hub_verify_token == expected:
+        return PlainTextResponse(hub_challenge)
+    raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Verification failed")
+
+
+@router.post("/instagram/{chatbot_id}", status_code=status.HTTP_200_OK)
+async def instagram_webhook(
+    chatbot_id: uuid.UUID,
+    request: Request,
+    background_tasks: BackgroundTasks,
+    db: DBSession,
+) -> dict:
+    await _get_integration(db, chatbot_id, "instagram")
+
+    body = await request.json()
+    try:
+        entry = body["entry"][0]
+        messaging = entry.get("messaging", [])
+        if not messaging:
+            return {"ok": True}
+        msg_event = messaging[0]
+        sender_id = msg_event["sender"]["id"]
+        message = msg_event.get("message", {})
+        text = message.get("text", "")
+        if not text:
+            return {"ok": True}
+
+        background_tasks.add_task(
+            process_incoming,
+            chatbot_id=chatbot_id,
+            channel="instagram",
             sender_id=sender_id,
             text=text,
         )
