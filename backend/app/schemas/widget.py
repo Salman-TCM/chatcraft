@@ -40,5 +40,10 @@ class WidgetPublicConfig(BaseModel):
     logo_url: str | None
     tts_enabled: bool
     stt_enabled: bool
+    auto_play_tts: bool
+    allow_model_switch: bool
+    voice_id: str | None
+    voice_stability: float
+    voice_similarity_boost: float
     position: str
     show_branding: bool

@@ -9,6 +9,15 @@ from app.services.llm.costs import calculate_cost
 
 _client: anthropic.AsyncAnthropic | None = None
 
+# Map user-facing short IDs to actual Anthropic API model IDs
+_MODEL_ALIASES: dict[str, str] = {
+    "claude-haiku-4-5": "claude-haiku-4-5-20251001",
+}
+
+
+def _resolve_model(model: str) -> str:
+    return _MODEL_ALIASES.get(model, model)
+
 
 def _get_client() -> anthropic.AsyncAnthropic:
     global _client
@@ -34,6 +43,7 @@ def _split_messages(
 class AnthropicProvider(LLMProvider):
     def __init__(self, model: str = "claude-sonnet-4-6") -> None:
         self._model = model
+        self._api_model = _resolve_model(model)
 
     @property
     def model_id(self) -> str:
@@ -48,7 +58,7 @@ class AnthropicProvider(LLMProvider):
     ) -> LLMResponse:
         system, turns = _split_messages(messages)
         kwargs: dict = dict(
-            model=self._model,
+            model=self._api_model,
             max_tokens=max_tokens,
             temperature=temperature,
             messages=turns,
@@ -76,7 +86,7 @@ class AnthropicProvider(LLMProvider):
     ) -> AsyncIterator[StreamChunk]:
         system, turns = _split_messages(messages)
         kwargs: dict = dict(
-            model=self._model,
+            model=self._api_model,
             max_tokens=max_tokens,
             temperature=temperature,
             messages=turns,

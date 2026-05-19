@@ -79,6 +79,11 @@ async def get_widget_config(
         logo_url=bot.logo_url,
         tts_enabled=bot.tts_enabled,
         stt_enabled=bot.stt_enabled,
+        auto_play_tts=bot.auto_play_tts,
+        allow_model_switch=bot.allow_model_switch,
+        voice_id=bot.voice_id,
+        voice_stability=bot.voice_stability,
+        voice_similarity_boost=bot.voice_similarity_boost,
         position=wc.position,
         show_branding=wc.show_branding,
     )
