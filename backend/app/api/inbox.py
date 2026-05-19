@@ -14,8 +14,11 @@ from fastapi import APIRouter, HTTPException, Query, status
 from sqlalchemy import func, or_, select, text
 from sqlalchemy.orm import selectinload
 
+from pydantic import BaseModel
+
 from app.core.dependencies import CurrentUser, DBSession
 from app.models.chatbot_config import ChatbotConfig
+from app.models.crm import Contact, Tag
 from app.models.conversation import Conversation
 from app.models.inbox import InboxAssignment, InternalNote, TeamMember
 from app.models.message import Message, MessageRole
@@ -435,3 +438,147 @@ async def remove_team_member(member_id: uuid.UUID, user: CurrentUser, db: DBSess
     await db.delete(member)
     await db.commit()
     return {"success": True, "data": None}
+
+
+# ── Round-robin assignment ──────────────────────────────────────────────────────
+
+@router.post("/conversations/{conv_id}/assign-roundrobin", response_model=dict)
+async def assign_roundrobin(conv_id: uuid.UUID, user: CurrentUser, db: DBSession) -> dict:
+    """Assign conversation to the next available team member in round-robin order."""
+    conv = await _get_owned_conv(conv_id, user.id, db)
+
+    # Get active team members
+    members_result = await db.execute(
+        select(TeamMember)
+        .where(TeamMember.owner_user_id == user.id, TeamMember.status == "active", TeamMember.member_user_id.isnot(None))
+        .order_by(TeamMember.created_at)
+    )
+    members = members_result.scalars().all()
+    if not members:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No active team members to assign")
+
+    # Count existing assignments per member to find the one with fewest
+    from sqlalchemy import case
+    counts_result = await db.execute(
+        select(
+            InboxAssignment.assigned_to_user_id,
+            func.count(InboxAssignment.id).label("cnt"),
+        )
+        .where(InboxAssignment.assigned_to_user_id.in_([m.member_user_id for m in members]))
+        .group_by(InboxAssignment.assigned_to_user_id)
+    )
+    counts = {row.assigned_to_user_id: row.cnt for row in counts_result}
+
+    # Pick member with fewest assignments (ties broken by creation order)
+    chosen = min(members, key=lambda m: counts.get(m.member_user_id, 0))
+
+    # Upsert assignment
+    existing_result = await db.execute(
+        select(InboxAssignment).where(InboxAssignment.conversation_id == conv.id)
+    )
+    assignment = existing_result.scalar_one_or_none()
+    if assignment:
+        assignment.assigned_to_user_id = chosen.member_user_id
+    else:
+        assignment = InboxAssignment(conversation_id=conv.id, assigned_to_user_id=chosen.member_user_id)
+        db.add(assignment)
+    await db.commit()
+    await db.refresh(assignment)
+
+    return {
+        "success": True,
+        "data": {
+            "conversation_id": str(conv.id),
+            "assigned_to_user_id": str(chosen.member_user_id),
+            "assigned_to_email": chosen.member_email,
+        },
+    }
+
+
+# ── Contact quick-edit ──────────────────────────────────────────────────────────
+
+class ContactUpdateRequest(BaseModel):
+    first_name: str | None = None
+    last_name: str | None = None
+    email: str | None = None
+    phone: str | None = None
+    company: str | None = None
+    tags: list[str] | None = None
+
+
+@router.get("/conversations/{conv_id}/contact", response_model=dict)
+async def get_conversation_contact(conv_id: uuid.UUID, user: CurrentUser, db: DBSession) -> dict:
+    """Return the contact linked to a conversation (quick-view in inbox sidebar)."""
+    conv = await _get_owned_conv(conv_id, user.id, db)
+    if not conv.contact_id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No contact linked")
+    result = await db.execute(select(Contact).where(Contact.id == conv.contact_id))
+    contact = result.scalar_one_or_none()
+    if not contact:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Contact not found")
+    return {
+        "success": True,
+        "data": {
+            "id": str(contact.id),
+            "first_name": contact.first_name,
+            "last_name": contact.last_name,
+            "email": contact.email,
+            "phone": contact.phone,
+            "company": contact.company,
+            "tags": [t.name for t in (contact.tags or [])],
+        },
+    }
+
+
+@router.patch("/conversations/{conv_id}/contact", response_model=dict)
+async def update_conversation_contact(
+    conv_id: uuid.UUID, body: ContactUpdateRequest, user: CurrentUser, db: DBSession
+) -> dict:
+    """Quick-edit the contact linked to a conversation from the inbox sidebar."""
+    conv = await _get_owned_conv(conv_id, user.id, db)
+    if not conv.contact_id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No contact linked")
+    result = await db.execute(select(Contact).where(Contact.id == conv.contact_id))
+    contact = result.scalar_one_or_none()
+    if not contact:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Contact not found")
+
+    if body.first_name is not None:
+        contact.first_name = body.first_name
+    if body.last_name is not None:
+        contact.last_name = body.last_name
+    if body.email is not None:
+        contact.email = body.email
+    if body.phone is not None:
+        contact.phone = body.phone
+    if body.company is not None:
+        contact.company = body.company
+    if body.tags is not None:
+        # Resolve or create Tag objects for this user
+        new_tags = []
+        for tag_name in body.tags:
+            tag_result = await db.execute(
+                select(Tag).where(Tag.user_id == user.id, Tag.name == tag_name)
+            )
+            tag = tag_result.scalar_one_or_none()
+            if not tag:
+                tag = Tag(user_id=user.id, name=tag_name)
+                db.add(tag)
+                await db.flush()
+            new_tags.append(tag)
+        contact.tags = new_tags
+
+    await db.commit()
+    await db.refresh(contact)
+    return {
+        "success": True,
+        "data": {
+            "id": str(contact.id),
+            "first_name": contact.first_name,
+            "last_name": contact.last_name,
+            "email": contact.email,
+            "phone": contact.phone,
+            "company": contact.company,
+            "tags": [t.name for t in (contact.tags or [])],
+        },
+    }
