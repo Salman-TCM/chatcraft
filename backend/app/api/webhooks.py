@@ -279,3 +279,62 @@ async def sms_webhook(
         '<?xml version="1.0" encoding="UTF-8"?><Response></Response>',
         media_type="text/xml",
     )
+
+
+# ── Discord Bot ───────────────────────────────────────────────────────────────
+
+@router.post("/discord/{chatbot_id}", status_code=status.HTTP_200_OK)
+async def discord_webhook(
+    chatbot_id: uuid.UUID,
+    request: Request,
+    background_tasks: BackgroundTasks,
+    db: DBSession,
+) -> dict:
+    integration = await _get_integration(db, chatbot_id, "discord")
+    body = await request.json()
+
+    # Discord PING interaction (required for webhook registration)
+    if body.get("type") == 1:
+        return {"type": 1}
+
+    # MESSAGE_CREATE event (type 0 = Discord Interactions, but we handle Gateway events here)
+    event_type = body.get("type")
+    if event_type == 0:
+        # Slash command or component interaction — extract message
+        data = body.get("data", {})
+        options = data.get("options", [])
+        text = options[0].get("value", "") if options else ""
+        sender_id = str(body.get("member", {}).get("user", {}).get("id") or body.get("user", {}).get("id", ""))
+        sender_name = body.get("member", {}).get("user", {}).get("username")
+        # channel_id acts as the recipient for reply
+        channel_id = str(body.get("channel_id", ""))
+        if not text or not sender_id:
+            return {"type": 5}  # ACK with no response
+        background_tasks.add_task(
+            process_incoming,
+            chatbot_id=chatbot_id,
+            channel="discord",
+            sender_id=channel_id or sender_id,
+            text=text,
+            sender_name=sender_name,
+        )
+        return {"type": 5}  # Deferred channel message
+
+    # Gateway MESSAGE_CREATE (when Discord sends raw events via configured endpoint)
+    if "content" in body and body.get("author", {}).get("bot") is not True:
+        sender_id = str(body.get("channel_id", body.get("author", {}).get("id", "")))
+        text = body.get("content", "")
+        author = body.get("author", {})
+        sender_name = author.get("username")
+        if not text or not sender_id:
+            return {"ok": True}
+        background_tasks.add_task(
+            process_incoming,
+            chatbot_id=chatbot_id,
+            channel="discord",
+            sender_id=sender_id,
+            text=text,
+            sender_name=sender_name,
+        )
+
+    return {"ok": True}

@@ -4,8 +4,12 @@ from app.services.channels.whatsapp import WhatsAppSender
 from app.services.channels.facebook import FacebookSender
 from app.services.channels.instagram import InstagramSender
 from app.services.channels.sms import SMSSender
+from app.services.channels.discord import DiscordSender
 
-__all__ = ["ChannelSender", "TelegramSender", "WhatsAppSender", "FacebookSender", "InstagramSender", "SMSSender"]
+__all__ = [
+    "ChannelSender", "TelegramSender", "WhatsAppSender",
+    "FacebookSender", "InstagramSender", "SMSSender", "DiscordSender",
+]
 
 
 def get_sender(channel: str, config: dict) -> "ChannelSender":
@@ -21,5 +25,7 @@ def get_sender(channel: str, config: dict) -> "ChannelSender":
             return InstagramSender(config)
         case "sms":
             return SMSSender(config)
+        case "discord":
+            return DiscordSender(config)
         case _:
             raise ValueError(f"No sender for channel: {channel}")
