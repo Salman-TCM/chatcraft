@@ -291,7 +291,7 @@ async def update_manage(
 ) -> dict:
     bot = await _owned_bot(chatbot_id, user.id, db)
     wc = await _get_or_create_widget_config(bot, db)
-    for field, value in body.model_dump(exclude_none=True).items():
+    for field, value in body.model_dump(exclude_unset=True).items():
         setattr(wc, field, value)
     await db.commit()
     await db.refresh(wc)
