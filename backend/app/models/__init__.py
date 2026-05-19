@@ -55,3 +55,4 @@ from app.models.white_label import (  # noqa: F401
 )
 from app.models.usage_log import UsageLog  # noqa: F401
 from app.models.analytics_daily import AnalyticsDaily  # noqa: F401
+from app.models.widget_license import WidgetLicense  # noqa: F401
