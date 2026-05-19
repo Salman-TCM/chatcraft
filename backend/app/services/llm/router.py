@@ -54,40 +54,56 @@ _XAI_MODELS = {
 DEFAULT_MODEL = "claude-sonnet-4-6"
 DEFAULT_FALLBACK = "gpt-4o-mini"
 
+_PROVIDER_MAP: dict[str, str] = (
+    {m: "anthropic" for m in _ANTHROPIC_MODELS}
+    | {m: "openai" for m in _OPENAI_MODELS}
+    | {m: "google" for m in _GEMINI_MODELS}
+    | {m: "deepseek" for m in _DEEPSEEK_MODELS}
+    | {m: "groq" for m in _GROQ_MODELS}
+    | {m: "perplexity" for m in _PERPLEXITY_MODELS}
+    | {m: "xai" for m in _XAI_MODELS}
+)
 
-def get_provider(model: str) -> LLMProvider:
+
+def get_model_provider(model: str) -> str:
+    """Return the provider name for a given model ID."""
+    return _PROVIDER_MAP.get(model, "anthropic")
+
+
+def get_provider(model: str, api_keys: dict[str, str] | None = None) -> LLMProvider:
+    keys = api_keys or {}
     if model in _ANTHROPIC_MODELS:
-        return AnthropicProvider(model)
+        return AnthropicProvider(model, api_key=keys.get("anthropic"))
     if model in _OPENAI_MODELS:
-        return OpenAIProvider(model)
+        return OpenAIProvider(model, api_key=keys.get("openai"))
     if model in _GEMINI_MODELS:
-        return GeminiProvider(model)
+        return GeminiProvider(model, api_key=keys.get("google"))
     if model in _DEEPSEEK_MODELS:
         return OpenAICompatProvider(
             model,
             base_url="https://api.deepseek.com/v1",
-            api_key=settings.deepseek_api_key,
+            api_key=keys.get("deepseek") or settings.deepseek_api_key,
         )
     if model in _GROQ_MODELS:
         return OpenAICompatProvider(
             model,
             base_url="https://api.groq.com/openai/v1",
-            api_key=settings.groq_api_key,
+            api_key=keys.get("groq") or settings.groq_api_key,
         )
     if model in _PERPLEXITY_MODELS:
         return OpenAICompatProvider(
             model,
             base_url="https://api.perplexity.ai",
-            api_key=settings.perplexity_api_key,
+            api_key=keys.get("perplexity") or settings.perplexity_api_key,
         )
     if model in _XAI_MODELS:
         return OpenAICompatProvider(
             model,
             base_url="https://api.x.ai/v1",
-            api_key=settings.xai_api_key,
+            api_key=keys.get("xai") or settings.xai_api_key,
         )
     logger.warning(f"Unknown model '{model}', falling back to {DEFAULT_MODEL}")
-    return AnthropicProvider(DEFAULT_MODEL)
+    return AnthropicProvider(DEFAULT_MODEL, api_key=keys.get("anthropic"))
 
 
 def all_models() -> list[str]:
@@ -107,12 +123,18 @@ class LLMRouter:
     Entry-point for the chat API.
     - Picks the right provider for `model`.
     - On any provider exception, retries with `fallback_model` once.
-    - Tracks cumulative cost across retries.
+    - api_keys: {provider_name: key} — user-supplied keys take precedence over env vars.
     """
 
-    def __init__(self, model: str = DEFAULT_MODEL, fallback_model: str | None = DEFAULT_FALLBACK) -> None:
+    def __init__(
+        self,
+        model: str = DEFAULT_MODEL,
+        fallback_model: str | None = DEFAULT_FALLBACK,
+        api_keys: dict[str, str] | None = None,
+    ) -> None:
         self._model = model
         self._fallback = fallback_model
+        self._api_keys = api_keys or {}
 
     async def complete(
         self,
@@ -122,7 +144,7 @@ class LLMRouter:
         temperature: float = 0.7,
     ) -> LLMResponse:
         try:
-            return await get_provider(self._model).complete(
+            return await get_provider(self._model, self._api_keys).complete(
                 messages, max_tokens=max_tokens, temperature=temperature
             )
         except Exception as exc:
@@ -132,7 +154,7 @@ class LLMRouter:
                 f"LLM provider '{self._model}' failed ({exc!r}), "
                 f"retrying with fallback '{self._fallback}'"
             )
-            return await get_provider(self._fallback).complete(
+            return await get_provider(self._fallback, self._api_keys).complete(
                 messages, max_tokens=max_tokens, temperature=temperature
             )
 
@@ -147,7 +169,7 @@ class LLMRouter:
         Stream from primary model; if it raises before yielding a single
         chunk, retry the full request on the fallback model.
         """
-        primary = get_provider(self._model)
+        primary = get_provider(self._model, self._api_keys)
         first_chunk = True
         try:
             async for chunk in _wrap_stream(primary, messages, max_tokens, temperature):
@@ -162,7 +184,7 @@ class LLMRouter:
                 f"retrying with fallback '{self._fallback}'"
             )
 
-        fallback = get_provider(self._fallback)
+        fallback = get_provider(self._fallback, self._api_keys)
         async for chunk in _wrap_stream(fallback, messages, max_tokens, temperature):
             yield chunk
 

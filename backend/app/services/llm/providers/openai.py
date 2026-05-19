@@ -7,23 +7,17 @@ from app.core.config import settings
 from app.services.llm.base import ChatMessage, LLMProvider, LLMResponse, StreamChunk
 from app.services.llm.costs import calculate_cost
 
-_client: AsyncOpenAI | None = None
-
-
-def _get_client() -> AsyncOpenAI:
-    global _client
-    if _client is None:
-        _client = AsyncOpenAI(api_key=settings.openai_api_key)
-    return _client
-
-
 def _to_oai(messages: list[ChatMessage]) -> list[dict]:
     return [{"role": m.role, "content": m.content} for m in messages]
 
 
 class OpenAIProvider(LLMProvider):
-    def __init__(self, model: str = "gpt-4o") -> None:
+    def __init__(self, model: str = "gpt-4o", api_key: str | None = None) -> None:
         self._model = model
+        self._api_key = api_key or settings.openai_api_key
+
+    def _client(self) -> AsyncOpenAI:
+        return AsyncOpenAI(api_key=self._api_key)
 
     @property
     def model_id(self) -> str:
@@ -36,7 +30,7 @@ class OpenAIProvider(LLMProvider):
         max_tokens: int = 2048,
         temperature: float = 0.7,
     ) -> LLMResponse:
-        resp = await _get_client().chat.completions.create(
+        resp = await self._client().chat.completions.create(
             model=self._model,
             messages=_to_oai(messages),  # type: ignore[arg-type]
             max_tokens=max_tokens,
@@ -62,7 +56,7 @@ class OpenAIProvider(LLMProvider):
         input_tok = 0
         output_tok = 0
 
-        async with await _get_client().chat.completions.create(
+        async with await self._client().chat.completions.create(
             model=self._model,
             messages=_to_oai(messages),  # type: ignore[arg-type]
             max_tokens=max_tokens,
