@@ -8,8 +8,11 @@ import {
   ChevronDown,
   ChevronRight,
   Copy,
+  Key,
   Loader2,
+  Plus,
   RefreshCw,
+  Trash2,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -18,6 +21,16 @@ import { Separator } from "@/components/ui/separator";
 import { apiClient } from "@/lib/api";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
+
+interface License {
+  id: string;
+  label: string;
+  license_key: string;
+  allowed_domain: string | null;
+  status: "active" | "revoked";
+  expires_at: string | null;
+  created_at: string;
+}
 
 interface WidgetConfig {
   id: string;
@@ -96,7 +109,15 @@ export default function WidgetPage() {
   const [saving, setSaving] = useState(false);
   const [rotating, setRotating] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [copiedKey, setCopiedKey] = useState<string | null>(null);
   const [openGuide, setOpenGuide] = useState<string | null>(null);
+
+  // Licenses
+  const [licenses, setLicenses] = useState<License[]>([]);
+  const [newLabel, setNewLabel] = useState("");
+  const [newDomain, setNewDomain] = useState("");
+  const [creatingLicense, setCreatingLicense] = useState(false);
+  const [revokingId, setRevokingId] = useState<string | null>(null);
 
   // Form state (mirrors config)
   const [domains, setDomains] = useState("");
@@ -109,17 +130,51 @@ export default function WidgetPage() {
 
   async function loadData() {
     try {
-      const [botRes, widgetRes] = await Promise.all([
+      const [botRes, widgetRes, licRes] = await Promise.all([
         apiClient.get(`/api/chatbots/${id}`),
         apiClient.get(`/api/widget/manage/${id}`),
+        apiClient.get(`/api/widget/manage/${id}/licenses`),
       ]);
       setChatbotName(botRes.data.data.name);
       applyConfig(widgetRes.data.data);
+      setLicenses(licRes.data.data);
     } catch {
       router.replace("/dashboard/chatbots");
     } finally {
       setLoading(false);
     }
+  }
+
+  async function handleCreateLicense() {
+    setCreatingLicense(true);
+    try {
+      const { data } = await apiClient.post(`/api/widget/manage/${id}/licenses`, {
+        label: newLabel.trim() || "Unnamed",
+        allowed_domain: newDomain.trim() || null,
+      });
+      setLicenses((prev) => [data.data, ...prev]);
+      setNewLabel("");
+      setNewDomain("");
+    } finally {
+      setCreatingLicense(false);
+    }
+  }
+
+  async function handleRevoke(licenseId: string) {
+    if (!confirm("Revoke this license? The widget will stop working on that site immediately.")) return;
+    setRevokingId(licenseId);
+    try {
+      await apiClient.delete(`/api/widget/manage/${id}/licenses/${licenseId}`);
+      setLicenses((prev) => prev.map((l) => l.id === licenseId ? { ...l, status: "revoked" as const } : l));
+    } finally {
+      setRevokingId(null);
+    }
+  }
+
+  async function copyKey(key: string) {
+    await navigator.clipboard.writeText(key);
+    setCopiedKey(key);
+    setTimeout(() => setCopiedKey(null), 2000);
   }
 
   function applyConfig(wc: WidgetConfig) {
@@ -288,6 +343,73 @@ export default function WidgetPage() {
               Rotate
             </Button>
           </div>
+        </Section>
+
+        <Separator />
+
+        {/* ── License keys ─────────────────────────────────────────────── */}
+        <Section
+          title="License Keys"
+          description="Generate per-client license keys so each site can embed your widget independently. Use data-license instead of data-widget-token in the snippet."
+        >
+          {/* Create form */}
+          <div className="flex gap-2 flex-wrap">
+            <input
+              value={newLabel}
+              onChange={(e) => setNewLabel(e.target.value)}
+              placeholder="Label (e.g. Client Name)"
+              className="flex-1 min-w-36 rounded-md border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-ring"
+            />
+            <input
+              value={newDomain}
+              onChange={(e) => setNewDomain(e.target.value)}
+              placeholder="Domain (optional, e.g. client.com)"
+              className="flex-1 min-w-36 rounded-md border bg-background px-3 py-2 text-sm font-mono focus:outline-none focus:ring-1 focus:ring-ring"
+            />
+            <Button size="sm" className="h-9 gap-1.5 text-xs shrink-0" disabled={creatingLicense} onClick={handleCreateLicense}>
+              {creatingLicense ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <><Plus className="h-3.5 w-3.5" />Generate</>}
+            </Button>
+          </div>
+
+          {/* List */}
+          {licenses.length > 0 ? (
+            <div className="mt-3 space-y-2">
+              {licenses.map((lic) => (
+                <div key={lic.id} className={`flex items-center gap-2 rounded-lg border p-3 ${lic.status === "revoked" ? "opacity-50" : ""}`}>
+                  <Key className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                  <div className="flex-1 min-w-0">
+                    <p className="text-xs font-medium truncate">{lic.label || "Unnamed"}</p>
+                    <p className="text-[10px] text-muted-foreground font-mono truncate">{lic.license_key}</p>
+                    {lic.allowed_domain && (
+                      <p className="text-[10px] text-muted-foreground">Domain: {lic.allowed_domain}</p>
+                    )}
+                  </div>
+                  <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded ${lic.status === "active" ? "bg-green-100 text-green-700" : "bg-muted text-muted-foreground"}`}>
+                    {lic.status}
+                  </span>
+                  <button
+                    className="shrink-0 p-1 rounded hover:bg-muted text-muted-foreground"
+                    title="Copy key"
+                    onClick={() => copyKey(lic.license_key)}
+                  >
+                    {copiedKey === lic.license_key ? <Check className="h-3.5 w-3.5 text-green-600" /> : <Copy className="h-3.5 w-3.5" />}
+                  </button>
+                  {lic.status === "active" && (
+                    <button
+                      className="shrink-0 p-1 rounded hover:bg-destructive/10 text-destructive"
+                      title="Revoke"
+                      disabled={revokingId === lic.id}
+                      onClick={() => handleRevoke(lic.id)}
+                    >
+                      {revokingId === lic.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
+                    </button>
+                  )}
+                </div>
+              ))}
+            </div>
+          ) : (
+            <p className="text-xs text-muted-foreground mt-2">No license keys yet. Generate one above to give a client embed access.</p>
+          )}
         </Section>
 
         <Separator />
