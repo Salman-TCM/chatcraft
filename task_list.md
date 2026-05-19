@@ -1,6 +1,7 @@
 # ChatCraft AI — Master Task List
 > Generated from API Reference + Full Platform Documentation (2026-05-13)
 > Modelled on Jafear.com feature scope. Mark tasks [x] as completed.
+> **Reordered by priority 2026-05-19** — completed phases kept in place; incomplete phases ranked by business impact.
 
 ---
 
@@ -354,7 +355,7 @@
 
 ---
 
-## Phase 8 — CRM: Contacts, Tags, Custom Fields & Pipelines
+## Phase 8 — CRM: Contacts, Tags, Custom Fields & Pipelines ✅
 > Goal: Full CRM with contacts, segmentation, and deal tracking
 
 ### Database Tables
@@ -419,7 +420,7 @@
 
 ---
 
-## Phase 9 — Unified Inbox
+## Phase 9 — Unified Inbox ✅ (partial)
 > Goal: All channel conversations in one place
 
 ### Database Tables
@@ -458,93 +459,13 @@
 - [ ] Contact quick-edit panel in inbox sidebar
 
 ---
+---
 
-## Phase 10 — Multi-Channel Messaging
-> Goal: 11 communication channels all routed to unified inbox
+# ━━━ INCOMPLETE PHASES — RANKED BY PRIORITY ━━━
 
-### Web Chat Extensions
-- [ ] `hideHeader` / `theme` / `primaryColor` URL parameters for widget
-- [ ] Launcher chat bubble (`type: 'launcher'`) with position config
-- [ ] Voice launcher widget (`type: 'voice_launcher'`) with icon options
-- [ ] PWA installation prompt + service worker
-- [ ] Web push notification subscription (VAPID keys)
-- [ ] Push notification backend (`/api/push/subscribe` + `/api/push/send`)
-- [ ] Persistent menu configuration (links/phone/flow triggers)
-- [ ] Typing indicator shown during AI reply delay
-- [ ] AI reply delay setting (0-30 seconds, fixed or random)
+---
 
-### Facebook Messenger
-- [ ] Facebook Page OAuth integration (`/api/integrations/facebook/connect`)
-- [ ] Webhook handler for Facebook messages (`POST /api/webhooks/facebook`)
-- [ ] Send messages via Messenger Graph API
-- [ ] 24-hour messaging window enforcement
-- [ ] Rich media (buttons, quick replies, carousels) for Messenger
-- [ ] Messenger channel in inbox
-- [ ] Set/delete persistent menu via Messenger Profile API
-
-### Instagram DM
-- [ ] Instagram DM webhook handler (`POST /api/webhooks/instagram`)
-- [ ] Send DM replies via Instagram Graph API
-- [ ] Story mention automation
-- [ ] Comment automation: auto-reply to post comments (public reply + DM)
-- [ ] Instagram channel in inbox
-
-### WhatsApp Business API
-- [ ] WhatsApp webhook handler (`POST /api/webhooks/whatsapp`)
-- [ ] Send messages via WhatsApp Cloud API
-- [ ] WhatsApp Template message management (sync from Meta)
-- [ ] 24-hour session window + template fallback
-- [ ] Rich media (interactive buttons, lists) for WhatsApp
-- [ ] WhatsApp channel in inbox
-
-### Telegram
-- [ ] Telegram bot token configuration per chatbot
-- [ ] Telegram webhook handler (`POST /api/webhooks/telegram/{token}`)
-- [ ] Send messages via Telegram Bot API
-- [ ] Telegram Bot Commands setup (`/start`, custom `/commands` triggering flows)
-- [ ] Rich media (inline keyboards, reply keyboards) for Telegram
-- [ ] Telegram channel in inbox
-
-### Discord
-- [ ] Discord bot token configuration
-- [ ] Discord bot message handler
-- [ ] Send messages, embeds, add/remove roles via Discord API
-- [ ] Discord channel in inbox
-
-### SMS (Twilio)
-- [ ] Twilio phone number management (`/api/integrations/twilio/connect`)
-- [ ] Twilio SMS webhook handler (`POST /api/webhooks/twilio/sms`)
-- [ ] Send SMS via Twilio API
-- [ ] MMS image support
-- [ ] SMS channel in inbox
-
-### Phone Calls (Twilio + Voice AI)
-- [ ] Inbound call webhook handler (`POST /api/webhooks/twilio/voice`)
-- [ ] OpenAI Realtime API integration for voice calls (WebRTC/WebSocket)
-- [ ] ElevenLabs outbound call trigger
-- [ ] DTMF transfer destinations (press 1 for sales, press 2 for support)
-- [ ] Missed-call AI takeover + SMS fallback configuration
-- [ ] Post-call transcript saved to conversation
-- [ ] AI-generated call summary saved to contact
-- [ ] Phone channel in inbox
-
-### X (Twitter)
-- [ ] Twitter/X OAuth integration
-- [ ] @Mention webhook monitor
-- [ ] Auto-reply to mentions using AI agent
-- [ ] X channel in inbox (mentions + replies)
-
-### TikTok DM
-- [ ] TikTok Business API integration
-- [ ] TikTok DM webhook handler
-- [ ] TikTok channel in inbox
-
-### Email (Inbox)
-- [ ] AWS SES or SMTP configuration per account/agent
-- [ ] Compose email from inbox (to, subject, CC/BCC, attachments)
-- [ ] AI email body generator (based on conversation context)
-- [ ] Attachment support (up to 5 files, 25MB total)
-- [ ] Email channel in inbox
+## 🥇 P1 — Core Product (build these first — they define the platform)
 
 ---
 
@@ -690,6 +611,99 @@
 
 ---
 
+## 🥈 P2 — High Revenue Impact (channels + lead gen + engagement)
+
+---
+
+## Phase 10 — Multi-Channel Messaging
+> Goal: 11 communication channels all routed to unified inbox
+
+### Web Chat Extensions
+- [ ] `hideHeader` / `theme` / `primaryColor` URL parameters for widget
+- [ ] Launcher chat bubble (`type: 'launcher'`) with position config
+- [ ] Voice launcher widget (`type: 'voice_launcher'`) with icon options
+- [ ] PWA installation prompt + service worker
+- [ ] Web push notification subscription (VAPID keys)
+- [ ] Push notification backend (`/api/push/subscribe` + `/api/push/send`)
+- [ ] Persistent menu configuration (links/phone/flow triggers)
+- [ ] Typing indicator shown during AI reply delay
+- [ ] AI reply delay setting (0-30 seconds, fixed or random)
+
+### Facebook Messenger
+- [ ] Facebook Page OAuth integration (`/api/integrations/facebook/connect`)
+- [ ] Webhook handler for Facebook messages (`POST /api/webhooks/facebook`)
+- [ ] Send messages via Messenger Graph API
+- [ ] 24-hour messaging window enforcement
+- [ ] Rich media (buttons, quick replies, carousels) for Messenger
+- [ ] Messenger channel in inbox
+- [ ] Set/delete persistent menu via Messenger Profile API
+
+### Instagram DM
+- [ ] Instagram DM webhook handler (`POST /api/webhooks/instagram`)
+- [ ] Send DM replies via Instagram Graph API
+- [ ] Story mention automation
+- [ ] Comment automation: auto-reply to post comments (public reply + DM)
+- [ ] Instagram channel in inbox
+
+### WhatsApp Business API
+- [ ] WhatsApp webhook handler (`POST /api/webhooks/whatsapp`)
+- [ ] Send messages via WhatsApp Cloud API
+- [ ] WhatsApp Template message management (sync from Meta)
+- [ ] 24-hour session window + template fallback
+- [ ] Rich media (interactive buttons, lists) for WhatsApp
+- [ ] WhatsApp channel in inbox
+
+### Telegram
+- [ ] Telegram bot token configuration per chatbot
+- [ ] Telegram webhook handler (`POST /api/webhooks/telegram/{token}`)
+- [ ] Send messages via Telegram Bot API
+- [ ] Telegram Bot Commands setup (`/start`, custom `/commands` triggering flows)
+- [ ] Rich media (inline keyboards, reply keyboards) for Telegram
+- [ ] Telegram channel in inbox
+
+### Discord
+- [ ] Discord bot token configuration
+- [ ] Discord bot message handler
+- [ ] Send messages, embeds, add/remove roles via Discord API
+- [ ] Discord channel in inbox
+
+### SMS (Twilio)
+- [ ] Twilio phone number management (`/api/integrations/twilio/connect`)
+- [ ] Twilio SMS webhook handler (`POST /api/webhooks/twilio/sms`)
+- [ ] Send SMS via Twilio API
+- [ ] MMS image support
+- [ ] SMS channel in inbox
+
+### Phone Calls (Twilio + Voice AI)
+- [ ] Inbound call webhook handler (`POST /api/webhooks/twilio/voice`)
+- [ ] OpenAI Realtime API integration for voice calls (WebRTC/WebSocket)
+- [ ] ElevenLabs outbound call trigger
+- [ ] DTMF transfer destinations (press 1 for sales, press 2 for support)
+- [ ] Missed-call AI takeover + SMS fallback configuration
+- [ ] Post-call transcript saved to conversation
+- [ ] AI-generated call summary saved to contact
+- [ ] Phone channel in inbox
+
+### X (Twitter)
+- [ ] Twitter/X OAuth integration
+- [ ] @Mention webhook monitor
+- [ ] Auto-reply to mentions using AI agent
+- [ ] X channel in inbox (mentions + replies)
+
+### TikTok DM
+- [ ] TikTok Business API integration
+- [ ] TikTok DM webhook handler
+- [ ] TikTok channel in inbox
+
+### Email (Inbox)
+- [ ] AWS SES or SMTP configuration per account/agent
+- [ ] Compose email from inbox (to, subject, CC/BCC, attachments)
+- [ ] AI email body generator (based on conversation context)
+- [ ] Attachment support (up to 5 files, 25MB total)
+- [ ] Email channel in inbox
+
+---
+
 ## Phase 13 — Forms & Landing Pages
 > Goal: Collect leads via forms, publish branded landing pages
 
@@ -733,6 +747,68 @@
 - [ ] QR code generator (PNG/SVG download, custom colors)
 - [ ] Social sharing preview
 - [ ] Published page (`/p/{slug}`) — public URL with embedded widget option
+
+---
+
+## Phase 16 — Broadcast Hub & Social Tools
+> Goal: Mass messaging across channels + social media management
+
+### Database Tables
+- [ ] `broadcast_campaigns` table (id, user_id, name, channel, status, message_template, target_filter JSON, scheduled_at, sent_count, failed_count)
+- [ ] `social_accounts` table (id, user_id, platform, account_id, access_token, name, avatar_url)
+- [ ] `social_posts` table (id, user_id, account_ids, content, image_url, status, scheduled_at, published_at)
+- [ ] `comment_automations` table (id, user_id, page_id, enabled, ai_prompt, response_type, keyword_triggers array, delay_seconds)
+
+### Broadcast Hub API — Backend
+- [ ] `GET /api/v1/broadcasts` — list campaigns
+- [ ] `POST /api/v1/broadcasts` — create broadcast (email/SMS/Telegram/push/WhatsApp/Messenger/phone)
+- [ ] `POST /api/v1/broadcasts/{id}/send` — send or schedule broadcast
+- [ ] `GET /api/v1/broadcasts/{id}/stats` — delivery + engagement analytics
+- [ ] Email broadcast: AWS SES bulk send, open/click tracking, HTML template
+- [ ] SMS broadcast: Twilio bulk SMS with personalization variables
+- [ ] Telegram broadcast: bulk message to all Telegram subscribers
+- [ ] Push broadcast: VAPID bulk push to PWA subscribers
+- [ ] WhatsApp broadcast: Meta-approved template messages (24h compliance)
+- [ ] Messenger broadcast: Facebook marketing messages
+- [ ] Phone broadcast: ElevenLabs outbound call campaigns
+
+### Social Poster API — Backend
+- [ ] `GET /api/v1/social/accounts` — list connected social accounts
+- [ ] `POST /api/v1/social/accounts/connect` — connect Facebook/Instagram/X
+- [ ] `GET /api/v1/social/posts` — post history
+- [ ] `POST /api/v1/social/posts` — create and publish/schedule post
+- [ ] `DELETE /api/v1/social/posts/{id}` — delete post
+- [ ] Facebook Page post via Graph API
+- [ ] Instagram post (requires image) via Graph API
+- [ ] X/Twitter post via Twitter API v2 (publish-only, no scheduling)
+- [ ] AI caption generator using agent's LLM
+
+### Comment Automation API — Backend
+- [ ] `GET /api/v1/comment-automations` — list comment automations per page
+- [ ] `POST /api/v1/comment-automations` — create automation
+- [ ] `PATCH /api/v1/comment-automations/{id}` — update configuration
+- [ ] `DELETE /api/v1/comment-automations/{id}` — delete
+- [ ] Facebook comment webhook handler → AI public reply + DM trigger
+- [ ] Instagram comment webhook handler → AI public reply
+
+### Broadcast & Social UI — Frontend
+- [ ] Broadcast Hub page (`/dashboard/broadcast`) — channel selector tabs
+- [ ] Email campaign composer (drag-and-drop HTML template builder)
+- [ ] Audience segmentation (by agent, tags, custom fields)
+- [ ] Campaign preview + test send
+- [ ] Campaign schedule picker
+- [ ] Delivery analytics table
+- [ ] Social Poster page (`/dashboard/social`)
+- [ ] Post composer (multi-platform select, caption, image upload)
+- [ ] AI caption generator button
+- [ ] Publish Now / Schedule toggle
+- [ ] Post history table with status
+- [ ] Comment Automation page (`/dashboard/comment-automation`)
+- [ ] Per-page toggle + AI prompt + keyword triggers + response type config
+
+---
+
+## 🥉 P3 — Monetisation (direct revenue channels)
 
 ---
 
@@ -814,61 +890,7 @@
 
 ---
 
-## Phase 16 — Broadcast Hub & Social Tools
-> Goal: Mass messaging across channels + social media management
-
-### Database Tables
-- [ ] `broadcast_campaigns` table (id, user_id, name, channel, status, message_template, target_filter JSON, scheduled_at, sent_count, failed_count)
-- [ ] `social_accounts` table (id, user_id, platform, account_id, access_token, name, avatar_url)
-- [ ] `social_posts` table (id, user_id, account_ids, content, image_url, status, scheduled_at, published_at)
-- [ ] `comment_automations` table (id, user_id, page_id, enabled, ai_prompt, response_type, keyword_triggers array, delay_seconds)
-
-### Broadcast Hub API — Backend
-- [ ] `GET /api/v1/broadcasts` — list campaigns
-- [ ] `POST /api/v1/broadcasts` — create broadcast (email/SMS/Telegram/push/WhatsApp/Messenger/phone)
-- [ ] `POST /api/v1/broadcasts/{id}/send` — send or schedule broadcast
-- [ ] `GET /api/v1/broadcasts/{id}/stats` — delivery + engagement analytics
-- [ ] Email broadcast: AWS SES bulk send, open/click tracking, HTML template
-- [ ] SMS broadcast: Twilio bulk SMS with personalization variables
-- [ ] Telegram broadcast: bulk message to all Telegram subscribers
-- [ ] Push broadcast: VAPID bulk push to PWA subscribers
-- [ ] WhatsApp broadcast: Meta-approved template messages (24h compliance)
-- [ ] Messenger broadcast: Facebook marketing messages
-- [ ] Phone broadcast: ElevenLabs outbound call campaigns
-
-### Social Poster API — Backend
-- [ ] `GET /api/v1/social/accounts` — list connected social accounts
-- [ ] `POST /api/v1/social/accounts/connect` — connect Facebook/Instagram/X
-- [ ] `GET /api/v1/social/posts` — post history
-- [ ] `POST /api/v1/social/posts` — create and publish/schedule post
-- [ ] `DELETE /api/v1/social/posts/{id}` — delete post
-- [ ] Facebook Page post via Graph API
-- [ ] Instagram post (requires image) via Graph API
-- [ ] X/Twitter post via Twitter API v2 (publish-only, no scheduling)
-- [ ] AI caption generator using agent's LLM
-
-### Comment Automation API — Backend
-- [ ] `GET /api/v1/comment-automations` — list comment automations per page
-- [ ] `POST /api/v1/comment-automations` — create automation
-- [ ] `PATCH /api/v1/comment-automations/{id}` — update configuration
-- [ ] `DELETE /api/v1/comment-automations/{id}` — delete
-- [ ] Facebook comment webhook handler → AI public reply + DM trigger
-- [ ] Instagram comment webhook handler → AI public reply
-
-### Broadcast & Social UI — Frontend
-- [ ] Broadcast Hub page (`/dashboard/broadcast`) — channel selector tabs
-- [ ] Email campaign composer (drag-and-drop HTML template builder)
-- [ ] Audience segmentation (by agent, tags, custom fields)
-- [ ] Campaign preview + test send
-- [ ] Campaign schedule picker
-- [ ] Delivery analytics table
-- [ ] Social Poster page (`/dashboard/social`)
-- [ ] Post composer (multi-platform select, caption, image upload)
-- [ ] AI caption generator button
-- [ ] Publish Now / Schedule toggle
-- [ ] Post history table with status
-- [ ] Comment Automation page (`/dashboard/comment-automation`)
-- [ ] Per-page toggle + AI prompt + keyword triggers + response type config
+## 🏅 P4 — Platform Expansion (differentiation + developer ecosystem)
 
 ---
 
@@ -1082,6 +1104,10 @@
 - [ ] License validation API — validates `data-license` token on widget load
 - [ ] Reseller revenue dashboard in agency UI (MRR, churn, client count)
 - [ ] Custom pricing tiers editor (agency sets its own price per plan)
+
+---
+
+## 🔒 P5 — Production Launch (run in parallel throughout; finalise last)
 
 ---
 
