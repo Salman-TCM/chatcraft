@@ -172,7 +172,6 @@ async def search_conversations(
     page: Annotated[int, Query(ge=1)] = 1,
     limit: Annotated[int, Query(ge=1, le=100)] = 30,
 ) -> dict:
-    from app.models.crm import Contact
     offset = (page - 1) * limit
 
     stmt = (
@@ -458,7 +457,6 @@ async def assign_roundrobin(conv_id: uuid.UUID, user: CurrentUser, db: DBSession
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No active team members to assign")
 
     # Count existing assignments per member to find the one with fewest
-    from sqlalchemy import case
     counts_result = await db.execute(
         select(
             InboxAssignment.assigned_to_user_id,
