@@ -155,7 +155,7 @@ async def update_contact(
     db: DBSession,
 ) -> dict:
     contact = await _get_contact(contact_id, user.id, db)
-    for field, value in body.model_dump(exclude_none=True).items():
+    for field, value in body.model_dump(exclude_unset=True).items():
         setattr(contact, field, value)
     await db.commit()
     await db.refresh(contact)
@@ -315,7 +315,7 @@ async def update_tag(
     tag = result.scalar_one_or_none()
     if not tag:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Tag not found")
-    for field, value in body.model_dump(exclude_none=True).items():
+    for field, value in body.model_dump(exclude_unset=True).items():
         setattr(tag, field, value)
     await db.commit()
     await db.refresh(tag)
@@ -373,7 +373,7 @@ async def update_custom_field(
     cf = result.scalar_one_or_none()
     if not cf:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Custom field not found")
-    for field, value in body.model_dump(exclude_none=True).items():
+    for field, value in body.model_dump(exclude_unset=True).items():
         setattr(cf, field, value)
     await db.commit()
     await db.refresh(cf)
@@ -456,7 +456,7 @@ async def update_pipeline(
     db: DBSession,
 ) -> dict:
     pipeline = await _get_pipeline(pipeline_id, user.id, db)
-    for field, value in body.model_dump(exclude_none=True).items():
+    for field, value in body.model_dump(exclude_unset=True).items():
         setattr(pipeline, field, value)
     await db.commit()
     pipeline = await _get_pipeline(pipeline_id, user.id, db)
