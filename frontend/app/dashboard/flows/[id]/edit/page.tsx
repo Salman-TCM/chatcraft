@@ -23,12 +23,15 @@ import {
   Check,
   ChevronDown,
   ChevronRight,
+  Clock,
   Copy,
+  ExternalLink,
   GitFork,
+  History,
   Loader2,
   Pause,
   Play,
-  Plus,
+  RefreshCw,
   Save,
   Trash2,
   Webhook,
@@ -123,11 +126,13 @@ function NodeConfigPanel({
   onUpdate,
   onDelete,
   onClose,
+  onCopy,
 }: {
   node: Node;
   onUpdate: (id: string, data: any) => void;
   onDelete: (id: string) => void;
   onClose: () => void;
+  onCopy: (node: Node) => void;
 }) {
   const data = node.data as any;
   const nodeType = data.nodeType as string;
@@ -147,9 +152,18 @@ function NodeConfigPanel({
         <span className="text-sm font-semibold capitalize">
           {NODE_MAP[nodeType]?.icon} {NODE_MAP[nodeType]?.label ?? nodeType}
         </span>
-        <button onClick={onClose} className="rounded p-1 hover:bg-muted">
-          <X className="h-4 w-4" />
-        </button>
+        <div className="flex items-center gap-1">
+          <button
+            title="Duplicate node"
+            onClick={() => onCopy(node)}
+            className="rounded p-1 hover:bg-muted text-muted-foreground"
+          >
+            <Copy className="h-3.5 w-3.5" />
+          </button>
+          <button onClick={onClose} className="rounded p-1 hover:bg-muted">
+            <X className="h-4 w-4" />
+          </button>
+        </div>
       </div>
       <div className="flex-1 overflow-y-auto p-4 space-y-3">
         {/* Common: display label */}
@@ -363,12 +377,202 @@ function NodeConfigPanel({
   );
 }
 
+// ── Webhook panel ─────────────────────────────────────────────────────────────
+
+function WebhookPanel({
+  flowId,
+  webhookSecret,
+  onSecretChange,
+  onClose,
+}: {
+  flowId: string;
+  webhookSecret: string | null;
+  onSecretChange: (secret: string) => void;
+  onClose: () => void;
+}) {
+  const [regenerating, setRegenerating] = useState(false);
+  const [copied, setCopied] = useState(false);
+  const apiBase = process.env.NEXT_PUBLIC_API_URL ?? "";
+  const webhookUrl = webhookSecret
+    ? `${apiBase}/webhooks/flow/${flowId}/${webhookSecret}`
+    : "";
+
+  async function regenerate() {
+    setRegenerating(true);
+    try {
+      const { data } = await apiClient.post(`/api/v1/flows/${flowId}/webhook`, { regenerate: true });
+      onSecretChange(data.data.webhook_secret);
+    } finally {
+      setRegenerating(false);
+    }
+  }
+
+  function copyUrl() {
+    navigator.clipboard.writeText(webhookUrl).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    });
+  }
+
+  return (
+    <div className="flex h-full flex-col">
+      <div className="flex items-center justify-between border-b px-4 py-3">
+        <span className="flex items-center gap-2 text-sm font-semibold">
+          <Webhook className="h-4 w-4" /> Webhook
+        </span>
+        <button onClick={onClose} className="rounded p-1 hover:bg-muted">
+          <X className="h-4 w-4" />
+        </button>
+      </div>
+      <div className="flex-1 overflow-y-auto p-4 space-y-4">
+        <p className="text-xs text-muted-foreground">
+          Send a POST request to this URL to trigger the flow externally. The flow must be active.
+        </p>
+        <div className="space-y-1">
+          <Label className="text-xs">Webhook URL</Label>
+          <div className="flex gap-2">
+            <Input
+              readOnly
+              className="h-8 text-xs font-mono bg-muted"
+              value={webhookUrl}
+            />
+            <Button size="icon" variant="outline" className="h-8 w-8 shrink-0" onClick={copyUrl} title="Copy URL">
+              {copied ? <Check className="h-3.5 w-3.5 text-green-600" /> : <Copy className="h-3.5 w-3.5" />}
+            </Button>
+          </div>
+        </div>
+        <div className="space-y-1">
+          <Label className="text-xs">Secret token</Label>
+          <p className="rounded bg-muted px-3 py-2 font-mono text-xs break-all">{webhookSecret ?? "—"}</p>
+        </div>
+        <Button
+          size="sm"
+          variant="outline"
+          className="h-8 w-full gap-1.5 text-xs"
+          onClick={regenerate}
+          disabled={regenerating}
+        >
+          {regenerating ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
+          Regenerate secret
+        </Button>
+        <div className="rounded-md border bg-muted/40 p-3 space-y-1.5">
+          <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Example body</p>
+          <pre className="text-[11px] text-muted-foreground whitespace-pre-wrap">{`{\n  "contact_id": "...",\n  "event": "purchase",\n  "data": { "amount": 99 }\n}`}</pre>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Run history panel ─────────────────────────────────────────────────────────
+
+interface FlowRun {
+  id: string;
+  status: string;
+  contact_id: string | null;
+  current_node_id: string | null;
+  started_at: string;
+  completed_at: string | null;
+  error: string | null;
+}
+
+const STATUS_COLOR: Record<string, string> = {
+  running:   "bg-blue-500",
+  waiting:   "bg-amber-500",
+  completed: "bg-green-500",
+  failed:    "bg-red-500",
+  cancelled: "bg-slate-400",
+};
+
+function RunHistoryPanel({
+  flowId,
+  onClose,
+}: {
+  flowId: string;
+  onClose: () => void;
+}) {
+  const [runs, setRuns] = useState<FlowRun[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [total, setTotal] = useState(0);
+
+  useEffect(() => {
+    setLoading(true);
+    apiClient.get(`/api/v1/flows/${flowId}/runs?limit=50`)
+      .then(({ data }) => {
+        setRuns(data.data ?? []);
+        setTotal(data.total ?? 0);
+      })
+      .finally(() => setLoading(false));
+  }, [flowId]);
+
+  function duration(run: FlowRun) {
+    if (!run.completed_at) return "—";
+    const ms = new Date(run.completed_at).getTime() - new Date(run.started_at).getTime();
+    if (ms < 1000) return `${ms}ms`;
+    if (ms < 60000) return `${(ms / 1000).toFixed(1)}s`;
+    return `${Math.round(ms / 60000)}m`;
+  }
+
+  return (
+    <div className="flex h-full flex-col">
+      <div className="flex items-center justify-between border-b px-4 py-3">
+        <span className="flex items-center gap-2 text-sm font-semibold">
+          <History className="h-4 w-4" /> Run History
+          {total > 0 && (
+            <span className="rounded-full bg-muted px-1.5 py-0.5 text-[10px] font-medium">{total}</span>
+          )}
+        </span>
+        <button onClick={onClose} className="rounded p-1 hover:bg-muted">
+          <X className="h-4 w-4" />
+        </button>
+      </div>
+      <div className="flex-1 overflow-y-auto">
+        {loading ? (
+          <div className="flex h-32 items-center justify-center">
+            <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+          </div>
+        ) : runs.length === 0 ? (
+          <div className="flex h-32 flex-col items-center justify-center gap-2 text-muted-foreground">
+            <Clock className="h-8 w-8 opacity-30" />
+            <p className="text-xs">No runs yet</p>
+          </div>
+        ) : (
+          <div className="divide-y">
+            {runs.map(run => (
+              <div key={run.id} className="px-4 py-3 hover:bg-muted/30">
+                <div className="flex items-center gap-2 mb-1">
+                  <span className={`h-2 w-2 rounded-full shrink-0 ${STATUS_COLOR[run.status] ?? "bg-slate-400"}`} />
+                  <span className="text-xs font-medium capitalize">{run.status}</span>
+                  <span className="ml-auto text-[10px] text-muted-foreground">{duration(run)}</span>
+                </div>
+                <p className="text-[10px] text-muted-foreground">
+                  {new Date(run.started_at).toLocaleString()}
+                </p>
+                {run.contact_id && (
+                  <p className="text-[10px] font-mono text-muted-foreground truncate mt-0.5">
+                    Contact: {run.contact_id.slice(0, 8)}…
+                  </p>
+                )}
+                {run.error && (
+                  <p className="mt-1 text-[10px] text-red-500 line-clamp-2">{run.error}</p>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 // ── Main editor ───────────────────────────────────────────────────────────────
 
 let nodeIdCounter = 100;
 function newNodeId() {
   return `node-${++nodeIdCounter}`;
 }
+
+type RightPanel = "node" | "webhook" | "history" | null;
 
 export default function FlowEditorPage() {
   const { id: flowId } = useParams<{ id: string }>();
@@ -385,6 +589,7 @@ export default function FlowEditorPage() {
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([]);
   const [selectedNode, setSelectedNode] = useState<Node | null>(null);
   const [paletteOpen, setPaletteOpen] = useState(true);
+  const [rightPanel, setRightPanel] = useState<RightPanel>(null);
 
   // Convert stored nodes (with type/data) to ReactFlow format
   function toRFNodes(raw: any[]): Node[] {
@@ -442,6 +647,17 @@ export default function FlowEditorPage() {
     setEdges(eds => eds.filter(e => e.source !== id && e.target !== id));
   }
 
+  function duplicateNode(node: Node) {
+    const id = newNodeId();
+    const copy: Node = {
+      ...node,
+      id,
+      position: { x: node.position.x + 40, y: node.position.y + 40 },
+      selected: false,
+    };
+    setNodes(nds => [...nds, copy]);
+  }
+
   async function save() {
     setSaving(true);
     try {
@@ -460,6 +676,24 @@ export default function FlowEditorPage() {
   async function toggle() {
     await apiClient.post(`/api/v1/flows/${flowId}/toggle`);
     setIsActive(a => !a);
+  }
+
+  function openNodePanel(node: Node) {
+    setSelectedNode(node);
+    setRightPanel("node");
+  }
+
+  function closeRightPanel() {
+    setSelectedNode(null);
+    setRightPanel(null);
+  }
+
+  function togglePanel(panel: Exclude<RightPanel, "node">) {
+    setRightPanel(prev => {
+      if (prev === panel) { setSelectedNode(null); return null; }
+      setSelectedNode(null);
+      return panel;
+    });
   }
 
   if (loading) {
@@ -488,12 +722,24 @@ export default function FlowEditorPage() {
           onBlur={save}
         />
         <div className="ml-auto flex items-center gap-2">
-          {webhookSecret && (
-            <span className="hidden md:flex items-center gap-1 rounded bg-muted px-2 py-1 text-[10px] font-mono text-muted-foreground">
-              <Webhook className="h-3 w-3" />
-              {webhookSecret.slice(0, 8)}…
-            </span>
-          )}
+          <Button
+            size="sm"
+            variant={rightPanel === "webhook" ? "secondary" : "ghost"}
+            className="h-8 gap-1 text-xs"
+            onClick={() => togglePanel("webhook")}
+          >
+            <Webhook className="h-3.5 w-3.5" />
+            <span className="hidden md:inline">Webhook</span>
+          </Button>
+          <Button
+            size="sm"
+            variant={rightPanel === "history" ? "secondary" : "ghost"}
+            className="h-8 gap-1 text-xs"
+            onClick={() => togglePanel("history")}
+          >
+            <History className="h-3.5 w-3.5" />
+            <span className="hidden md:inline">History</span>
+          </Button>
           <Button size="sm" variant="outline" className="h-8 gap-1 text-xs" onClick={toggle}>
             {isActive ? <Pause className="h-3.5 w-3.5 text-amber-600" /> : <Play className="h-3.5 w-3.5 text-green-600" />}
             {isActive ? "Active" : "Inactive"}
@@ -559,8 +805,8 @@ export default function FlowEditorPage() {
             onEdgesChange={onEdgesChange}
             onConnect={onConnect}
             nodeTypes={nodeTypes}
-            onNodeClick={(_, node) => setSelectedNode(node)}
-            onPaneClick={() => setSelectedNode(null)}
+            onNodeClick={(_, node) => openNodePanel(node)}
+            onPaneClick={() => { setSelectedNode(null); if (rightPanel === "node") setRightPanel(null); }}
             defaultEdgeOptions={{
               markerEnd: { type: MarkerType.ArrowClosed },
               style: { stroke: "#94a3b8" },
@@ -573,15 +819,32 @@ export default function FlowEditorPage() {
           </ReactFlow>
         </div>
 
-        {/* Node config panel */}
-        {selectedNode && (
+        {/* Right panel */}
+        {rightPanel && (
           <div className="w-72 border-l bg-background overflow-hidden flex flex-col">
-            <NodeConfigPanel
-              node={selectedNode}
-              onUpdate={updateNodeData}
-              onDelete={deleteNode}
-              onClose={() => setSelectedNode(null)}
-            />
+            {rightPanel === "node" && selectedNode && (
+              <NodeConfigPanel
+                node={selectedNode}
+                onUpdate={updateNodeData}
+                onDelete={deleteNode}
+                onClose={closeRightPanel}
+                onCopy={duplicateNode}
+              />
+            )}
+            {rightPanel === "webhook" && (
+              <WebhookPanel
+                flowId={flowId}
+                webhookSecret={webhookSecret}
+                onSecretChange={setWebhookSecret}
+                onClose={closeRightPanel}
+              />
+            )}
+            {rightPanel === "history" && (
+              <RunHistoryPanel
+                flowId={flowId}
+                onClose={closeRightPanel}
+              />
+            )}
           </div>
         )}
       </div>
