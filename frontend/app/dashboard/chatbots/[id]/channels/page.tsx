@@ -84,6 +84,18 @@ const CHANNELS: ChannelDef[] = [
     setupUrl: "https://developers.facebook.com/docs/messenger-platform",
   },
   {
+    key: "instagram",
+    label: "Instagram DM",
+    icon: "📸",
+    color: "bg-pink-50 border-pink-200",
+    description: "Receive and reply to Instagram Direct Messages via the Instagram Graph API.",
+    fields: [
+      { key: "page_access_token", label: "Page Access Token", placeholder: "EAAGm...", secret: true },
+      { key: "verify_token", label: "Webhook Verify Token", placeholder: "my_verify_token_123" },
+    ],
+    setupUrl: "https://developers.facebook.com/docs/instagram-api/guides/messaging",
+  },
+  {
     key: "sms",
     label: "SMS (Twilio)",
     icon: "📱",
@@ -176,7 +188,7 @@ export default function ChannelsPage() {
         ? `@${info.username} (${info.first_name})`
         : channel === "whatsapp"
         ? `${info.verified_name} · ${info.display_phone_number}`
-        : channel === "facebook"
+        : channel === "facebook" || channel === "instagram"
         ? `${info.page_name} (${info.page_id})`
         : `${info.friendly_name} · ${info.status}`;
       setTestResult(prev => ({ ...prev, [channel]: { ok: true, msg } }));
