@@ -35,6 +35,7 @@ class ChatbotUpdateRequest(BaseModel):
     placeholder_text: str | None = Field(None, max_length=200)
     bubble_style: str | None = Field(None, pattern=r"^(rounded|square|pill)$")
     dark_mode: bool | None = None
+    ai_paused: bool | None = None
     # Voice
     tts_enabled: bool | None = None
     stt_enabled: bool | None = None
@@ -64,6 +65,7 @@ class ChatbotResponse(BaseModel):
     placeholder_text: str
     bubble_style: str
     dark_mode: bool
+    ai_paused: bool
     # Voice
     tts_enabled: bool
     stt_enabled: bool
