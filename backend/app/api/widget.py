@@ -82,9 +82,26 @@ async def get_widget_config(
         position=wc.position,
         show_branding=wc.show_branding,
     )
+
+    data = cfg.model_dump()
+
+    # Apply agency branding when chatbot belongs to an agency-owned account
+    try:
+        from app.models.white_label import Agency
+        agency_result = await db.execute(
+            select(Agency).where(Agency.owner_user_id == bot.user_id)
+        )
+        agency = agency_result.scalar_one_or_none()
+        if agency:
+            data["agency_primary_colour"] = agency.primary_colour
+            data["agency_logo_url"] = agency.logo_url
+            data["powered_by"] = agency.slug if agency.plan in ("growth", "unlimited") else None
+    except Exception:
+        pass
+
     # CDN-cacheable for 60 s; stale-while-revalidate allows serving while refreshing
     http_response.headers["Cache-Control"] = "public, max-age=60, s-maxage=60, stale-while-revalidate=30"
-    return {"success": True, "data": cfg.model_dump()}
+    return {"success": True, "data": data}
 
 
 # ── Widget chat ────────────────────────────────────────────────────────────────
