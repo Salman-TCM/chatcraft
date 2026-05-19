@@ -375,7 +375,7 @@
 - [x] `GET /api/v1/contacts/{id}` — get contact (numeric ID or publicId or contactId)
 - [x] `PATCH /api/v1/contacts/{id}` — update contact
 - [x] `DELETE /api/v1/contacts/{id}` — delete contact
-- [ ] `POST /api/v1/contacts/{id}/messages` — send message to contact (finds/creates conversation)
+- [x] `POST /api/v1/contacts/{id}/messages` — send message to contact (finds/creates conversation)
 - [x] `POST /api/v1/contacts/{id}/tags` — add tags to contact
 - [x] `DELETE /api/v1/contacts/{id}/tags/{tagId}` — remove tag from contact
 - [x] `GET /api/v1/contacts/{id}/fields` — get contact custom field values
@@ -623,8 +623,8 @@
 - [ ] Launcher chat bubble (`type: 'launcher'`) with position config
 - [ ] Voice launcher widget (`type: 'voice_launcher'`) with icon options
 - [ ] PWA installation prompt + service worker
-- [ ] Web push notification subscription (VAPID keys)
-- [ ] Push notification backend (`/api/push/subscribe` + `/api/push/send`)
+- [x] Web push notification subscription (VAPID keys)
+- [x] Push notification backend (`/api/push/subscribe` + `/api/push/send`)
 - [ ] Persistent menu configuration (links/phone/flow triggers)
 - [ ] Typing indicator shown during AI reply delay
 - [ ] AI reply delay setting (0-30 seconds, fixed or random)
@@ -662,8 +662,8 @@
 - [x] Telegram channel in inbox
 
 ### Discord
-- [ ] Discord bot token configuration
-- [ ] Discord bot message handler
+- [x] Discord bot token configuration
+- [x] Discord bot message handler
 - [ ] Send messages, embeds, add/remove roles via Discord API
 - [ ] Discord channel in inbox
 
