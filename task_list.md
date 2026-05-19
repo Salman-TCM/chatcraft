@@ -816,37 +816,37 @@
 > Goal: Sell products via chatbot-powered storefront
 
 ### Database Tables
-- [ ] `commerce_stores` table (id, user_id, name, slug, description, is_active, currency, primary_color, default_view_mode, payment_provider, google_sheet_id)
-- [ ] `commerce_payments` table (id, store_id, user_id, contact_id, customer_name, customer_email, amount, currency, stripe_payment_intent_id, status, items JSON, metadata JSON)
+- [x] `commerce_stores` table (id, user_id, name, slug, description, is_active, currency, primary_color, default_view_mode, payment_provider, google_sheet_id)
+- [x] `commerce_payments` table (id, store_id, user_id, contact_id, customer_name, customer_email, amount, currency, stripe_payment_intent_id, status, items JSON, metadata JSON)
 
 ### Commerce API — Backend
-- [ ] `GET /api/v1/stores` — list stores
-- [ ] `POST /api/v1/stores` — create store
-- [ ] `GET /api/v1/stores/{id}` — store detail
-- [ ] `PATCH /api/v1/stores/{id}` — update store
-- [ ] `DELETE /api/v1/stores/{id}` — delete store
-- [ ] `GET /api/v1/stores/{id}/products` — list products (from Google Sheet catalog, filter by category, maxItems)
-- [ ] `POST /api/v1/stores/{id}/products` — add product to catalog
-- [ ] `PATCH /api/v1/stores/{id}/products/{productId}` — update product (by originalName in Sheet)
-- [ ] `DELETE /api/v1/stores/{id}/products/{productId}` — delete product
-- [ ] `POST /api/v1/stores/{id}/sync` — sync products from Google Sheet
-- [ ] `GET /api/v1/stores/{idOrSlug}/public` — public store config (no auth)
-- [ ] `GET /api/v1/stores/{idOrSlug}/products/public` — public product catalog (no auth)
-- [ ] `POST /api/commerce/checkout/create-payment-intent` — validate cart + create Stripe PaymentIntent
-- [ ] `POST /api/commerce/checkout/confirm` — confirm payment + create contact + record order
-- [ ] `GET /api/commerce/stores/{id}/purchases` — list purchases (store owner only)
-- [ ] `GET /api/commerce/stores/{id}/purchases/{purchaseId}` — single purchase detail
+- [x] `GET /api/v1/stores` — list stores
+- [x] `POST /api/v1/stores` — create store
+- [x] `GET /api/v1/stores/{id}` — store detail
+- [x] `PATCH /api/v1/stores/{id}` — update store
+- [x] `DELETE /api/v1/stores/{id}` — delete store
+- [x] `GET /api/v1/stores/{id}/products` — list products (from Google Sheet catalog, filter by category, maxItems)
+- [x] `POST /api/v1/stores/{id}/products` — add product to catalog
+- [x] `PATCH /api/v1/stores/{id}/products/{productId}` — update product (by originalName in Sheet)
+- [x] `DELETE /api/v1/stores/{id}/products/{productId}` — delete product
+- [x] `POST /api/v1/stores/{id}/sync` — sync products from Google Sheet
+- [x] `GET /api/v1/stores/{idOrSlug}/public` — public store config (no auth)
+- [x] `GET /api/v1/stores/{idOrSlug}/products/public` — public product catalog (no auth)
+- [x] `POST /api/commerce/checkout/create-payment-intent` — validate cart + create Stripe PaymentIntent
+- [x] `POST /api/commerce/checkout/confirm` — confirm payment + create contact + record order
+- [x] `GET /api/commerce/stores/{id}/purchases` — list purchases (store owner only)
+- [x] `GET /api/commerce/stores/{id}/purchases/{purchaseId}` — single purchase detail
 
 ### Commerce UI — Frontend
-- [ ] Stores list page (`/dashboard/stores`)
-- [ ] Store settings page (name, slug, currency, color, payment provider, Google Sheet connection)
-- [ ] Product catalog table (with category filter, add/edit/delete)
-- [ ] Product inventory sync from Google Sheet
-- [ ] Public storefront (`/store/{slug}`) — product grid/list view
-- [ ] Shopping cart with item management
-- [ ] Stripe checkout integration on storefront
-- [ ] Order confirmation page
-- [ ] Purchase history page (store owner view)
+- [x] Stores list page (`/dashboard/stores`)
+- [x] Store settings page (name, slug, currency, color, payment provider, Google Sheet connection)
+- [x] Product catalog table (with category filter, add/edit/delete)
+- [x] Product inventory sync from Google Sheet
+- [x] Public storefront (`/store/{slug}`) — product grid/list view
+- [x] Shopping cart with item management
+- [x] Stripe checkout integration on storefront
+- [x] Order confirmation page
+- [x] Purchase history page (store owner view)
 - [ ] Embed storefront in widget (chatbot can show products)
 
 ---
@@ -855,37 +855,37 @@
 > Goal: Issue Apple/Google Wallet passes (membership, punch card, points, etc.)
 
 ### Database Tables
-- [ ] `wallet_programs` table (id, user_id, name, type, description, status, config JSON, brand_overrides JSON, chatbot_id)
-- [ ] `wallet_cards` table (id, serial, program_id, customer_name, customer_email, customer_phone, contact_id, status, state JSON, google_pass_object_id, created_at)
-- [ ] `wallet_push_subscriptions` table (id, card_id, device_type, push_token, created_at)
+- [x] `wallet_programs` table (id, user_id, name, type, description, status, config JSON, brand_overrides JSON, chatbot_id)
+- [x] `wallet_cards` table (id, serial, program_id, customer_name, customer_email, customer_phone, contact_id, status, state JSON, google_pass_object_id, created_at)
+- [x] `wallet_push_subscriptions` table (id, card_id, device_type, push_token, created_at)
 
 ### Wallet API — Backend
-- [ ] `GET /api/wallet/program-types` — list supported pass types
-- [ ] `GET /api/wallet/programs` — list wallet programs
-- [ ] `POST /api/wallet/programs` — create program (membership/punch_card/points/coupon/event_ticket/prepaid_balance/business_card)
-- [ ] `GET /api/wallet/programs/{id}` — program detail
-- [ ] `PATCH /api/wallet/programs/{id}` — update program (config, branding, widget link)
-- [ ] `POST /api/wallet/programs/bulk-delete` — bulk delete programs
-- [ ] `GET /api/wallet/programs/{id}/cards` — list issued cards
-- [ ] `POST /api/wallet/programs/{id}/cards` — issue card to customer (with deduplication)
-- [ ] `DELETE /api/wallet/cards/{serial}` — revoke card (removes from Google Wallet)
-- [ ] `POST /api/wallet/cards/{serial}/action` — perform card action (add_punch, remove_punch, redeem, set_punches, set_tier, add_points, remove_points, set_balance, check_in, un_check_in, deduct_balance, load_balance, refund_balance)
-- [ ] `POST /api/wallet/cards/{serial}/push` — send push notification to card (Apple + Google)
-- [ ] `POST /api/wallet/programs/{id}/push` — broadcast push to all active card holders
-- [ ] Apple Wallet PKPass generation (`.pkpass` file with signing cert)
-- [ ] Google Wallet pass object creation via Google Wallet API
-- [ ] APNs (Apple Push Notification service) integration for wallet updates
-- [ ] Google Wallet class-level broadcast push
+- [x] `GET /api/wallet/program-types` — list supported pass types
+- [x] `GET /api/wallet/programs` — list wallet programs
+- [x] `POST /api/wallet/programs` — create program (membership/punch_card/points/coupon/event_ticket/prepaid_balance/business_card)
+- [x] `GET /api/wallet/programs/{id}` — program detail
+- [x] `PATCH /api/wallet/programs/{id}` — update program (config, branding, widget link)
+- [x] `POST /api/wallet/programs/bulk-delete` — bulk delete programs
+- [x] `GET /api/wallet/programs/{id}/cards` — list issued cards
+- [x] `POST /api/wallet/programs/{id}/cards` — issue card to customer (with deduplication)
+- [x] `DELETE /api/wallet/cards/{serial}` — revoke card (removes from Google Wallet)
+- [x] `POST /api/wallet/cards/{serial}/action` — perform card action (add_punch, remove_punch, redeem, set_punches, set_tier, add_points, remove_points, set_balance, check_in, un_check_in, deduct_balance, load_balance, refund_balance)
+- [x] `POST /api/wallet/cards/{serial}/push` — send push notification to card (Apple + Google)
+- [x] `POST /api/wallet/programs/{id}/push` — broadcast push to all active card holders
+- [x] Apple Wallet PKPass generation (`.pkpass` file with signing cert)
+- [x] Google Wallet pass object creation via Google Wallet API
+- [x] APNs (Apple Push Notification service) integration for wallet updates
+- [x] Google Wallet class-level broadcast push
 
 ### Wallet UI — Frontend
-- [ ] Wallet Programs list page (`/dashboard/wallet`)
-- [ ] Create program wizard (type selection + config per type)
-- [ ] Program detail page with issued cards table
-- [ ] Issue card modal (customer name, email, phone)
-- [ ] Card action panel (punch, redeem, add points, etc.)
-- [ ] Send push notification form (with template variables)
-- [ ] Broadcast push to all card holders
-- [ ] Program branding editor (colors, icons)
+- [x] Wallet Programs list page (`/dashboard/wallet`)
+- [x] Create program wizard (type selection + config per type)
+- [x] Program detail page with issued cards table
+- [x] Issue card modal (customer name, email, phone)
+- [x] Card action panel (punch, redeem, add points, etc.)
+- [x] Send push notification form (with template variables)
+- [x] Broadcast push to all card holders
+- [x] Program branding editor (colors, icons)
 - [ ] Card public pass page — QR code for Apple/Google Wallet add button
 
 ---
