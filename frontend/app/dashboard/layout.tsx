@@ -65,13 +65,16 @@ const AI_TOOLS: NavItem[] = [
 ];
 
 const FOOTER_NAV: NavItem[] = [
-  { href: "/dashboard/tags",     label: "Tags",     icon: Tag },
-  { href: "/dashboard/usage",    label: "Usage",    icon: BarChart2 },
-  { href: "/dashboard/settings", label: "Settings", icon: Settings },
+  { href: "/dashboard/tags",                    label: "Tags",         icon: Tag },
+  { href: "/dashboard/usage",                   label: "Usage",        icon: BarChart2 },
+  { href: "/dashboard/settings/integrations",   label: "Integrations", icon: Plug },
+  { href: "/dashboard/settings",                label: "Settings",     icon: Settings },
 ];
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
+const EXACT_ROUTES = new Set(["/dashboard/settings"]);
 function active(pathname: string, href: string) {
+  if (EXACT_ROUTES.has(href)) return pathname === href;
   return href === "/dashboard" ? pathname === "/dashboard" : pathname.startsWith(href);
 }
 function sectionHasActive(pathname: string, items: NavItem[]) {
