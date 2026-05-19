@@ -312,3 +312,31 @@ async def test_sms(chatbot_id: uuid.UUID, user: CurrentUser, db: DBSession) -> d
     except Exception as exc:
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc))
     return {"success": True, "data": {"account_sid": data.get("sid"), "friendly_name": data.get("friendly_name"), "status": data.get("status")}}
+
+
+@router.post("/chatbots/{chatbot_id}/integrations/discord/test", response_model=dict)
+async def test_discord(chatbot_id: uuid.UUID, user: CurrentUser, db: DBSession) -> dict:
+    await _get_owned_bot(chatbot_id, user.id, db)
+    result = await db.execute(
+        select(ChannelIntegration).where(
+            ChannelIntegration.chatbot_id == chatbot_id,
+            ChannelIntegration.channel == "discord",
+        )
+    )
+    integration = result.scalar_one_or_none()
+    if not integration:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not configured")
+
+    import httpx
+    token = integration.config.get("bot_token", "")
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            r = await client.get(
+                "https://discord.com/api/v10/users/@me",
+                headers={"Authorization": f"Bot {token}"},
+            )
+            r.raise_for_status()
+            data = r.json()
+    except Exception as exc:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc))
+    return {"success": True, "data": {"bot_id": data.get("id"), "username": data.get("username"), "discriminator": data.get("discriminator")}}

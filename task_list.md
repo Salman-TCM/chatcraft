@@ -351,7 +351,7 @@
 - [x] SQLAlchemy parameterised queries only
 - [ ] File upload virus scanning (ClamAV or equivalent)
 - [ ] API keys encrypted at rest (AES-256 via cryptography lib)
-- [ ] Brute force protection on login (Redis-backed attempt counter)
+- [x] Brute force protection on login (Redis-backed attempt counter)
 
 ---
 
@@ -1139,10 +1139,10 @@
 ### Final Security
 - [ ] File upload virus scanning (ClamAV)
 - [ ] API keys encrypted at rest (AES-256)
-- [ ] Brute force protection on login
+- [x] Brute force protection on login
 - [ ] OWASP Top 10 checklist review
 - [ ] Penetration test on auth + billing endpoints
-- [ ] Rate limiting on all public endpoints (including widget chat + webhooks)
+- [x] Rate limiting on all public endpoints (including widget chat + webhooks)
 
 ### DevOps
 - [ ] Production environment fully configured (Railway + Vercel + Supabase + Upstash)

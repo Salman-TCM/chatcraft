@@ -108,6 +108,19 @@ const CHANNELS: ChannelDef[] = [
     ],
     setupUrl: "https://console.twilio.com/",
   },
+  {
+    key: "discord",
+    label: "Discord",
+    icon: "🎮",
+    color: "bg-indigo-50 border-indigo-200",
+    description: "Connect a Discord bot to reply to messages in your server channels.",
+    fields: [
+      { key: "bot_token", label: "Bot Token", placeholder: "MTxxxxxxxxxxxxxxxxxxxxxxxx.xxxxxx.xxxxx", secret: true },
+      { key: "application_id", label: "Application ID", placeholder: "1234567890123456789" },
+    ],
+    webhookNote: "Set your Discord bot's Interactions Endpoint URL to the webhook URL below.",
+    setupUrl: "https://discord.com/developers/applications",
+  },
 ];
 
 // ── Main component ────────────────────────────────────────────────────────────
@@ -190,6 +203,8 @@ export default function ChannelsPage() {
         ? `${info.verified_name} · ${info.display_phone_number}`
         : channel === "facebook" || channel === "instagram"
         ? `${info.page_name} (${info.page_id})`
+        : channel === "discord"
+        ? `@${info.username}#${info.discriminator} (${info.bot_id})`
         : `${info.friendly_name} · ${info.status}`;
       setTestResult(prev => ({ ...prev, [channel]: { ok: true, msg } }));
     } catch (e: any) {
