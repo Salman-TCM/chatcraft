@@ -29,8 +29,15 @@ from app.models.conversation import Conversation
 from app.models.message import Message, MessageFeedback, MessageRole
 from app.models.user import User, UserRole
 from app.models.widget_config import WidgetConfig
+from app.models.widget_license import WidgetLicense
 from app.schemas.chat import ChatRequest
 from app.schemas.widget import WidgetConfigResponse, WidgetConfigUpdate, WidgetPublicConfig
+from pydantic import BaseModel as _BaseModel
+
+class _LicenseCreate(_BaseModel):
+    label: str = ""
+    allowed_domain: str | None = None
+    expires_at: datetime | None = None
 from app.services.kb.rag import RAGService
 from app.services.llm import (
     ChatMessage,
@@ -318,6 +325,85 @@ async def rotate_token(chatbot_id: uuid.UUID, user: CurrentUser, db: DBSession) 
     await db.commit()
     await db.refresh(wc)
     return {"success": True, "data": {"embed_token": wc.embed_token}}
+
+
+# ── License endpoints ─────────────────────────────────────────────────────────
+
+def _license_out(lic: WidgetLicense) -> dict:
+    return {
+        "id": str(lic.id),
+        "label": lic.label,
+        "license_key": lic.license_key,
+        "allowed_domain": lic.allowed_domain,
+        "status": lic.status,
+        "expires_at": lic.expires_at.isoformat() if lic.expires_at else None,
+        "created_at": lic.created_at.isoformat(),
+    }
+
+
+@router.get("/manage/{chatbot_id}/licenses")
+async def list_licenses(chatbot_id: uuid.UUID, user: CurrentUser, db: DBSession) -> dict:
+    bot = await _owned_bot(chatbot_id, user.id, db)
+    wc = await _get_or_create_widget_config(bot, db)
+    result = await db.execute(
+        select(WidgetLicense)
+        .where(WidgetLicense.widget_config_id == wc.id)
+        .order_by(WidgetLicense.created_at.desc())
+    )
+    licenses = result.scalars().all()
+    return {"success": True, "data": [_license_out(lic) for lic in licenses]}
+
+
+@router.post("/manage/{chatbot_id}/licenses", status_code=status.HTTP_201_CREATED)
+async def create_license(chatbot_id: uuid.UUID, body: _LicenseCreate, user: CurrentUser, db: DBSession) -> dict:
+    bot = await _owned_bot(chatbot_id, user.id, db)
+    wc = await _get_or_create_widget_config(bot, db)
+    lic = WidgetLicense(
+        widget_config_id=wc.id,
+        label=body.label,
+        allowed_domain=body.allowed_domain or None,
+        expires_at=body.expires_at,
+    )
+    db.add(lic)
+    await db.commit()
+    await db.refresh(lic)
+    return {"success": True, "data": _license_out(lic)}
+
+
+@router.delete("/manage/{chatbot_id}/licenses/{license_id}", status_code=status.HTTP_200_OK)
+async def revoke_license(chatbot_id: uuid.UUID, license_id: uuid.UUID, user: CurrentUser, db: DBSession) -> dict:
+    bot = await _owned_bot(chatbot_id, user.id, db)
+    wc = await _get_or_create_widget_config(bot, db)
+    result = await db.execute(
+        select(WidgetLicense).where(
+            WidgetLicense.id == license_id,
+            WidgetLicense.widget_config_id == wc.id,
+        )
+    )
+    lic = result.scalar_one_or_none()
+    if not lic:
+        raise HTTPException(status_code=404, detail="License not found")
+    lic.status = "revoked"
+    await db.commit()
+    return {"success": True, "data": None}
+
+
+@router.get("/validate-license")
+async def validate_license(license_key: str, origin: str | None = None, db: DBSession = None) -> dict:
+    """Called by widget.js on load to check if the license key is valid."""
+    result = await db.execute(
+        select(WidgetLicense).where(WidgetLicense.license_key == license_key)
+    )
+    lic = result.scalar_one_or_none()
+    if not lic or lic.status != "active":
+        return {"success": False, "data": {"valid": False, "reason": "Invalid or revoked license"}}
+    if lic.expires_at and lic.expires_at < datetime.now(timezone.utc):
+        return {"success": False, "data": {"valid": False, "reason": "License expired"}}
+    if lic.allowed_domain and origin:
+        host = _origin_host(origin)
+        if host != lic.allowed_domain.lower().lstrip("www."):
+            return {"success": False, "data": {"valid": False, "reason": "Domain not authorised"}}
+    return {"success": True, "data": {"valid": True}}
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
