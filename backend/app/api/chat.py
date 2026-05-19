@@ -17,7 +17,7 @@ from datetime import datetime, timezone
 from typing import AsyncIterator
 
 import redis.asyncio as aioredis
-from fastapi import APIRouter, BackgroundTasks, Header, HTTPException, Request, status
+from fastapi import APIRouter, BackgroundTasks, Depends, Header, HTTPException, Request, status
 from fastapi.responses import StreamingResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from jose import JWTError
@@ -74,7 +74,7 @@ async def stream_chat(
     background_tasks: BackgroundTasks,
     db: DBSession,
     redis: RedisClient,
-    authorization: HTTPAuthorizationCredentials | None = _optional_bearer,
+    authorization: HTTPAuthorizationCredentials | None = Depends(_optional_bearer),
     x_guest_id: str | None = Header(default=None),
 ) -> StreamingResponse:
     # ── resolve identity ──────────────────────────────────────────────────────
@@ -293,7 +293,7 @@ async def get_history(
     db: DBSession,
     page: int = 1,
     per_page: int = 20,
-    authorization: HTTPAuthorizationCredentials | None = _optional_bearer,
+    authorization: HTTPAuthorizationCredentials | None = Depends(_optional_bearer),
 ) -> dict:
     user = await _resolve_user(authorization, db)
     if not user:
@@ -335,7 +335,7 @@ async def get_history(
 async def delete_conversation(
     conversation_id: uuid.UUID,
     db: DBSession,
-    authorization: HTTPAuthorizationCredentials | None = _optional_bearer,
+    authorization: HTTPAuthorizationCredentials | None = Depends(_optional_bearer),
 ) -> dict:
     user = await _resolve_user(authorization, db)
     if not user:
@@ -361,7 +361,7 @@ async def set_feedback(
     message_id: uuid.UUID,
     body: FeedbackRequest,
     db: DBSession,
-    authorization: HTTPAuthorizationCredentials | None = _optional_bearer,
+    authorization: HTTPAuthorizationCredentials | None = Depends(_optional_bearer),
 ) -> dict:
     user = await _resolve_user(authorization, db)
     if not user:
