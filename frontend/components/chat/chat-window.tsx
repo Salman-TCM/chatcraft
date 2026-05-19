@@ -143,8 +143,17 @@ export function ChatWindow({
         const code = err?.detail?.code;
         if (code === "MESSAGE_CAP_REACHED") {
           openHardPaywall(err?.detail?.cap ?? 0);
+          setMessages((prev) => prev.filter((m) => m.id !== tempAiId));
+        } else {
+          const errorMsg = err?.detail?.error ?? err?.detail ?? `Request failed (${res.status})`;
+          setMessages((prev) =>
+            prev.map((m) =>
+              m.id === tempAiId
+                ? { ...m, content: `⚠️ ${errorMsg}`, isStreaming: false }
+                : m
+            )
+          );
         }
-        setMessages((prev) => prev.filter((m) => m.id !== tempAiId));
         return;
       }
 
