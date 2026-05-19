@@ -58,6 +58,9 @@ class ChatbotConfig(TimestampMixin, Base):
     dark_mode: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=False, server_default="false"
     )
+    ai_paused: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default="false"
+    )
 
     # ── Voice fields ──────────────────────────────────────────────────────────
     tts_enabled: Mapped[bool] = mapped_column(
