@@ -639,11 +639,11 @@
 - [ ] Set/delete persistent menu via Messenger Profile API
 
 ### Instagram DM
-- [ ] Instagram DM webhook handler (`POST /api/webhooks/instagram`)
-- [ ] Send DM replies via Instagram Graph API
+- [x] Instagram DM webhook handler (`POST /api/webhooks/instagram`)
+- [x] Send DM replies via Instagram Graph API
 - [ ] Story mention automation
 - [ ] Comment automation: auto-reply to post comments (public reply + DM)
-- [ ] Instagram channel in inbox
+- [x] Instagram channel in inbox
 
 ### WhatsApp Business API
 - [x] WhatsApp webhook handler (`POST /api/webhooks/whatsapp`)
@@ -764,11 +764,11 @@
 - [x] `POST /api/v1/broadcasts` — create broadcast (email/SMS/Telegram/push/WhatsApp/Messenger/phone)
 - [x] `POST /api/v1/broadcasts/{id}/send` — send or schedule broadcast
 - [x] `GET /api/v1/broadcasts/{id}/stats` — delivery + engagement analytics
-- [ ] Email broadcast: AWS SES bulk send, open/click tracking, HTML template
-- [ ] SMS broadcast: Twilio bulk SMS with personalization variables
-- [ ] Telegram broadcast: bulk message to all Telegram subscribers
+- [x] Email broadcast: AWS SES bulk send, open/click tracking, HTML template
+- [x] SMS broadcast: Twilio bulk SMS with personalization variables
+- [x] Telegram broadcast: bulk message to all Telegram subscribers
 - [ ] Push broadcast: VAPID bulk push to PWA subscribers
-- [ ] WhatsApp broadcast: Meta-approved template messages (24h compliance)
+- [x] WhatsApp broadcast: Meta-approved template messages (24h compliance)
 - [ ] Messenger broadcast: Facebook marketing messages
 - [ ] Phone broadcast: ElevenLabs outbound call campaigns
 
@@ -992,15 +992,15 @@
 > Goal: Programmatic platform control for integrations
 
 ### Database Tables
-- [ ] `api_tokens` table (id, user_id, name, token_hash, token_prefix, last_used_at)
+- [x] `api_tokens` table (id, user_id, name, token_hash, token_prefix, last_used_at)
 
 ### API Token Management
-- [ ] `GET /api/tokens` — list all API tokens
-- [ ] `POST /api/tokens` — generate new API token (full token shown once)
-- [ ] `DELETE /api/tokens/{id}` — revoke token
+- [x] `GET /api/tokens` — list all API tokens
+- [x] `POST /api/tokens` — generate new API token (full token shown once)
+- [x] `DELETE /api/tokens/{id}` — revoke token
 - [ ] `GET /api/v1/me` — get authenticated user info
-- [ ] API tokens management page (`/dashboard/settings/api-tokens`)
-- [ ] Bearer token auth on all `/api/v1/*` and `/api/manage/*` routes
+- [x] API tokens management page (`/dashboard/settings/api-tokens`)
+- [x] Bearer token auth on all `/api/v1/*` and `/api/manage/*` routes
 
 ### Widget Management API
 - [ ] `GET /api/manage/widgets` — list widgets with key config fields
