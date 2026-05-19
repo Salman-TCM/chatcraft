@@ -1025,84 +1025,84 @@
 > Goal: 3-tier reseller hierarchy (Platform → Agencies → Tenants/Clients) with full brand isolation
 
 ### 19.1 — Database Schema (3-tier hierarchy)
-- [ ] `platform_config` table — single row: platform name, logo, support email, Stripe account ID, updated_at
-- [ ] `agencies` table — slug (subdomain), custom_domain, logo_url, favicon_url, primary_colour, support_email, from_email, smtp_config JSONB, plan (starter/growth/unlimited), status, owner_user_id
-- [ ] `tenants` table — agency_id FK, name, slug, plan, status; UNIQUE(agency_id, slug)
-- [ ] `impersonation_audit_log` table — id, actor_user_id, target_user_id, target_agency_id, started_at, ended_at, ip_address
-- [ ] Alembic migration `000000000014_add_white_label_tables.py`
+- [x] `platform_config` table — single row: platform name, logo, support email, Stripe account ID, updated_at
+- [x] `agencies` table — slug (subdomain), custom_domain, logo_url, favicon_url, primary_colour, support_email, from_email, smtp_config JSONB, plan (starter/growth/unlimited), status, owner_user_id
+- [x] `tenants` table — agency_id FK, name, slug, plan, status; UNIQUE(agency_id, slug)
+- [x] `impersonation_audit_log` table — id, actor_user_id, target_user_id, target_agency_id, started_at, ended_at, ip_address
+- [x] Alembic migration `000000000024_add_white_label_tables.py`
 
 ### 19.2 — Custom Domain Routing (Next.js Middleware)
-- [ ] Extend `middleware.ts` to read `host` header and call `resolveAgency(host)`
-- [ ] `resolveAgency()` helper: (a) exact match on `agencies.custom_domain` → load agency; (b) `{slug}.platform.com` → load by slug; (c) bare platform domain → platform admin mode
+- [x] Extend `middleware.ts` to read `host` header and call `resolveAgency(host)`
+- [x] `resolveAgency()` helper: (a) exact match on `agencies.custom_domain` → load agency; (b) `{slug}.platform.com` → load by slug; (c) bare platform domain → platform admin mode
 - [ ] Redis cache for domain→agency_id lookup (TTL 5 min, key: `agency:domain:{host}`)
-- [ ] Set response headers `x-agency-id` and `x-agency-theme` (JSON: primaryColour, logo, name, favicon)
-- [ ] Fallback gracefully when Redis is unavailable (DB direct lookup)
+- [x] Set response headers `x-agency-id` and `x-agency-theme` (JSON: primaryColour, logo, name, favicon)
+- [x] Fallback gracefully when Redis is unavailable (DB direct lookup)
 
 ### 19.3 — Theme Provider (React)
-- [ ] `AgencyThemeProvider` server component — reads `x-agency-theme` header, passes to client
-- [ ] Client `ThemeInjector` — injects CSS variables `--brand-primary`, `--brand-primary-hover` into `:root`
-- [ ] Dynamic favicon swap via `<link>` tag based on agency config
+- [x] `AgencyThemeProvider` server component — reads `x-agency-theme` header, passes to client
+- [x] Client `ThemeInjector` — injects CSS variables `--brand-primary`, `--brand-primary-hover` into `:root`
+- [x] Dynamic favicon swap via `<link>` tag based on agency config
 - [ ] Dynamic `<title>` and `og:image` metadata from agency config (per-layout server component)
 - [ ] Replace all hardcoded "ChatCraft AI" strings in client-facing routes with `{agency.name ?? platformName}`
 - [ ] Logo component that renders agency logo when present, platform logo as fallback
 
 ### 19.4 — Agency Admin UI
-- [ ] `/agency` layout with agency-branded sidebar (reads theme from context)
-- [ ] `/agency/dashboard` — KPIs: total clients, active conversations, revenue MTD
-- [ ] `/agency/clients` — tenant list: create/edit/delete clients, impersonate client
-- [ ] `/agency/settings/branding` — logo upload, primary colour picker, support email, from_email
-- [ ] `/agency/settings/domain` — custom domain setup flow:
+- [x] `/agency` layout with agency-branded sidebar (reads theme from context)
+- [x] `/agency/dashboard` — KPIs: total clients, active conversations, revenue MTD
+- [x] `/agency/clients` — tenant list: create/edit/delete clients, impersonate client
+- [x] `/agency/settings/branding` — logo upload, primary colour picker, support email, from_email
+- [x] `/agency/settings/domain` — custom domain setup flow:
   - Step 1: input custom domain
   - Step 2: display CNAME DNS instructions (point to platform proxy)
   - Step 3: poll DNS verification every 30 s (`dns.resolve()` check via `/api/agency/verify-domain`)
   - Step 4: mark `custom_domain` verified in DB, activate routing
-- [ ] `/agency/settings/email` — custom SMTP config form (host, port, user, password, from_name); send test email button
+- [x] `/agency/settings/email` — custom SMTP config form (host, port, user, password, from_name); send test email button
 - [ ] `/agency/team` — invite/manage agency team members
 
 ### 19.5 — Agency & Tenant API (Backend)
-- [ ] `POST /api/v1/agencies` — create agency (superadmin only)
-- [ ] `GET /api/v1/agencies` — list agencies (superadmin)
-- [ ] `GET /api/v1/agencies/{id}` — get agency detail
-- [ ] `PATCH /api/v1/agencies/{id}` — update agency config/branding
-- [ ] `DELETE /api/v1/agencies/{id}` — delete agency + cascade
-- [ ] `GET /api/v1/agencies/{id}/tenants` — list tenants for agency
-- [ ] `POST /api/v1/agencies/{id}/tenants` — create tenant/client
-- [ ] `DELETE /api/v1/agencies/{id}/tenants/{tid}` — delete tenant
-- [ ] `GET /api/v1/agency/me` — agency owner: get own agency config
-- [ ] `PUT /api/v1/agency/me` — agency owner: update branding/settings
-- [ ] `GET /api/v1/agency/me/domain-status` — check custom domain DNS propagation
-- [ ] `POST /api/v1/agency/verify-domain` — trigger DNS check and mark verified
-- [ ] `POST /api/v1/agency/send-test-email` — test SMTP config
+- [x] `POST /api/v1/agencies` — create agency (superadmin only)
+- [x] `GET /api/v1/agencies` — list agencies (superadmin)
+- [x] `GET /api/v1/agencies/{id}` — get agency detail
+- [x] `PATCH /api/v1/agencies/{id}` — update agency config/branding
+- [x] `DELETE /api/v1/agencies/{id}` — delete agency + cascade
+- [x] `GET /api/v1/agencies/{id}/tenants` — list tenants for agency
+- [x] `POST /api/v1/agencies/{id}/tenants` — create tenant/client
+- [x] `DELETE /api/v1/agencies/{id}/tenants/{tid}` — delete tenant
+- [x] `GET /api/v1/agency/me` — agency owner: get own agency config
+- [x] `PUT /api/v1/agency/me` — agency owner: update branding/settings
+- [x] `GET /api/v1/agency/me/domain-status` — check custom domain DNS propagation
+- [x] `POST /api/v1/agency/verify-domain` — trigger DNS check and mark verified
+- [x] `POST /api/v1/agency/send-test-email` — test SMTP config
 
 ### 19.6 — Branded Email (Zero Platform Leakage)
 - [ ] Email service (`services/email.py`) updated to accept optional `agency_id`
 - [ ] When `agency_id` present: use agency `smtp_config` if set, else use SendGrid subuser for that agency
 - [ ] All transactional email templates: logo, primary_colour, support_email pulled from agency config at send time
 - [ ] No platform name/logo in any agency-sent email footer, subject, or preheader
-- [ ] `POST /api/v1/agency/send-test-email` — send a test email through the configured SMTP
+- [x] `POST /api/v1/agency/send-test-email` — send a test email through the configured SMTP
 
 ### 19.7 — White-Label Widget
-- [ ] Widget config endpoint `/api/widget/config/{token}` returns agency branding (not platform branding) when chatbot belongs to an agency-owned account
+- [x] Widget config endpoint `/api/widget/config/{token}` returns agency branding (not platform branding) when chatbot belongs to an agency-owned account
 - [ ] `widget.js` served at `/widget.js` on agency's custom domain includes agency styles, not platform styles
-- [ ] "Powered by" footer logic: growth+ plan → "Powered by {agency_name}"; starter → hidden (platform name never appears)
+- [x] "Powered by" footer logic: growth+ plan → "Powered by {agency_name}"; starter → hidden (platform name never appears)
 - [ ] Widget iframe `<title>` and `aria-label` use agency name
 
 ### 19.8 — Super-Admin Impersonation (complete remaining gaps)
 - [x] Backend `POST /api/admin/users/{id}/impersonate` — generates JWT with `impersonated_by` claim (5 min TTL)
 - [x] Frontend "Impersonate" button in `/admin/users/[id]` — copies token to clipboard
-- [ ] Extend impersonation JWT to 15-min TTL (update `exp` in admin.py)
-- [ ] Add `target_agency_id` to impersonation JWT payload for "View as Agency" mode
-- [ ] `POST /api/admin/agencies/{id}/impersonate` — agency-level impersonation token
-- [ ] Write impersonation start/end events to `impersonation_audit_log`
-- [ ] Visible session banner: read impersonation claim from session JWT; show amber bar "Viewing as [Name] — Exit" with `signOut()` / token clear on exit
-- [ ] Superadmin panel: `/admin/impersonation-log` — table of all impersonation sessions with actor, target, start/end times, IP
+- [x] Extend impersonation JWT to 15-min TTL (update `exp` in admin.py)
+- [x] Add `target_agency_id` to impersonation JWT payload for "View as Agency" mode
+- [x] `POST /api/admin/agencies/{id}/impersonate` — agency-level impersonation token
+- [x] Write impersonation start/end events to `impersonation_audit_log`
+- [x] Visible session banner: read impersonation claim from session JWT; show amber bar "Viewing as [Name] — Exit" with `signOut()` / token clear on exit
+- [x] Superadmin panel: `/admin/impersonation-log` — table of all impersonation sessions with actor, target, start/end times, IP
 
 ### 19.9 — Reseller Revenue & Licensing
-- [ ] `subscriptions_reseller` table (agency_id, client_email, stripe_subscription_id, license_token, plan, amount, status)
-- [ ] `GET /api/v1/agency/subscriptions` — list agency's client subscriptions
-- [ ] `POST /api/v1/agency/subscriptions` — create client subscription + generate license token
+- [x] `subscriptions_reseller` table (agency_id, client_email, stripe_subscription_id, license_token, plan, amount, status)
+- [x] `GET /api/v1/agency/subscriptions` — list agency's client subscriptions
+- [x] `POST /api/v1/agency/subscriptions` — create client subscription + generate license token
 - [ ] License validation API — validates `data-license` token on widget load
-- [ ] Reseller revenue dashboard in agency UI (MRR, churn, client count)
+- [x] Reseller revenue dashboard in agency UI (MRR, churn, client count)
 - [ ] Custom pricing tiers editor (agency sets its own price per plan)
 
 ---
