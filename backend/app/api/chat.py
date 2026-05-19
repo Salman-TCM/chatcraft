@@ -48,6 +48,7 @@ from app.services.llm import (
     build_system_prompt,
     sanitize,
 )
+from app.services.llm.key_store import get_all_keys
 
 router = APIRouter(prefix="/api/chat", tags=["chat"])
 
@@ -168,9 +169,23 @@ async def stream_chat(
     if body.model and bot.allow_model_switch:
         model_id = body.model
 
+    # Load the chatbot owner's API keys (BYOK)
+    owner_id = bot.user_id
+    api_keys = await get_all_keys(owner_id, db)
+    if not api_keys:
+        raise HTTPException(
+            status_code=status.HTTP_402_PAYMENT_REQUIRED,
+            detail={
+                "success": False,
+                "error": "No AI model API key configured. Go to Settings → Integrations and add your API key.",
+                "code": "NO_API_KEY",
+            },
+        )
+
     llm_router = LLMRouter(
         model=model_id,
         fallback_model=bot.fallback_model or settings.default_fallback_model,
+        api_keys=api_keys,
     )
 
     # ── RAG context retrieval ─────────────────────────────────────────────────

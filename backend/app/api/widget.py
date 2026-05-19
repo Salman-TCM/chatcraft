@@ -39,6 +39,7 @@ from app.services.llm import (
     build_system_prompt,
     sanitize,
 )
+from app.services.llm.key_store import get_all_keys
 
 router = APIRouter(prefix="/api/widget", tags=["widget"])
 
@@ -200,9 +201,20 @@ async def widget_chat(
     await _increment_guest(redis, guest_id)
 
     model_id = bot.default_model
+    api_keys = await get_all_keys(bot.user_id, db)
+    if not api_keys:
+        raise HTTPException(
+            status_code=status.HTTP_402_PAYMENT_REQUIRED,
+            detail={
+                "success": False,
+                "error": "No AI model API key configured for this chatbot.",
+                "code": "NO_API_KEY",
+            },
+        )
     llm_router = LLMRouter(
         model=model_id,
         fallback_model=bot.fallback_model or settings.default_fallback_model,
+        api_keys=api_keys,
     )
 
     rag = RAGService(db)
