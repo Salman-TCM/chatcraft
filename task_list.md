@@ -473,43 +473,43 @@
 > Goal: Visual drag-and-drop conversation flow builder
 
 ### Database Tables
-- [ ] `flows` table (id, user_id, chatbot_id, name, slug, description, is_active, webhook_enabled, webhook_secret, nodes JSON, edges JSON)
-- [ ] `flow_runs` table (id, flow_id, contact_id, status, started_at, completed_at, duration_ms)
-- [ ] `flow_variables` table (id, flow_run_id, key, value)
+- [x] `flows` table (id, user_id, chatbot_id, name, slug, description, is_active, webhook_enabled, webhook_secret, nodes JSON, edges JSON)
+- [x] `flow_runs` table (id, flow_id, contact_id, status, started_at, completed_at, duration_ms)
+- [x] `flow_variables` table (id, flow_run_id, key, value)
 
 ### Flow API — Backend
-- [ ] `GET /api/v1/flows` — list all flows
-- [ ] `POST /api/v1/flows` — create flow
-- [ ] `GET /api/v1/flows/list` — simplified list for integrations (id, name, slug)
-- [ ] `GET /api/v1/flows/{id}` — get flow detail (nodes + edges)
-- [ ] `PATCH /api/v1/flows/{id}` — update flow
-- [ ] `DELETE /api/v1/flows/{id}` — delete flow
-- [ ] `POST /api/v1/flows/{id}/toggle` — enable/disable flow
-- [ ] `GET /api/v1/flows/{id}/webhook` — get webhook config
-- [ ] `POST /api/v1/flows/{id}/webhook` — configure webhook (enable/disable, regenerate secret)
-- [ ] `POST /api/v1/flows/{id}/trigger` — manually trigger flow for a contact
-- [ ] `POST /api/webhooks/flow/{flowId}/{webhookSecret}` — external webhook trigger
-- [ ] Flow execution engine (Celery task) — process nodes sequentially
-- [ ] Template variable resolution (`{{first_name}}`, `{{webhook_data.field}}`, custom fields)
+- [x] `GET /api/v1/flows` — list all flows
+- [x] `POST /api/v1/flows` — create flow
+- [x] `GET /api/v1/flows/list` — simplified list for integrations (id, name, slug)
+- [x] `GET /api/v1/flows/{id}` — get flow detail (nodes + edges)
+- [x] `PATCH /api/v1/flows/{id}` — update flow
+- [x] `DELETE /api/v1/flows/{id}` — delete flow
+- [x] `POST /api/v1/flows/{id}/toggle` — enable/disable flow
+- [x] `GET /api/v1/flows/{id}/webhook` — get webhook config
+- [x] `POST /api/v1/flows/{id}/webhook` — configure webhook (enable/disable, regenerate secret)
+- [x] `POST /api/v1/flows/{id}/trigger` — manually trigger flow for a contact
+- [x] `POST /api/webhooks/flow/{flowId}/{webhookSecret}` — external webhook trigger
+- [x] Flow execution engine (Celery task) — process nodes sequentially
+- [x] Template variable resolution (`{{first_name}}`, `{{webhook_data.field}}`, custom fields)
 
 ### Flow Node Types — Backend Execution
-- [ ] **Start node** — entry point
-- [ ] **Send Message node** — text, image, video, file, carousel, card, quick replies, buttons, audio, GIF, typing indicator
-- [ ] **User Input node** — 15 input types (text, email, phone, number, yes/no, date, time, datetime, month, monthday, select, multiselect, file, image, JSON), save to custom field
-- [ ] **Condition node** — field check, has tag, channel, time-based (business hours, day-of-week, date range, relative time), Instagram status
-- [ ] **AI Response node** — generate dynamic response using any LLM
+- [x] **Start node** — entry point
+- [x] **Send Message node** — text, image, video, file, carousel, card, quick replies, buttons, audio, GIF, typing indicator
+- [x] **User Input node** — 15 input types (text, email, phone, number, yes/no, date, time, datetime, month, monthday, select, multiselect, file, image, JSON), save to custom field
+- [x] **Condition node** — field check, has tag, channel, time-based (business hours, day-of-week, date range, relative time), Instagram status
+- [x] **AI Response node** — generate dynamic response using any LLM
 - [ ] **AI Tasks node** — multi-task checklist driven by AI with follow-up nudges and completion branching
-- [ ] **Delay node** — wait seconds/minutes/hours/days
-- [ ] **HTTP Request node** — GET/POST/PUT/DELETE to external APIs with response mapping
-- [ ] **Randomizer node** — A/B split traffic between multiple paths
+- [x] **Delay node** — wait seconds/minutes/hours/days
+- [x] **HTTP Request node** — GET/POST/PUT/DELETE to external APIs with response mapping
+- [x] **Randomizer node** — A/B split traffic between multiple paths
 - [ ] **AI Web node** — Search mode (web search), Fetch mode (URL content), Browse mode (cloud browser)
-- [ ] **Jump To node** — navigate to another flow or step within current flow
-- [ ] **End node** — terminate flow
-- [ ] **Notes node** — documentation only, no execution
-- [ ] **Action nodes** (executed silently):
+- [x] **Jump To node** — navigate to another flow or step within current flow
+- [x] **End node** — terminate flow
+- [x] **Notes node** — documentation only, no execution
+- [x] **Action nodes** (executed silently):
   - [ ] AI Generate (text, image, audio with any provider)
   - [ ] AI Web Search
-  - [ ] Set Custom Field (set/append/prepend/increment/decrement/math/date ops)
+  - [x] Set Custom Field (set/append/prepend/increment/decrement/math/date ops)
   - [ ] Clear Custom Field
   - [ ] Extract Data (AI-powered data extraction from conversation)
   - [ ] Execute JavaScript (sandboxed, no network)
@@ -517,12 +517,12 @@
   - [ ] Clear Chat History
   - [ ] Opt-Out / Opt-In Contact
   - [ ] Block / Unblock Contact
-  - [ ] Add Tag / Remove Tag
+  - [x] Add Tag / Remove Tag
   - [ ] Assign to Sequence / Unassign from Sequence
-  - [ ] Assign Conversation / Assign Round-Robin / Unassign
-  - [ ] Go to Flow / Go to Step
+  - [x] Assign Conversation / Assign Round-Robin / Unassign
+  - [x] Go to Flow / Go to Step
   - [ ] Add to Pipeline / Move Pipeline Stage / Remove from Pipeline / Update Deal Value
-  - [ ] Pause Conversation / Resume Conversation
+  - [x] Pause Conversation / Resume Conversation
   - [ ] Cancel Pending Flow
   - [ ] Send SMS (Twilio)
   - [ ] Send Email (AWS SES/SMTP)
@@ -530,7 +530,7 @@
   - [ ] Outbound Call (OpenAI Realtime / xAI / ElevenLabs)
   - [ ] Transfer Call / End Call
   - [ ] Send Team Notification / Internal Note
-  - [ ] Send Webhook (HTTP POST to external URL)
+  - [x] Send Webhook (HTTP POST to external URL)
   - [ ] Google Sheets (send/get/update/search rows)
   - [ ] Google Docs (create/update)
   - [ ] WhatsApp Template message
@@ -543,21 +543,21 @@
   - [ ] Comment on Post (Instagram)
 
 ### Flow Builder UI — Frontend
-- [ ] Flow Builder page (`/dashboard/flows/{id}/edit`) with ReactFlow canvas
-- [ ] Drag-and-drop node palette (left panel)
-- [ ] Node configuration panel (right panel, opens on click)
-- [ ] Canvas navigation (zoom, pan, minimap, fit-view)
-- [ ] Copy/paste nodes
+- [x] Flow Builder page (`/dashboard/flows/{id}/edit`) with ReactFlow canvas
+- [x] Drag-and-drop node palette (left panel)
+- [x] Node configuration panel (right panel, opens on click)
+- [x] Canvas navigation (zoom, pan, minimap, fit-view)
+- [x] Copy/paste nodes
 - [ ] Flag icon to set starting node
 - [ ] AI Flow Builder — generate full flow from natural language description
 - [ ] Smart variable autocomplete (press `{` for dropdown of available vars)
 - [ ] Channel routing selector per Send Message node (omni/Messenger/WhatsApp/SMS/etc.)
 - [ ] Built-in flow simulator / test run
-- [ ] Webhook toggle + URL display in toolbar
-- [ ] Flow list page (`/dashboard/flows`)
+- [x] Webhook toggle + URL display in toolbar
+- [x] Flow list page (`/dashboard/flows`)
 - [ ] Folder organisation for flows
-- [ ] Duplicate flow button
-- [ ] Flow run history table (with duration, contact, status)
+- [x] Duplicate flow button
+- [x] Flow run history table (with duration, contact, status)
 
 ---
 
@@ -565,49 +565,49 @@
 > Goal: Event-driven automations, drip sequences, keyword triggers
 
 ### Database Tables
-- [ ] `automations` table (id, user_id, name, description, trigger_type, trigger_config JSON, action_type, action_config JSON, enabled, execution_count, last_executed_at)
-- [ ] `sequences` table (id, user_id, chatbot_id, name, description, auto_enroll, reply_behavior, steps JSON)
-- [ ] `sequence_enrollments` table (id, sequence_id, contact_id, status, current_step, enrolled_at, completed_at)
-- [ ] `keywords` table (id, user_id, chatbot_id, keywords array, response_type, response_text, flow_id, is_active)
+- [x] `automations` table (id, user_id, name, description, trigger_type, trigger_config JSON, action_type, action_config JSON, enabled, execution_count, last_executed_at)
+- [x] `sequences` table (id, user_id, chatbot_id, name, description, auto_enroll, reply_behavior, steps JSON)
+- [x] `sequence_enrollments` table (id, sequence_id, contact_id, status, current_step, enrolled_at, completed_at)
+- [x] `keywords` table (id, user_id, chatbot_id, keywords array, response_type, response_text, flow_id, is_active)
 
 ### Automations API — Backend
-- [ ] `GET /api/v1/automations` — list all automations
-- [ ] `GET /api/v1/automations/{id}` — get automation detail (trigger + action config)
-- [ ] `POST /api/v1/automations/{id}/toggle` — enable/disable automation
-- [ ] Automation trigger types: new contact, contact tag added, contact field updated, conversation opened, conversation closed, pipeline stage changed, payment received, form submitted
-- [ ] Automation action types: trigger flow, send message, add tag, set custom field, add to pipeline, send webhook
+- [x] `GET /api/v1/automations` — list all automations
+- [x] `GET /api/v1/automations/{id}` — get automation detail (trigger + action config)
+- [x] `POST /api/v1/automations/{id}/toggle` — enable/disable automation
+- [x] Automation trigger types: new contact, contact tag added, contact field updated, conversation opened, conversation closed, pipeline stage changed, payment received, form submitted
+- [x] Automation action types: trigger flow, send message, add tag, set custom field, add to pipeline, send webhook
 
 ### AI Sequences API — Backend
-- [ ] `GET /api/v1/sequences` — list sequences
-- [ ] `POST /api/v1/sequences` — create sequence with steps
-- [ ] `GET /api/v1/sequences/{id}` — get sequence detail
-- [ ] `PATCH /api/v1/sequences/{id}` — update sequence
-- [ ] `DELETE /api/v1/sequences/{id}` — delete sequence
-- [ ] `POST /api/v1/sequences/{id}/enroll` — enroll contact in sequence
-- [ ] `POST /api/v1/sequences/{id}/unenroll` — remove contact from sequence
-- [ ] Sequence step types: delay (seconds/minutes/hours/days), inactivity trigger, date field trigger
-- [ ] Auto-channel selection (chooses best available channel per contact)
+- [x] `GET /api/v1/sequences` — list sequences
+- [x] `POST /api/v1/sequences` — create sequence with steps
+- [x] `GET /api/v1/sequences/{id}` — get sequence detail
+- [x] `PATCH /api/v1/sequences/{id}` — update sequence
+- [x] `DELETE /api/v1/sequences/{id}` — delete sequence
+- [x] `POST /api/v1/sequences/{id}/enroll` — enroll contact in sequence
+- [x] `POST /api/v1/sequences/{id}/unenroll` — remove contact from sequence
+- [x] Sequence step types: delay (seconds/minutes/hours/days), inactivity trigger, date field trigger
+- [x] Auto-channel selection (chooses best available channel per contact)
 - [ ] Meta 24-hour window detection (stops follow-ups before window closes)
-- [ ] Reply behaviour: stop / pause / continue sequence on reply
+- [x] Reply behaviour: stop / pause / continue sequence on reply
 
 ### Keywords API — Backend
-- [ ] `GET /api/v1/keywords` — list keyword rules (filterable by chatbot_id)
-- [ ] `POST /api/v1/keywords` — create keyword rule
-- [ ] `GET /api/v1/keywords/{id}` — get keyword rule
-- [ ] `PATCH /api/v1/keywords/{id}` — update keyword rule
-- [ ] `DELETE /api/v1/keywords/{id}` — delete keyword rule
-- [ ] Keyword matching engine (runs on every incoming message before AI)
-- [ ] Keyword rule scoped to specific widget or global
+- [x] `GET /api/v1/keywords` — list keyword rules (filterable by chatbot_id)
+- [x] `POST /api/v1/keywords` — create keyword rule
+- [x] `GET /api/v1/keywords/{id}` — get keyword rule
+- [x] `PATCH /api/v1/keywords/{id}` — update keyword rule
+- [x] `DELETE /api/v1/keywords/{id}` — delete keyword rule
+- [x] Keyword matching engine (runs on every incoming message before AI)
+- [x] Keyword rule scoped to specific widget or global
 
 ### Automation UI — Frontend
-- [ ] Automations list page (`/dashboard/automations`)
-- [ ] Create/edit automation modal (trigger type + conditions + action)
+- [x] Automations list page (`/dashboard/automations`)
+- [x] Create/edit automation modal (trigger type + conditions + action)
 - [ ] Execution history table per automation
-- [ ] AI Sequences page (`/dashboard/sequences`)
-- [ ] Sequence editor (steps, delays, conditions, reply behaviour)
+- [x] AI Sequences page (`/dashboard/sequences`)
+- [x] Sequence editor (steps, delays, conditions, reply behaviour)
 - [ ] Sequence enrollment stats (active, completed, cancelled)
-- [ ] Keywords page (`/dashboard/keywords`)
-- [ ] Create/edit keyword rule (keywords array, response type, text or flow)
+- [x] Keywords page (`/dashboard/keywords`)
+- [x] Create/edit keyword rule (keywords array, response type, text or flow)
 
 ---
 
@@ -630,12 +630,12 @@
 - [ ] AI reply delay setting (0-30 seconds, fixed or random)
 
 ### Facebook Messenger
-- [ ] Facebook Page OAuth integration (`/api/integrations/facebook/connect`)
-- [ ] Webhook handler for Facebook messages (`POST /api/webhooks/facebook`)
-- [ ] Send messages via Messenger Graph API
+- [x] Facebook Page OAuth integration (`/api/integrations/facebook/connect`)
+- [x] Webhook handler for Facebook messages (`POST /api/webhooks/facebook`)
+- [x] Send messages via Messenger Graph API
 - [ ] 24-hour messaging window enforcement
 - [ ] Rich media (buttons, quick replies, carousels) for Messenger
-- [ ] Messenger channel in inbox
+- [x] Messenger channel in inbox
 - [ ] Set/delete persistent menu via Messenger Profile API
 
 ### Instagram DM
@@ -646,20 +646,20 @@
 - [ ] Instagram channel in inbox
 
 ### WhatsApp Business API
-- [ ] WhatsApp webhook handler (`POST /api/webhooks/whatsapp`)
-- [ ] Send messages via WhatsApp Cloud API
+- [x] WhatsApp webhook handler (`POST /api/webhooks/whatsapp`)
+- [x] Send messages via WhatsApp Cloud API
 - [ ] WhatsApp Template message management (sync from Meta)
 - [ ] 24-hour session window + template fallback
 - [ ] Rich media (interactive buttons, lists) for WhatsApp
-- [ ] WhatsApp channel in inbox
+- [x] WhatsApp channel in inbox
 
 ### Telegram
-- [ ] Telegram bot token configuration per chatbot
-- [ ] Telegram webhook handler (`POST /api/webhooks/telegram/{token}`)
-- [ ] Send messages via Telegram Bot API
+- [x] Telegram bot token configuration per chatbot
+- [x] Telegram webhook handler (`POST /api/webhooks/telegram/{token}`)
+- [x] Send messages via Telegram Bot API
 - [ ] Telegram Bot Commands setup (`/start`, custom `/commands` triggering flows)
 - [ ] Rich media (inline keyboards, reply keyboards) for Telegram
-- [ ] Telegram channel in inbox
+- [x] Telegram channel in inbox
 
 ### Discord
 - [ ] Discord bot token configuration
@@ -668,11 +668,11 @@
 - [ ] Discord channel in inbox
 
 ### SMS (Twilio)
-- [ ] Twilio phone number management (`/api/integrations/twilio/connect`)
-- [ ] Twilio SMS webhook handler (`POST /api/webhooks/twilio/sms`)
-- [ ] Send SMS via Twilio API
+- [x] Twilio phone number management (`/api/integrations/twilio/connect`)
+- [x] Twilio SMS webhook handler (`POST /api/webhooks/twilio/sms`)
+- [x] Send SMS via Twilio API
 - [ ] MMS image support
-- [ ] SMS channel in inbox
+- [x] SMS channel in inbox
 
 ### Phone Calls (Twilio + Voice AI)
 - [ ] Inbound call webhook handler (`POST /api/webhooks/twilio/voice`)
@@ -708,45 +708,45 @@
 > Goal: Collect leads via forms, publish branded landing pages
 
 ### Database Tables
-- [ ] `forms` table (id, user_id, chatbot_id, name, description, fields JSON, is_active, success_message, submit_button_text, public_id)
-- [ ] `form_submissions` table (id, form_id, contact_id, data JSON, submitted_at)
-- [ ] `landing_pages` table (id, user_id, chatbot_id, title, name, slug, short_id, description, html_content, theme, primary_color, is_published, seo_meta JSON)
+- [x] `forms` table (id, user_id, chatbot_id, name, description, fields JSON, is_active, success_message, submit_button_text, public_id)
+- [x] `form_submissions` table (id, form_id, contact_id, data JSON, submitted_at)
+- [x] `landing_pages` table (id, user_id, chatbot_id, title, name, slug, short_id, description, html_content, theme, primary_color, is_published, seo_meta JSON)
 
 ### Forms API — Backend
-- [ ] `GET /api/v1/forms` — list all forms
-- [ ] `POST /api/v1/forms` — create form with field definitions
-- [ ] `GET /api/v1/forms/{id}` — get form detail
-- [ ] `PATCH /api/v1/forms/{id}` — update form
-- [ ] `DELETE /api/v1/forms/{id}` — delete form + submissions
-- [ ] `GET /api/v1/forms/{id}/submissions` — list submissions (with pagination)
-- [ ] `POST /api/public/forms/{publicId}/submit` — public form submission (creates/updates contact)
-- [ ] Form field types: text, email, phone, number, select, multiselect, checkbox, textarea, date, file, signature
+- [x] `GET /api/v1/forms` — list all forms
+- [x] `POST /api/v1/forms` — create form with field definitions
+- [x] `GET /api/v1/forms/{id}` — get form detail
+- [x] `PATCH /api/v1/forms/{id}` — update form
+- [x] `DELETE /api/v1/forms/{id}` — delete form + submissions
+- [x] `GET /api/v1/forms/{id}/submissions` — list submissions (with pagination)
+- [x] `POST /api/public/forms/{publicId}/submit` — public form submission (creates/updates contact)
+- [x] Form field types: text, email, phone, number, select, multiselect, checkbox, textarea, date, file, signature
 
 ### Landing Pages API — Backend
-- [ ] `GET /api/v1/landing-pages` — list landing pages (paginated)
-- [ ] `POST /api/v1/landing-pages` — create landing page
-- [ ] `GET /api/v1/landing-pages/{id}` — get by numeric ID, shortId, or slug
-- [ ] `PATCH /api/v1/landing-pages/{id}` — update landing page
-- [ ] `DELETE /api/v1/landing-pages/{id}` — delete landing page
-- [ ] `POST /api/v1/landing-pages/{id}/publish` — toggle published status
-- [ ] `GET /p/{slug}` — public page render (no auth required)
-- [ ] URL parameter pre-fill: `?email=`, `?phone=`, `?first_name=`, `?scf=` (custom fields), `?agent=`, `?ref=`
+- [x] `GET /api/v1/landing-pages` — list landing pages (paginated)
+- [x] `POST /api/v1/landing-pages` — create landing page
+- [x] `GET /api/v1/landing-pages/{id}` — get by numeric ID, shortId, or slug
+- [x] `PATCH /api/v1/landing-pages/{id}` — update landing page
+- [x] `DELETE /api/v1/landing-pages/{id}` — delete landing page
+- [x] `POST /api/v1/landing-pages/{id}/publish` — toggle published status
+- [x] `GET /p/{slug}` — public page render (no auth required)
+- [x] URL parameter pre-fill: `?email=`, `?phone=`, `?first_name=`, `?scf=` (custom fields), `?agent=`, `?ref=`
 - [ ] Attribution tracking (first-touch, last-touch, journey history)
 - [ ] QR code generation per landing page with scan counter
 - [ ] Dark mode and `?primaryColor=` URL parameters
 
 ### Forms & Landing Pages UI — Frontend
-- [ ] Forms list page (`/dashboard/forms`)
+- [x] Forms list page (`/dashboard/forms`)
 - [ ] Form builder editor (drag-and-drop field builder)
 - [ ] Form embed code generator + direct link
 - [ ] Form submissions table (filterable, exportable to CSV)
-- [ ] Landing Pages list page (`/dashboard/landing-pages`)
+- [x] Landing Pages list page (`/dashboard/landing-pages`)
 - [ ] Landing page editor (Word/Google Docs-style WYSIWYG + Code mode + Preview mode)
 - [ ] AI content generation for landing page sections
 - [ ] SEO settings panel (title, description, OG tags, canonical, robots)
 - [ ] QR code generator (PNG/SVG download, custom colors)
 - [ ] Social sharing preview
-- [ ] Published page (`/p/{slug}`) — public URL with embedded widget option
+- [x] Published page (`/p/{slug}`) — public URL with embedded widget option
 
 ---
 
@@ -754,16 +754,16 @@
 > Goal: Mass messaging across channels + social media management
 
 ### Database Tables
-- [ ] `broadcast_campaigns` table (id, user_id, name, channel, status, message_template, target_filter JSON, scheduled_at, sent_count, failed_count)
-- [ ] `social_accounts` table (id, user_id, platform, account_id, access_token, name, avatar_url)
-- [ ] `social_posts` table (id, user_id, account_ids, content, image_url, status, scheduled_at, published_at)
-- [ ] `comment_automations` table (id, user_id, page_id, enabled, ai_prompt, response_type, keyword_triggers array, delay_seconds)
+- [x] `broadcast_campaigns` table (id, user_id, name, channel, status, message_template, target_filter JSON, scheduled_at, sent_count, failed_count)
+- [x] `social_accounts` table (id, user_id, platform, account_id, access_token, name, avatar_url)
+- [x] `social_posts` table (id, user_id, account_ids, content, image_url, status, scheduled_at, published_at)
+- [x] `comment_automations` table (id, user_id, page_id, enabled, ai_prompt, response_type, keyword_triggers array, delay_seconds)
 
 ### Broadcast Hub API — Backend
-- [ ] `GET /api/v1/broadcasts` — list campaigns
-- [ ] `POST /api/v1/broadcasts` — create broadcast (email/SMS/Telegram/push/WhatsApp/Messenger/phone)
-- [ ] `POST /api/v1/broadcasts/{id}/send` — send or schedule broadcast
-- [ ] `GET /api/v1/broadcasts/{id}/stats` — delivery + engagement analytics
+- [x] `GET /api/v1/broadcasts` — list campaigns
+- [x] `POST /api/v1/broadcasts` — create broadcast (email/SMS/Telegram/push/WhatsApp/Messenger/phone)
+- [x] `POST /api/v1/broadcasts/{id}/send` — send or schedule broadcast
+- [x] `GET /api/v1/broadcasts/{id}/stats` — delivery + engagement analytics
 - [ ] Email broadcast: AWS SES bulk send, open/click tracking, HTML template
 - [ ] SMS broadcast: Twilio bulk SMS with personalization variables
 - [ ] Telegram broadcast: bulk message to all Telegram subscribers
@@ -773,38 +773,38 @@
 - [ ] Phone broadcast: ElevenLabs outbound call campaigns
 
 ### Social Poster API — Backend
-- [ ] `GET /api/v1/social/accounts` — list connected social accounts
-- [ ] `POST /api/v1/social/accounts/connect` — connect Facebook/Instagram/X
-- [ ] `GET /api/v1/social/posts` — post history
-- [ ] `POST /api/v1/social/posts` — create and publish/schedule post
-- [ ] `DELETE /api/v1/social/posts/{id}` — delete post
-- [ ] Facebook Page post via Graph API
-- [ ] Instagram post (requires image) via Graph API
+- [x] `GET /api/v1/social/accounts` — list connected social accounts
+- [x] `POST /api/v1/social/accounts/connect` — connect Facebook/Instagram/X
+- [x] `GET /api/v1/social/posts` — post history
+- [x] `POST /api/v1/social/posts` — create and publish/schedule post
+- [x] `DELETE /api/v1/social/posts/{id}` — delete post
+- [x] Facebook Page post via Graph API
+- [x] Instagram post (requires image) via Graph API
 - [ ] X/Twitter post via Twitter API v2 (publish-only, no scheduling)
-- [ ] AI caption generator using agent's LLM
+- [x] AI caption generator using agent's LLM
 
 ### Comment Automation API — Backend
-- [ ] `GET /api/v1/comment-automations` — list comment automations per page
-- [ ] `POST /api/v1/comment-automations` — create automation
-- [ ] `PATCH /api/v1/comment-automations/{id}` — update configuration
-- [ ] `DELETE /api/v1/comment-automations/{id}` — delete
+- [x] `GET /api/v1/comment-automations` — list comment automations per page
+- [x] `POST /api/v1/comment-automations` — create automation
+- [x] `PATCH /api/v1/comment-automations/{id}` — update configuration
+- [x] `DELETE /api/v1/comment-automations/{id}` — delete
 - [ ] Facebook comment webhook handler → AI public reply + DM trigger
 - [ ] Instagram comment webhook handler → AI public reply
 
 ### Broadcast & Social UI — Frontend
-- [ ] Broadcast Hub page (`/dashboard/broadcast`) — channel selector tabs
+- [x] Broadcast Hub page (`/dashboard/broadcast`) — channel selector tabs
 - [ ] Email campaign composer (drag-and-drop HTML template builder)
 - [ ] Audience segmentation (by agent, tags, custom fields)
 - [ ] Campaign preview + test send
 - [ ] Campaign schedule picker
 - [ ] Delivery analytics table
-- [ ] Social Poster page (`/dashboard/social`)
-- [ ] Post composer (multi-platform select, caption, image upload)
-- [ ] AI caption generator button
-- [ ] Publish Now / Schedule toggle
-- [ ] Post history table with status
-- [ ] Comment Automation page (`/dashboard/comment-automation`)
-- [ ] Per-page toggle + AI prompt + keyword triggers + response type config
+- [x] Social Poster page (`/dashboard/social`)
+- [x] Post composer (multi-platform select, caption, image upload)
+- [x] AI caption generator button
+- [x] Publish Now / Schedule toggle
+- [x] Post history table with status
+- [x] Comment Automation page (`/dashboard/comment-automation`)
+- [x] Per-page toggle + AI prompt + keyword triggers + response type config
 
 ---
 
