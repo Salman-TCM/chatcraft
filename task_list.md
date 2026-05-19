@@ -998,18 +998,18 @@
 - [x] `GET /api/tokens` — list all API tokens
 - [x] `POST /api/tokens` — generate new API token (full token shown once)
 - [x] `DELETE /api/tokens/{id}` — revoke token
-- [ ] `GET /api/v1/me` — get authenticated user info
+- [x] `GET /api/v1/me` — get authenticated user info
 - [x] API tokens management page (`/dashboard/settings/api-tokens`)
 - [x] Bearer token auth on all `/api/v1/*` and `/api/manage/*` routes
 
 ### Widget Management API
-- [ ] `GET /api/manage/widgets` — list widgets with key config fields
-- [ ] `GET /api/manage/widgets/{id}` — full widget config
-- [ ] `PUT /api/manage/widgets/{id}` — update any widget setting (name, prompt, model, voice, channels, toggles)
-- [ ] `DELETE /api/manage/widgets/{id}` — delete widget
-- [ ] `POST /api/manage/widgets/{id}/pause` — pause AI responses (human takeover)
-- [ ] `POST /api/manage/widgets/{id}/unpause` — resume AI responses
-- [ ] `POST /api/manage/widgets/{id}/enable-ai` — toggle AI per channel (webchat/telegram/discord/phone/tiktok/all)
+- [x] `GET /api/manage/widgets` — list widgets with key config fields
+- [x] `GET /api/manage/widgets/{id}` — full widget config
+- [x] `PUT /api/manage/widgets/{id}` — update any widget setting (name, prompt, model, voice, channels, toggles)
+- [x] `DELETE /api/manage/widgets/{id}` — delete widget
+- [x] `POST /api/manage/widgets/{id}/pause` — pause AI responses (human takeover)
+- [x] `POST /api/manage/widgets/{id}/unpause` — resume AI responses
+- [x] `POST /api/manage/widgets/{id}/enable-ai` — toggle AI per channel (webchat/telegram/discord/phone/tiktok/all)
 - [ ] `GET /api/manage/widgets/{id}/functions` — list assigned functions + available
 - [ ] `PUT /api/manage/widgets/{id}/functions` — assign functions to widget
 - [ ] `GET /api/manage/functions` — list all functions
