@@ -366,9 +366,7 @@ async def impersonate_user(
     db: DBSession,
     caller: CurrentUser,
 ) -> dict:
-    """Issue a short-lived access token (5 min) for the target user.
-    The admin uses this token in the Authorization header to act as that user.
-    """
+    """Issue a short-lived access token (15 min) for the target user."""
     result = await db.execute(select(User).where(User.id == user_id))
     u = result.scalar_one_or_none()
     if not u:
@@ -376,22 +374,62 @@ async def impersonate_user(
     if str(u.id) == str(caller.id):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Cannot impersonate yourself")
 
-    from app.core.security import create_access_token
-    from datetime import timedelta
     from jose import jwt
     from app.core.config import settings
+    from app.models.white_label import ImpersonationAuditLog
 
     now = datetime.now(timezone.utc)
     payload = {
         "sub": str(u.id),
         "role": u.role.value,
         "iat": now,
-        "exp": now + timedelta(minutes=5),
+        "exp": now + timedelta(minutes=15),
         "type": "access",
         "impersonated_by": str(caller.id),
     }
     token = jwt.encode(payload, settings.secret_key, algorithm=settings.jwt_algorithm)
-    return {"success": True, "data": {"access_token": token, "expires_in": 300, "user": _user_dict(u)}}
+
+    log = ImpersonationAuditLog(actor_user_id=caller.id, target_user_id=u.id)
+    db.add(log)
+    await db.commit()
+
+    return {"success": True, "data": {"access_token": token, "expires_in": 900, "user": _user_dict(u)}}
+
+
+@router.get("/impersonation-log", response_model=dict)
+async def list_impersonation_log(
+    db: DBSession,
+    page: Annotated[int, Query(ge=1)] = 1,
+    limit: Annotated[int, Query(ge=1, le=200)] = 50,
+) -> dict:
+    from app.models.white_label import ImpersonationAuditLog
+    offset = (page - 1) * limit
+    result = await db.execute(
+        select(ImpersonationAuditLog)
+        .order_by(ImpersonationAuditLog.started_at.desc())
+        .offset(offset)
+        .limit(limit)
+    )
+    logs = result.scalars().all()
+    total = (await db.execute(select(func.count()).select_from(ImpersonationAuditLog))).scalar_one()
+    return {
+        "success": True,
+        "data": [
+            {
+                "id": str(l.id),
+                "actor_user_id": str(l.actor_user_id),
+                "target_user_id": str(l.target_user_id) if l.target_user_id else None,
+                "target_agency_id": str(l.target_agency_id) if l.target_agency_id else None,
+                "started_at": l.started_at.isoformat(),
+                "ended_at": l.ended_at.isoformat() if l.ended_at else None,
+                "ip_address": l.ip_address,
+            }
+            for l in logs
+        ],
+        "total": total,
+        "page": page,
+        "limit": limit,
+    }
 
 
 # ══════════════════════════════════════════════════════════════════════════════
