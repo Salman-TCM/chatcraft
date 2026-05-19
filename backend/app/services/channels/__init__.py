@@ -2,9 +2,10 @@ from app.services.channels.base import ChannelSender
 from app.services.channels.telegram import TelegramSender
 from app.services.channels.whatsapp import WhatsAppSender
 from app.services.channels.facebook import FacebookSender
+from app.services.channels.instagram import InstagramSender
 from app.services.channels.sms import SMSSender
 
-__all__ = ["ChannelSender", "TelegramSender", "WhatsAppSender", "FacebookSender", "SMSSender"]
+__all__ = ["ChannelSender", "TelegramSender", "WhatsAppSender", "FacebookSender", "InstagramSender", "SMSSender"]
 
 
 def get_sender(channel: str, config: dict) -> "ChannelSender":
@@ -16,6 +17,8 @@ def get_sender(channel: str, config: dict) -> "ChannelSender":
             return WhatsAppSender(config)
         case "facebook":
             return FacebookSender(config)
+        case "instagram":
+            return InstagramSender(config)
         case "sms":
             return SMSSender(config)
         case _:

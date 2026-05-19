@@ -255,6 +255,34 @@ async def test_facebook(chatbot_id: uuid.UUID, user: CurrentUser, db: DBSession)
     return {"success": True, "data": {"page_id": data.get("id"), "page_name": data.get("name")}}
 
 
+@router.post("/chatbots/{chatbot_id}/integrations/instagram/test", response_model=dict)
+async def test_instagram(chatbot_id: uuid.UUID, user: CurrentUser, db: DBSession) -> dict:
+    await _get_owned_bot(chatbot_id, user.id, db)
+    result = await db.execute(
+        select(ChannelIntegration).where(
+            ChannelIntegration.chatbot_id == chatbot_id,
+            ChannelIntegration.channel == "instagram",
+        )
+    )
+    integration = result.scalar_one_or_none()
+    if not integration:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not configured")
+
+    import httpx
+    token = integration.config.get("page_access_token", "")
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            r = await client.get(
+                "https://graph.facebook.com/v19.0/me",
+                params={"access_token": token, "fields": "id,name,instagram_business_account"},
+            )
+            r.raise_for_status()
+            data = r.json()
+    except Exception as exc:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc))
+    return {"success": True, "data": {"page_id": data.get("id"), "page_name": data.get("name")}}
+
+
 @router.post("/chatbots/{chatbot_id}/integrations/sms/test", response_model=dict)
 async def test_sms(chatbot_id: uuid.UUID, user: CurrentUser, db: DBSession) -> dict:
     await _get_owned_bot(chatbot_id, user.id, db)
