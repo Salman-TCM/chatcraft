@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   Search, X, Send, StickyNote, UserCheck, UserX, CheckCheck,
-  RotateCcw, ChevronDown, Inbox, Bot, User, Clock, Filter,
+  RotateCcw, ChevronDown, Inbox, Bot, User, Clock, Filter, Shuffle, Contact2,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -15,6 +15,10 @@ import { apiClient } from "@/lib/api";
 // ── Types ──────────────────────────────────────────────────────────────────────
 
 interface Contact { id: string; name: string | null; email: string | null; phone: string | null }
+interface ContactDetail {
+  id: string; first_name: string | null; last_name: string | null;
+  email: string | null; phone: string | null; company: string | null; tags: string[];
+}
 
 interface ConvSummary {
   id: string;
@@ -76,6 +80,11 @@ export default function InboxPage() {
 
   const [teamMembers, setTeamMembers] = useState<TeamMember[]>([]);
   const [showAssign, setShowAssign] = useState(false);
+  const [showContact, setShowContact] = useState(false);
+  const [contactDetail, setContactDetail] = useState<ContactDetail | null>(null);
+  const [contactEdit, setContactEdit] = useState<Partial<ContactDetail>>({});
+  const [savingContact, setSavingContact] = useState(false);
+  const [assigningRR, setAssigningRR] = useState(false);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -206,6 +215,45 @@ export default function InboxPage() {
     const res = await apiClient.get(`/api/v1/conversations/${selected.id}`);
     setSelected(res.data.data);
     setShowAssign(false);
+  }
+
+  async function assignRoundRobin() {
+    if (!selected) return;
+    setAssigningRR(true);
+    try {
+      await apiClient.post(`/api/v1/conversations/${selected.id}/assign-roundrobin`);
+      const res = await apiClient.get(`/api/v1/conversations/${selected.id}`);
+      setSelected(res.data.data);
+    } catch (e: any) {
+      alert(e?.response?.data?.detail ?? "Round-robin failed");
+    } finally {
+      setAssigningRR(false);
+    }
+  }
+
+  // ── Contact quick-edit ───────────────────────────────────────────────────
+
+  async function loadContact() {
+    if (!selected) return;
+    try {
+      const res = await apiClient.get(`/api/v1/conversations/${selected.id}/contact`);
+      const d = res.data.data as ContactDetail;
+      setContactDetail(d);
+      setContactEdit({ first_name: d.first_name ?? "", last_name: d.last_name ?? "", email: d.email ?? "", phone: d.phone ?? "", company: d.company ?? "", tags: d.tags });
+    } catch {
+      setContactDetail(null);
+    }
+  }
+
+  async function saveContact() {
+    if (!selected) return;
+    setSavingContact(true);
+    try {
+      const res = await apiClient.patch(`/api/v1/conversations/${selected.id}/contact`, contactEdit);
+      setContactDetail(res.data.data);
+    } finally {
+      setSavingContact(false);
+    }
   }
 
   // ── Render ───────────────────────────────────────────────────────────────
@@ -424,6 +472,28 @@ export default function InboxPage() {
                 )}
               </div>
 
+              {/* Round-robin assign */}
+              <Button
+                size="sm"
+                variant="outline"
+                className="h-7 text-xs gap-1"
+                onClick={assignRoundRobin}
+                disabled={assigningRR}
+                title="Auto-assign to next available team member"
+              >
+                <Shuffle className="h-3.5 w-3.5" /> Auto-assign
+              </Button>
+
+              {/* Contact panel toggle */}
+              <Button
+                size="sm"
+                variant={showContact ? "default" : "outline"}
+                className="h-7 text-xs gap-1"
+                onClick={() => { setShowContact((v) => !v); if (!showContact) loadContact(); }}
+              >
+                <Contact2 className="h-3.5 w-3.5" /> Contact
+              </Button>
+
               {/* Notes toggle */}
               <Button
                 size="sm"
@@ -497,6 +567,88 @@ export default function InboxPage() {
                 </div>
               )}
             </div>
+
+            {/* Contact quick-edit sidebar */}
+            {showContact && (
+              <div className="flex w-72 shrink-0 flex-col border-l">
+                <div className="border-b px-4 py-3">
+                  <p className="text-sm font-semibold flex items-center gap-1.5">
+                    <Contact2 className="h-3.5 w-3.5" /> Contact Info
+                  </p>
+                </div>
+                {!contactDetail ? (
+                  <div className="flex flex-1 items-center justify-center text-xs text-muted-foreground p-4 text-center">
+                    No contact linked to this conversation.
+                  </div>
+                ) : (
+                  <>
+                    <ScrollArea className="flex-1 p-3">
+                      <div className="space-y-3">
+                        <div className="grid grid-cols-2 gap-2">
+                          <div>
+                            <label className="text-[10px] text-muted-foreground font-medium">First name</label>
+                            <Input
+                              className="h-7 text-xs mt-0.5"
+                              value={contactEdit.first_name ?? ""}
+                              onChange={(e) => setContactEdit((p) => ({ ...p, first_name: e.target.value }))}
+                            />
+                          </div>
+                          <div>
+                            <label className="text-[10px] text-muted-foreground font-medium">Last name</label>
+                            <Input
+                              className="h-7 text-xs mt-0.5"
+                              value={contactEdit.last_name ?? ""}
+                              onChange={(e) => setContactEdit((p) => ({ ...p, last_name: e.target.value }))}
+                            />
+                          </div>
+                        </div>
+                        <div>
+                          <label className="text-[10px] text-muted-foreground font-medium">Email</label>
+                          <Input
+                            className="h-7 text-xs mt-0.5"
+                            type="email"
+                            value={contactEdit.email ?? ""}
+                            onChange={(e) => setContactEdit((p) => ({ ...p, email: e.target.value }))}
+                          />
+                        </div>
+                        <div>
+                          <label className="text-[10px] text-muted-foreground font-medium">Phone</label>
+                          <Input
+                            className="h-7 text-xs mt-0.5"
+                            value={contactEdit.phone ?? ""}
+                            onChange={(e) => setContactEdit((p) => ({ ...p, phone: e.target.value }))}
+                          />
+                        </div>
+                        <div>
+                          <label className="text-[10px] text-muted-foreground font-medium">Company</label>
+                          <Input
+                            className="h-7 text-xs mt-0.5"
+                            value={contactEdit.company ?? ""}
+                            onChange={(e) => setContactEdit((p) => ({ ...p, company: e.target.value }))}
+                          />
+                        </div>
+                        <div>
+                          <label className="text-[10px] text-muted-foreground font-medium">Tags (comma-separated)</label>
+                          <Input
+                            className="h-7 text-xs mt-0.5"
+                            value={(contactEdit.tags ?? []).join(", ")}
+                            onChange={(e) => setContactEdit((p) => ({
+                              ...p,
+                              tags: e.target.value.split(",").map((t) => t.trim()).filter(Boolean),
+                            }))}
+                          />
+                        </div>
+                      </div>
+                    </ScrollArea>
+                    <div className="border-t p-3">
+                      <Button size="sm" className="w-full" onClick={saveContact} disabled={savingContact}>
+                        {savingContact ? "Saving…" : "Save Changes"}
+                      </Button>
+                    </div>
+                  </>
+                )}
+              </div>
+            )}
 
             {/* Notes sidebar */}
             {showNotes && (
