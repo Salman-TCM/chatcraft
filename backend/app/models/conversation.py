@@ -58,6 +58,9 @@ class Conversation(TimestampMixin, Base):
     last_message_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True, index=True
     )
+    last_user_message_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True, index=True
+    )
 
     # Relationships
     chatbot: Mapped["ChatbotConfig"] = relationship(  # type: ignore[name-defined]

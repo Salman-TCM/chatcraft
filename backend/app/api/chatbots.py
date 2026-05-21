@@ -4,7 +4,8 @@ from fastapi import APIRouter, HTTPException, UploadFile, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.dependencies import CurrentUser, DBSession
+from app.core.dependencies import CurrentUser, DBSession, RedisClient
+from app.core.pagination import LimitParam, PageParam, count_query, page_meta, paginate
 from app.models.chatbot_config import ChatbotConfig
 from app.schemas.chat import ChatbotCreateRequest, ChatbotResponse, ChatbotUpdateRequest
 from app.services import storage as storage_svc
@@ -13,16 +14,24 @@ router = APIRouter(prefix="/api/chatbots", tags=["chatbots"])
 
 
 @router.get("", response_model=dict)
-async def list_chatbots(user: CurrentUser, db: DBSession) -> dict:
-    result = await db.execute(
+async def list_chatbots(
+    user: CurrentUser,
+    db: DBSession,
+    page: PageParam = 1,
+    limit: LimitParam = 20,
+) -> dict:
+    base_q = (
         select(ChatbotConfig)
         .where(ChatbotConfig.user_id == user.id)
         .order_by(ChatbotConfig.created_at.desc())
     )
+    total = await count_query(db, base_q)
+    result = await db.execute(paginate(base_q, page, limit))
     bots = result.scalars().all()
     return {
         "success": True,
         "data": [ChatbotResponse.model_validate(b) for b in bots],
+        "meta": page_meta(page, limit, total),
     }
 
 
@@ -62,12 +71,18 @@ async def update_chatbot(
     body: ChatbotUpdateRequest,
     user: CurrentUser,
     db: DBSession,
+    redis: RedisClient,
 ) -> dict:
     bot = await _get_owned_bot(chatbot_id, user.id, db)
     for field, value in body.model_dump(exclude_unset=True).items():
         setattr(bot, field, value)
     await db.commit()
     await db.refresh(bot)
+    if redis is not None:
+        try:
+            await redis.delete(f"widget:config:{chatbot_id}")
+        except Exception:
+            pass
     return {"success": True, "data": ChatbotResponse.model_validate(bot)}
 
 
