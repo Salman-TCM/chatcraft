@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import Link from "next/link";
 import {
-  LayoutDashboard, Users, Settings, Globe, Mail, Menu, X, LogOut, CreditCard,
+  LayoutDashboard, Users, Settings, Globe, Mail, Menu, X, LogOut, CreditCard, UserCheck, Tag,
 } from "lucide-react";
 import { signOut, useSession } from "next-auth/react";
 
@@ -12,7 +12,9 @@ const NAV = [
   { href: "/agency",                    label: "Dashboard",  icon: LayoutDashboard },
   { href: "/agency/clients",            label: "Clients",    icon: Users },
   { href: "/agency/subscriptions",      label: "Revenue",    icon: CreditCard },
+  { href: "/agency/team",               label: "Team",       icon: UserCheck },
   { href: "/agency/settings/branding",  label: "Branding",   icon: Settings },
+  { href: "/agency/settings/pricing",   label: "Pricing",    icon: Tag },
   { href: "/agency/settings/domain",    label: "Domain",     icon: Globe },
   { href: "/agency/settings/email",     label: "Email",      icon: Mail },
 ];

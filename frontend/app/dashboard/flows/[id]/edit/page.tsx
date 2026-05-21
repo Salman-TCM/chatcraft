@@ -83,6 +83,7 @@ function FlowNode({ data, selected }: { data: any; selected: boolean }) {
   const isStart = data.nodeType === "start";
   const isEnd = data.nodeType === "end";
   const isCondition = data.nodeType === "condition";
+  const isEntryPoint = data.isStartingNode;
 
   return (
     <div
@@ -95,7 +96,8 @@ function FlowNode({ data, selected }: { data: any; selected: boolean }) {
 
       <div className="flex items-center gap-2 px-3 py-2 rounded-t-[6px]" style={{ backgroundColor: `${def.color}18` }}>
         <span className="text-base leading-none">{def.icon}</span>
-        <span className="text-xs font-semibold text-slate-700 truncate">{def.label}</span>
+        <span className="text-xs font-semibold text-slate-700 truncate flex-1">{def.label}</span>
+        {isEntryPoint && <span title="Entry point" style={{ fontSize: 12 }}>🚩</span>}
       </div>
 
       {data.label && (
@@ -121,18 +123,122 @@ const nodeTypes: NodeTypes = { flowNode: FlowNode };
 
 // ── Config panels ─────────────────────────────────────────────────────────────
 
+// ── Variable autocomplete textarea ────────────────────────────────────────────
+
+const STATIC_VARS = [
+  "contact.first_name", "contact.last_name", "contact.email", "contact.phone",
+  "contact.id", "contact.tags", "contact.custom_fields",
+  "conversation.id", "message.text", "trigger.data",
+  "timestamp", "date", "time",
+];
+
+function VarTextarea({
+  value,
+  onChange,
+  placeholder,
+  flowVars = [],
+  minHeight = "80px",
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  placeholder?: string;
+  flowVars?: string[];
+  minHeight?: string;
+}) {
+  const [showDropdown, setShowDropdown] = useState(false);
+  const [query, setQuery] = useState("");
+  const ref = useRef<HTMLTextAreaElement>(null);
+  const allVars = [...STATIC_VARS, ...flowVars.filter((v) => !STATIC_VARS.includes(v))];
+
+  function handleChange(e: React.ChangeEvent<HTMLTextAreaElement>) {
+    onChange(e.target.value);
+    checkForVar(e.target);
+  }
+
+  function checkForVar(el: HTMLTextAreaElement) {
+    const pos = el.selectionStart ?? 0;
+    const textBefore = el.value.slice(0, pos);
+    const match = textBefore.match(/\{\{([^}]*)$/);
+    if (match) {
+      setQuery(match[1].toLowerCase());
+      setShowDropdown(true);
+    } else {
+      setShowDropdown(false);
+      setQuery("");
+    }
+  }
+
+  function insertVar(varName: string) {
+    const el = ref.current;
+    if (!el) return;
+    const pos = el.selectionStart ?? 0;
+    const textBefore = value.slice(0, pos);
+    const start = textBefore.lastIndexOf("{{");
+    const newVal = value.slice(0, start) + `{{${varName}}}` + value.slice(pos);
+    onChange(newVal);
+    setShowDropdown(false);
+    setQuery("");
+    setTimeout(() => {
+      el.focus();
+      const newPos = start + varName.length + 4;
+      el.setSelectionRange(newPos, newPos);
+    }, 0);
+  }
+
+  const filtered = query
+    ? allVars.filter((v) => v.includes(query))
+    : allVars;
+
+  return (
+    <div className="relative">
+      <textarea
+        ref={ref}
+        className="w-full rounded-md border text-xs px-3 py-2 resize-y focus:outline-none focus:ring-1 focus:ring-primary"
+        style={{ minHeight }}
+        value={value}
+        onChange={handleChange}
+        onKeyUp={(e) => checkForVar(e.currentTarget)}
+        onBlur={() => setTimeout(() => setShowDropdown(false), 150)}
+        placeholder={placeholder}
+      />
+      {showDropdown && filtered.length > 0 && (
+        <div className="absolute z-50 w-full max-h-48 overflow-y-auto rounded-md border bg-popover shadow-md">
+          {filtered.slice(0, 12).map((v) => (
+            <button
+              key={v}
+              type="button"
+              onMouseDown={(e) => { e.preventDefault(); insertVar(v); }}
+              className="w-full px-3 py-1.5 text-left text-xs hover:bg-muted font-mono"
+            >
+              {`{{${v}}}`}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Node config panel ─────────────────────────────────────────────────────────
+
 function NodeConfigPanel({
   node,
   onUpdate,
   onDelete,
   onClose,
   onCopy,
+  onSetStart,
+  isStartingNode,
+  flowVars,
 }: {
   node: Node;
   onUpdate: (id: string, data: any) => void;
   onDelete: (id: string) => void;
   onClose: () => void;
   onCopy: (node: Node) => void;
+  onSetStart: (id: string) => void;
+  isStartingNode: boolean;
+  flowVars: string[];
 }) {
   const data = node.data as any;
   const nodeType = data.nodeType as string;
@@ -153,6 +259,13 @@ function NodeConfigPanel({
           {NODE_MAP[nodeType]?.icon} {NODE_MAP[nodeType]?.label ?? nodeType}
         </span>
         <div className="flex items-center gap-1">
+          <button
+            title={isStartingNode ? "Entry point (click to remove)" : "Set as entry point"}
+            onClick={() => onSetStart(node.id)}
+            className={`rounded p-1 hover:bg-muted ${isStartingNode ? "text-green-600" : "text-muted-foreground"}`}
+          >
+            🚩
+          </button>
           <button
             title="Duplicate node"
             onClick={() => onCopy(node)}
@@ -179,15 +292,38 @@ function NodeConfigPanel({
 
         {/* Type-specific fields */}
         {nodeType === "send_message" && (
-          <div className="space-y-1">
-            <Label className="text-xs">Message text</Label>
-            <textarea
-              className="w-full rounded-md border text-xs px-3 py-2 min-h-[80px] resize-y focus:outline-none focus:ring-1 focus:ring-primary"
-              value={local.text ?? ""}
-              onChange={e => set("text", e.target.value)}
-              placeholder="Hello {{first_name}}! How can I help?"
-            />
-            <p className="text-[10px] text-muted-foreground">Use {"{{"} variable {"}}"}  for dynamic values</p>
+          <div className="space-y-3">
+            <div className="space-y-1">
+              <Label className="text-xs">Channel</Label>
+              <select
+                className="w-full rounded-md border text-xs px-2 py-1.5 focus:outline-none"
+                value={local.channel ?? "omni"}
+                onChange={(e) => set("channel", e.target.value)}
+              >
+                {[
+                  ["omni", "Omni (auto-select best)"],
+                  ["web_widget", "Web Widget"],
+                  ["messenger", "Facebook Messenger"],
+                  ["instagram", "Instagram DM"],
+                  ["whatsapp", "WhatsApp"],
+                  ["telegram", "Telegram"],
+                  ["sms", "SMS"],
+                  ["email", "Email"],
+                ].map(([v, l]) => (
+                  <option key={v} value={v}>{l}</option>
+                ))}
+              </select>
+            </div>
+            <div className="space-y-1">
+              <Label className="text-xs">Message text</Label>
+              <VarTextarea
+                value={local.text ?? ""}
+                onChange={(v) => set("text", v)}
+                placeholder="Hello {{contact.first_name}}! How can I help?"
+                flowVars={flowVars}
+              />
+              <p className="text-[10px] text-muted-foreground">Type {"{{"}  to insert a variable</p>
+            </div>
           </div>
         )}
 
@@ -195,11 +331,12 @@ function NodeConfigPanel({
           <>
             <div className="space-y-1">
               <Label className="text-xs">Prompt (optional)</Label>
-              <textarea
-                className="w-full rounded-md border text-xs px-3 py-2 min-h-[60px] resize-y focus:outline-none focus:ring-1 focus:ring-primary"
+              <VarTextarea
                 value={local.prompt ?? ""}
-                onChange={e => set("prompt", e.target.value)}
+                onChange={(v) => set("prompt", v)}
                 placeholder="What is your name?"
+                flowVars={flowVars}
+                minHeight="60px"
               />
             </div>
             <div className="space-y-1">
@@ -244,11 +381,11 @@ function NodeConfigPanel({
           <>
             <div className="space-y-1">
               <Label className="text-xs">Prompt</Label>
-              <textarea
-                className="w-full rounded-md border text-xs px-3 py-2 min-h-[80px] resize-y focus:outline-none focus:ring-1 focus:ring-primary"
+              <VarTextarea
                 value={local.prompt ?? ""}
-                onChange={e => set("prompt", e.target.value)}
-                placeholder="Summarize the conversation so far"
+                onChange={(v) => set("prompt", v)}
+                placeholder="Summarize the conversation so far. User name: {{contact.first_name}}"
+                flowVars={flowVars}
               />
             </div>
             <div className="space-y-1">
@@ -565,6 +702,129 @@ function RunHistoryPanel({
   );
 }
 
+// ── Flow simulator panel ──────────────────────────────────────────────────────
+
+function FlowSimulatorPanel({
+  flowId,
+  onClose,
+}: {
+  flowId: string;
+  onClose: () => void;
+}) {
+  const [contactId, setContactId] = useState("");
+  const [triggerData, setTriggerData] = useState("{}");
+  const [running, setRunning] = useState(false);
+  const [result, setResult] = useState<{
+    run_id: string;
+    status: string;
+    context: Record<string, unknown>;
+    current_node_id?: string;
+    error?: string;
+  } | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  async function run() {
+    setRunning(true);
+    setResult(null);
+    setError(null);
+    try {
+      let data: Record<string, unknown> = {};
+      try { data = JSON.parse(triggerData); } catch { setError("Trigger data must be valid JSON"); setRunning(false); return; }
+      const res = await apiClient.post(`/api/v1/flows/${flowId}/trigger`, {
+        contact_id: contactId.trim() || undefined,
+        data,
+      });
+      setResult(res.data.data);
+    } catch (e: any) {
+      setError(e?.response?.data?.detail ?? "Failed to trigger flow");
+    } finally {
+      setRunning(false);
+    }
+  }
+
+  const statusColor: Record<string, string> = {
+    completed: "text-green-600",
+    failed: "text-red-500",
+    waiting: "text-amber-600",
+    running: "text-blue-500",
+  };
+
+  return (
+    <div className="flex h-full flex-col">
+      <div className="flex items-center justify-between border-b px-4 py-3">
+        <span className="text-sm font-semibold flex items-center gap-1.5">
+          <Zap className="h-4 w-4 text-primary" /> Simulator
+        </span>
+        <button onClick={onClose} className="rounded p-1 hover:bg-muted">
+          <X className="h-4 w-4" />
+        </button>
+      </div>
+      <div className="flex-1 overflow-y-auto p-4 space-y-4">
+        <div className="space-y-1">
+          <Label className="text-xs">Contact ID (optional)</Label>
+          <Input
+            className="h-8 text-xs font-mono"
+            value={contactId}
+            onChange={(e) => setContactId(e.target.value)}
+            placeholder="Leave blank for anonymous test"
+          />
+        </div>
+        <div className="space-y-1">
+          <Label className="text-xs">Trigger data (JSON)</Label>
+          <textarea
+            className="w-full rounded-md border text-xs px-3 py-2 font-mono min-h-[80px] resize-y focus:outline-none focus:ring-1 focus:ring-primary"
+            value={triggerData}
+            onChange={(e) => setTriggerData(e.target.value)}
+            placeholder='{}'
+          />
+        </div>
+        {error && (
+          <div className="rounded-md bg-destructive/10 px-3 py-2 text-xs text-destructive">
+            {error}
+          </div>
+        )}
+        {result && (
+          <div className="space-y-2">
+            <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Result</p>
+            <div className="rounded-md border bg-muted/30 p-3 space-y-1.5">
+              <div className="flex items-center gap-2">
+                <span className="text-xs text-muted-foreground">Status:</span>
+                <span className={`text-xs font-semibold ${statusColor[result.status] ?? ""}`}>
+                  {result.status}
+                </span>
+              </div>
+              {result.current_node_id && (
+                <div className="flex items-center gap-2">
+                  <span className="text-xs text-muted-foreground">Stopped at:</span>
+                  <span className="text-xs font-mono">{result.current_node_id}</span>
+                </div>
+              )}
+              {result.error && (
+                <div className="text-xs text-red-500 mt-1">{result.error}</div>
+              )}
+              {Object.keys(result.context || {}).length > 0 && (
+                <div>
+                  <p className="text-[10px] text-muted-foreground mt-2 mb-1">Context variables:</p>
+                  <pre className="text-[10px] font-mono bg-muted rounded p-2 overflow-x-auto">
+                    {JSON.stringify(result.context, null, 2)}
+                  </pre>
+                </div>
+              )}
+              <p className="text-[10px] text-muted-foreground font-mono mt-1">Run: {result.run_id.slice(0, 8)}…</p>
+            </div>
+          </div>
+        )}
+      </div>
+      <div className="border-t px-4 py-3">
+        <Button size="sm" className="w-full h-8 text-xs gap-1.5" onClick={run} disabled={running}>
+          {running ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Zap className="h-3.5 w-3.5" />}
+          {running ? "Running…" : "Run Simulation"}
+        </Button>
+      </div>
+    </div>
+  );
+}
+
 // ── Main editor ───────────────────────────────────────────────────────────────
 
 let nodeIdCounter = 100;
@@ -572,7 +832,7 @@ function newNodeId() {
   return `node-${++nodeIdCounter}`;
 }
 
-type RightPanel = "node" | "webhook" | "history" | null;
+type RightPanel = "node" | "webhook" | "history" | "simulator" | null;
 
 export default function FlowEditorPage() {
   const { id: flowId } = useParams<{ id: string }>();
@@ -581,6 +841,7 @@ export default function FlowEditorPage() {
   const [flowName, setFlowName] = useState("Loading…");
   const [isActive, setIsActive] = useState(false);
   const [webhookSecret, setWebhookSecret] = useState<string | null>(null);
+  const [startingNodeId, setStartingNodeId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [savedOk, setSavedOk] = useState(false);
@@ -588,6 +849,11 @@ export default function FlowEditorPage() {
   const [nodes, setNodes, onNodesChange] = useNodesState<Node>([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([]);
   const [selectedNode, setSelectedNode] = useState<Node | null>(null);
+
+  // Derived list of variable names defined by user_input nodes — used by VarTextarea autocomplete
+  const flowVars = nodes
+    .filter((n) => (n.data as any).nodeType === "user_input" && (n.data as any).variable)
+    .map((n) => (n.data as any).variable as string);
   const [paletteOpen, setPaletteOpen] = useState(true);
   const [rightPanel, setRightPanel] = useState<RightPanel>(null);
 
@@ -615,7 +881,13 @@ export default function FlowEditorPage() {
       setFlowName(f.name);
       setIsActive(f.is_active);
       setWebhookSecret(f.webhook_secret);
-      setNodes(toRFNodes(f.nodes || []));
+      setStartingNodeId(f.starting_node_id ?? null);
+      const snId = f.starting_node_id ?? null;
+      setStartingNodeId(snId);
+      setNodes(toRFNodes(f.nodes || []).map((n: Node) => ({
+        ...n,
+        data: { ...n.data, isStartingNode: n.id === snId },
+      })));
       setEdges(f.edges || []);
     }).finally(() => setLoading(false));
   }, [flowId]);
@@ -658,6 +930,15 @@ export default function FlowEditorPage() {
     setNodes(nds => [...nds, copy]);
   }
 
+  function setAsStartingNode(nodeId: string) {
+    const newId = startingNodeId === nodeId ? null : nodeId;
+    setStartingNodeId(newId);
+    setNodes(nds => nds.map(n => ({
+      ...n,
+      data: { ...n.data, isStartingNode: n.id === newId },
+    })));
+  }
+
   async function save() {
     setSaving(true);
     try {
@@ -665,6 +946,7 @@ export default function FlowEditorPage() {
         name: flowName,
         nodes: fromRFNodes(nodes),
         edges,
+        starting_node_id: startingNodeId,
       });
       setSavedOk(true);
       setTimeout(() => setSavedOk(false), 2000);
@@ -739,6 +1021,15 @@ export default function FlowEditorPage() {
           >
             <History className="h-3.5 w-3.5" />
             <span className="hidden md:inline">History</span>
+          </Button>
+          <Button
+            size="sm"
+            variant={rightPanel === "simulator" ? "secondary" : "ghost"}
+            className="h-8 gap-1 text-xs"
+            onClick={() => togglePanel("simulator")}
+          >
+            <Zap className="h-3.5 w-3.5" />
+            <span className="hidden md:inline">Simulate</span>
           </Button>
           <Button size="sm" variant="outline" className="h-8 gap-1 text-xs" onClick={toggle}>
             {isActive ? <Pause className="h-3.5 w-3.5 text-amber-600" /> : <Play className="h-3.5 w-3.5 text-green-600" />}
@@ -829,6 +1120,9 @@ export default function FlowEditorPage() {
                 onDelete={deleteNode}
                 onClose={closeRightPanel}
                 onCopy={duplicateNode}
+                onSetStart={setAsStartingNode}
+                isStartingNode={startingNodeId === selectedNode.id}
+                flowVars={flowVars}
               />
             )}
             {rightPanel === "webhook" && (
@@ -841,6 +1135,12 @@ export default function FlowEditorPage() {
             )}
             {rightPanel === "history" && (
               <RunHistoryPanel
+                flowId={flowId}
+                onClose={closeRightPanel}
+              />
+            )}
+            {rightPanel === "simulator" && (
+              <FlowSimulatorPanel
                 flowId={flowId}
                 onClose={closeRightPanel}
               />

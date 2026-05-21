@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   LayoutTemplate, Plus, Loader2, Pencil, Trash2, Globe, QrCode,
-  Eye, EyeOff, X, Sparkles, Download, Code, Palette,
+  Eye, EyeOff, X, Sparkles, Download, Code, Palette, BarChart2,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -31,6 +31,15 @@ interface LandingPage {
 
 type EditorTab = "code" | "preview" | "seo";
 
+interface AttributionData {
+  total_visits: number;
+  scan_count: number;
+  top_sources: { key: string; count: number }[];
+  top_mediums: { key: string; count: number }[];
+  top_campaigns: { key: string; count: number }[];
+  top_refs: { key: string; count: number }[];
+}
+
 export default function LandingPagesPage() {
   const [pages, setPages] = useState<LandingPage[]>([]);
   const [loading, setLoading] = useState(true);
@@ -52,6 +61,13 @@ export default function LandingPagesPage() {
   const [aiGenerating, setAiGenerating] = useState(false);
   const [saving, setSaving] = useState(false);
   const [publishing, setPublishing] = useState<string | null>(null);
+  const [qrPage, setQrPage] = useState<LandingPage | null>(null);
+  const [qrFill, setQrFill] = useState("#000000");
+  const [qrBack, setQrBack] = useState("#ffffff");
+  const [qrBlobUrl, setQrBlobUrl] = useState<string | null>(null);
+  const [attrPage, setAttrPage] = useState<LandingPage | null>(null);
+  const [attrData, setAttrData] = useState<AttributionData | null>(null);
+  const [attrLoading, setAttrLoading] = useState(false);
 
   const iframeRef = useRef<HTMLIFrameElement>(null);
 
@@ -65,6 +81,12 @@ export default function LandingPagesPage() {
   }, []);
 
   useEffect(() => { load(); }, [load]);
+
+  useEffect(() => {
+    if (!qrPage) return;
+    const t = setTimeout(() => refreshQrPreview(qrPage, qrFill, qrBack), 300);
+    return () => clearTimeout(t);
+  }, [qrFill, qrBack, qrPage]);
 
   async function openEditor(p: LandingPage) {
     try {
@@ -136,16 +158,50 @@ export default function LandingPagesPage() {
     setPublishing(null);
   }
 
-  async function downloadQr(p: LandingPage) {
+  async function openQrModal(p: LandingPage) {
+    setQrPage(p);
+    setQrFill("#000000");
+    setQrBack("#ffffff");
+    await refreshQrPreview(p, "#000000", "#ffffff");
+  }
+
+  async function refreshQrPreview(p: LandingPage, fill: string, back: string) {
     try {
-      const res = await apiClient.get(`/api/v1/landing-pages/${p.id}/qr?fmt=png&size=400`, { responseType: "blob" });
+      const res = await apiClient.get(
+        `/api/v1/landing-pages/${p.id}/qr?fmt=png&size=300&fill=${encodeURIComponent(fill)}&back=${encodeURIComponent(back)}`,
+        { responseType: "blob" }
+      );
+      setQrBlobUrl((prev) => { if (prev) URL.revokeObjectURL(prev); return URL.createObjectURL(res.data); });
+    } catch {}
+  }
+
+  async function downloadQr(fmt: "png" | "svg") {
+    if (!qrPage) return;
+    try {
+      const fill = encodeURIComponent(qrFill);
+      const back = encodeURIComponent(qrBack);
+      const res = await apiClient.get(
+        `/api/v1/landing-pages/${qrPage.id}/qr?fmt=${fmt}&size=600&fill=${fill}&back=${back}`,
+        { responseType: "blob" }
+      );
       const url = URL.createObjectURL(res.data);
       const a = document.createElement("a");
       a.href = url;
-      a.download = `${p.slug}-qr.png`;
+      a.download = `${qrPage.slug}-qr.${fmt}`;
       a.click();
       URL.revokeObjectURL(url);
     } catch {}
+  }
+
+  async function openAttrModal(p: LandingPage) {
+    setAttrPage(p);
+    setAttrData(null);
+    setAttrLoading(true);
+    try {
+      const res = await apiClient.get(`/api/v1/landing-pages/${p.id}/attribution`);
+      setAttrData(res.data.data);
+    } catch {}
+    setAttrLoading(false);
   }
 
   async function generateAi() {
@@ -376,8 +432,11 @@ export default function LandingPagesPage() {
                         ? <EyeOff className="h-4 w-4" />
                         : <Globe className="h-4 w-4" />}
                   </Button>
-                  <Button variant="ghost" size="sm" onClick={() => downloadQr(p)} title="Download QR code">
+                  <Button variant="ghost" size="sm" onClick={() => openQrModal(p)} title="QR code">
                     <QrCode className="h-4 w-4" />
+                  </Button>
+                  <Button variant="ghost" size="sm" onClick={() => openAttrModal(p)} title="Attribution">
+                    <BarChart2 className="h-4 w-4" />
                   </Button>
                   <Button variant="ghost" size="sm" onClick={() => openEditor(p)}>
                     <Pencil className="h-4 w-4" />
@@ -431,6 +490,134 @@ export default function LandingPagesPage() {
           </div>
         </div>
       )}
+
+      {/* QR code modal */}
+      {qrPage && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+          <div className="bg-background rounded-xl shadow-xl w-full max-w-sm">
+            <div className="flex items-center justify-between p-4 border-b">
+              <h2 className="font-semibold flex items-center gap-2">
+                <QrCode className="h-4 w-4" /> QR Code
+              </h2>
+              <button onClick={() => { setQrPage(null); if (qrBlobUrl) URL.revokeObjectURL(qrBlobUrl); setQrBlobUrl(null); }}>
+                <X className="h-5 w-5 text-muted-foreground" />
+              </button>
+            </div>
+            <div className="p-4 space-y-4">
+              <div className="flex justify-center bg-muted rounded-lg p-4">
+                {qrBlobUrl ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img src={qrBlobUrl} alt="QR code" width={200} height={200} className="rounded" />
+                ) : (
+                  <div className="w-[200px] h-[200px] flex items-center justify-center">
+                    <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+                  </div>
+                )}
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1">
+                  <Label className="text-xs">Foreground color</Label>
+                  <div className="flex items-center gap-2">
+                    <input type="color" value={qrFill} onChange={(e) => setQrFill(e.target.value)} className="h-8 w-10 rounded border cursor-pointer" />
+                    <span className="text-xs font-mono text-muted-foreground">{qrFill}</span>
+                  </div>
+                </div>
+                <div className="space-y-1">
+                  <Label className="text-xs">Background color</Label>
+                  <div className="flex items-center gap-2">
+                    <input type="color" value={qrBack} onChange={(e) => setQrBack(e.target.value)} className="h-8 w-10 rounded border cursor-pointer" />
+                    <span className="text-xs font-mono text-muted-foreground">{qrBack}</span>
+                  </div>
+                </div>
+              </div>
+              <p className="text-xs text-muted-foreground truncate">
+                Encodes: {typeof window !== "undefined" ? window.location.origin : ""}/p/{qrPage.slug}
+              </p>
+              <div className="flex gap-2">
+                <Button className="flex-1 gap-1.5" onClick={() => downloadQr("png")}>
+                  <Download className="h-3.5 w-3.5" /> PNG
+                </Button>
+                <Button variant="outline" className="flex-1 gap-1.5" onClick={() => downloadQr("svg")}>
+                  <Download className="h-3.5 w-3.5" /> SVG
+                </Button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Attribution modal */}
+      {attrPage && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
+          <div className="relative w-full max-w-md rounded-xl border bg-background p-6 shadow-xl">
+            <button
+              onClick={() => setAttrPage(null)}
+              className="absolute right-4 top-4 rounded-full p-1 hover:bg-muted"
+            >
+              <X className="h-4 w-4" />
+            </button>
+            <div className="flex items-center gap-2 mb-4">
+              <BarChart2 className="h-5 w-5 text-primary" />
+              <h2 className="text-base font-semibold">Attribution — {attrPage.name}</h2>
+            </div>
+            {attrLoading && (
+              <div className="flex justify-center py-8"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /></div>
+            )}
+            {!attrLoading && attrData && (
+              <div className="space-y-4">
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="rounded-lg border bg-muted/30 p-3 text-center">
+                    <p className="text-2xl font-bold">{attrData.total_visits}</p>
+                    <p className="text-xs text-muted-foreground mt-0.5">Total visits</p>
+                  </div>
+                  <div className="rounded-lg border bg-muted/30 p-3 text-center">
+                    <p className="text-2xl font-bold">{attrData.scan_count}</p>
+                    <p className="text-xs text-muted-foreground mt-0.5">QR scans</p>
+                  </div>
+                </div>
+                {attrData.top_sources.length > 0 && (
+                  <AttrTable title="Top Sources" rows={attrData.top_sources} />
+                )}
+                {attrData.top_mediums.length > 0 && (
+                  <AttrTable title="Top Mediums" rows={attrData.top_mediums} />
+                )}
+                {attrData.top_campaigns.length > 0 && (
+                  <AttrTable title="Top Campaigns" rows={attrData.top_campaigns} />
+                )}
+                {attrData.top_refs.length > 0 && (
+                  <AttrTable title="Top Refs" rows={attrData.top_refs} />
+                )}
+                {attrData.total_visits === 0 && (
+                  <p className="text-sm text-muted-foreground text-center py-4">No visit data yet. Share your landing page to start tracking.</p>
+                )}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function AttrTable({ title, rows }: { title: string; rows: { key: string; count: number }[] }) {
+  const max = rows[0]?.count ?? 1;
+  return (
+    <div>
+      <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-1.5">{title}</p>
+      <div className="space-y-1">
+        {rows.map((r) => (
+          <div key={r.key} className="flex items-center gap-2">
+            <span className="text-xs w-32 truncate font-medium">{r.key}</span>
+            <div className="flex-1 h-1.5 rounded-full bg-muted overflow-hidden">
+              <div
+                className="h-full rounded-full bg-primary"
+                style={{ width: `${(r.count / max) * 100}%` }}
+              />
+            </div>
+            <span className="text-xs text-muted-foreground w-8 text-right">{r.count}</span>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }
