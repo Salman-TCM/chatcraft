@@ -6,11 +6,14 @@ import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { apiClient } from "@/lib/api";
 import { AudioPlayer } from "./audio-player";
+import { RichContent, parseRichContent } from "./rich-content";
 import type { ChatMessage } from "./types";
 
 interface MessageBubbleProps {
   message: ChatMessage;
   onFeedbackChange?: (id: string, feedback: "thumbs_up" | "thumbs_down") => void;
+  onQuickReply?: (reply: string) => void;
+  onPostback?: (payload: string) => void;
   ttsEnabled?: boolean;
   autoPlayTts?: boolean;
   accessToken?: string | null;
@@ -22,6 +25,8 @@ const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 export function MessageBubble({
   message,
   onFeedbackChange,
+  onQuickReply,
+  onPostback,
   ttsEnabled = false,
   autoPlayTts = false,
   accessToken,
@@ -30,6 +35,14 @@ export function MessageBubble({
   const [copied, setCopied] = useState(false);
   const [feedback, setFeedback] = useState(message.feedback ?? null);
   const isUser = message.role === "user";
+
+  // Parse rich content blocks from assistant messages
+  const { text: displayText, blocks: richBlocks } = !isUser && !message.isStreaming
+    ? parseRichContent(message.content)
+    : { text: message.content, blocks: [] };
+
+  // Extract YouTube video IDs from assistant message text
+  const youtubeIds = !isUser && !message.isStreaming ? extractYouTubeIds(displayText) : [];
 
   // TTS audio URL — built from API endpoint; backend redirects to cached S3 URL
   const ttsUrl = ttsEnabled && !isUser && !message.isStreaming && message.content
@@ -71,24 +84,50 @@ export function MessageBubble({
 
       {/* Bubble */}
       <div className={cn("flex max-w-[75%] flex-col gap-1", isUser && "items-end")}>
-        <div
-          className={cn(
-            "rounded-2xl px-4 py-2.5 text-sm leading-relaxed whitespace-pre-wrap break-words",
-            isUser
-              ? "bg-primary text-primary-foreground rounded-tr-sm"
-              : "bg-muted text-foreground rounded-tl-sm"
-          )}
-        >
-          {message.content}
-          {message.isStreaming && (
-            <span className="ml-0.5 inline-block h-4 w-0.5 animate-pulse bg-current opacity-70" />
-          )}
-        </div>
+        {(displayText || message.isStreaming) && (
+          <div
+            className={cn(
+              "rounded-2xl px-4 py-2.5 text-sm leading-relaxed whitespace-pre-wrap break-words",
+              isUser
+                ? "bg-primary text-primary-foreground rounded-tr-sm"
+                : "bg-muted text-foreground rounded-tl-sm"
+            )}
+          >
+            {displayText}
+            {message.isStreaming && (
+              <span className="ml-0.5 inline-block h-4 w-0.5 animate-pulse bg-current opacity-70" />
+            )}
+          </div>
+        )}
+
+        {/* YouTube embeds */}
+        {youtubeIds.map((vid) => (
+          <div key={vid} className="mt-1 w-full max-w-xs rounded-xl overflow-hidden border">
+            <iframe
+              src={`https://www.youtube.com/embed/${vid}`}
+              title="YouTube video"
+              allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+              allowFullScreen
+              className="w-full aspect-video"
+              loading="lazy"
+            />
+          </div>
+        ))}
+
+        {/* Rich content blocks */}
+        {richBlocks.map((block, i) => (
+          <RichContent
+            key={i}
+            block={block}
+            onQuickReply={onQuickReply}
+            onPostback={onPostback}
+          />
+        ))}
 
         {/* TTS audio player */}
         {ttsUrl && (
           <TtsPlayer
-            text={message.content}
+            text={displayText || message.content}
             apiBase={apiBase}
             accessToken={accessToken}
             autoPlay={autoPlayTts}
@@ -143,6 +182,25 @@ export function MessageBubble({
       </div>
     </div>
   );
+}
+
+// ── YouTube URL extractor ─────────────────────────────────────────────────────
+
+const YT_REGEX =
+  /(?:https?:\/\/)?(?:www\.)?(?:youtube\.com\/watch\?v=|youtu\.be\/|youtube\.com\/embed\/)([A-Za-z0-9_-]{11})/g;
+
+function extractYouTubeIds(text: string): string[] {
+  const ids: string[] = [];
+  const seen = new Set<string>();
+  let match;
+  YT_REGEX.lastIndex = 0;
+  while ((match = YT_REGEX.exec(text)) !== null) {
+    if (!seen.has(match[1])) {
+      ids.push(match[1]);
+      seen.add(match[1]);
+    }
+  }
+  return ids;
 }
 
 // ── TTS Player sub-component ──────────────────────────────────────────────────

@@ -11,11 +11,20 @@ export interface AuthUser {
   accessToken: string;
 }
 
+export interface AgencyTheme {
+  primaryColour?: string;
+  logo?: string;
+  name?: string;
+  favicon?: string;
+}
+
 interface AuthState {
   user: AuthUser | null;
   isAuthenticated: boolean;
   setUser: (user: AuthUser | null) => void;
   clearAuth: () => void;
+  agencyTheme: AgencyTheme | null;
+  setAgencyTheme: (theme: AgencyTheme | null) => void;
 }
 
 interface UIState {
@@ -41,6 +50,8 @@ export const useAppStore = create<AppState>()(
       isAuthenticated: false,
       setUser: (user) => set({ user, isAuthenticated: !!user }),
       clearAuth: () => set({ user: null, isAuthenticated: false }),
+      agencyTheme: null,
+      setAgencyTheme: (agencyTheme) => set({ agencyTheme }),
 
       sidebarOpen: true,
       setSidebarOpen: (open) => set({ sidebarOpen: open }),
