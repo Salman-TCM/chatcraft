@@ -4,6 +4,12 @@ Google A2A (Agent-to-Agent) Protocol endpoints.
 Implements:
   GET  /a2a/widgets/{widget_id}/agent.json  — Agent Card discovery
   POST /a2a/widgets/{widget_id}             — JSON-RPC 2.0 message endpoint
+
+Authentication:
+  If `a2a_auth_required` is set on the chatbot config, callers must send:
+  Authorization: Bearer <token>
+  Where <token> is one of the keys in `a2a_allowed_tokens` (JSONB list).
+  Typically, callers use their Google AI API key.
 """
 import uuid
 
@@ -29,6 +35,9 @@ async def agent_card(widget_id: str, db: DBSession):
     chatbot = await _get_chatbot(widget_id, db)
     base = settings.api_base_url.rstrip("/")
 
+    a2a_auth_required = getattr(chatbot, "a2a_auth_required", False) or False
+    auth_schemes = ["bearer"] if a2a_auth_required else ["none", "bearer"]
+
     card = {
         "name": chatbot.name,
         "description": getattr(chatbot, "description", None) or f"{chatbot.name} powered by ChatCraft AI",
@@ -44,7 +53,7 @@ async def agent_card(widget_id: str, db: DBSession):
             "stateTransitionHistory": False,
         },
         "authentication": {
-            "schemes": ["none"],
+            "schemes": auth_schemes,
         },
         "defaultInputModes": ["text/plain"],
         "defaultOutputModes": ["text/plain"],
@@ -93,6 +102,15 @@ async def a2a_message(widget_id: str, request: Request, db: DBSession):
         return _rpc_error(rpc_id, -32602, "Invalid params — no text parts found")
 
     chatbot = await _get_chatbot(widget_id, db)
+
+    # ── A2A Authentication check ──────────────────────────────────────────────
+    a2a_auth_required = getattr(chatbot, "a2a_auth_required", False) or False
+    a2a_allowed_tokens: list[str] = getattr(chatbot, "a2a_allowed_tokens", None) or []
+    if a2a_auth_required and a2a_allowed_tokens:
+        auth_header = request.headers.get("Authorization", "")
+        provided_token = auth_header.removeprefix("Bearer ").strip()
+        if not provided_token or provided_token not in a2a_allowed_tokens:
+            return _rpc_error(rpc_id, -32000, "Unauthorized — invalid or missing Bearer token")
 
     system_prompt = getattr(chatbot, "system_prompt", None) or "You are a helpful assistant."
     llm = LLMRouter(

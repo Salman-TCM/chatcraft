@@ -1,7 +1,7 @@
 import uuid
 
-from sqlalchemy import Boolean, ForeignKey, String, Text
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy import Boolean, Float, ForeignKey, Integer, String, Text
+from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import Base, TimestampMixin
@@ -58,8 +58,22 @@ class ChatbotConfig(TimestampMixin, Base):
     dark_mode: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=False, server_default="false"
     )
+    # 0 = instant reply; 1-30 = delay in seconds before bot starts "typing"
+    reply_delay_seconds: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default="0"
+    )
     ai_paused: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=False, server_default="false"
+    )
+    # Temperature: 0.0 (deterministic) to 1.0 (creative); null = model default
+    temperature: Mapped[float | None] = mapped_column(Float, nullable=True)
+    # streaming_mode: "normal" | "fast" (fast disables rich content + function calls)
+    streaming_mode: Mapped[str] = mapped_column(
+        String(20), nullable=False, default="normal", server_default="normal"
+    )
+    # Max iterations for multi-step agent tool calls (1-20)
+    max_agent_steps: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=5, server_default="5"
     )
 
     # ── Voice fields ──────────────────────────────────────────────────────────
@@ -80,6 +94,13 @@ class ChatbotConfig(TimestampMixin, Base):
     voice_similarity_boost: Mapped[float] = mapped_column(
         nullable=False, default=0.75, server_default="0.75"
     )
+
+    # A2A authentication — if a2a_auth_required is True, callers must supply a Bearer token
+    # from a2a_allowed_tokens (list of accepted token strings, e.g. Google AI API keys)
+    a2a_auth_required: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default="false"
+    )
+    a2a_allowed_tokens: Mapped[list | None] = mapped_column(JSONB, nullable=True, default=None)
 
     # Relationships
     user: Mapped["User"] = relationship("User", back_populates="chatbot_configs")  # type: ignore[name-defined]
