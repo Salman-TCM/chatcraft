@@ -118,6 +118,18 @@ def all_models() -> list[str]:
     )
 
 
+def all_models() -> list[str]:
+    return sorted(
+        _ANTHROPIC_MODELS
+        | _OPENAI_MODELS
+        | _GEMINI_MODELS
+        | _DEEPSEEK_MODELS
+        | _GROQ_MODELS
+        | _PERPLEXITY_MODELS
+        | _XAI_MODELS
+    )
+
+
 class LLMRouter:
     """
     Entry-point for the chat API.
