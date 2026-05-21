@@ -129,6 +129,10 @@ class FlowExecutor:
                 return await self._exec_jump_to(data)
             case "randomizer":
                 return await self._exec_randomizer(data)
+            case "ai_tasks":
+                return await self._exec_ai_tasks(data)
+            case "ai_web":
+                return await self._exec_ai_web(data)
             case _:
                 # Unknown node type — skip
                 return {"status": "continue"}
@@ -137,8 +141,9 @@ class FlowExecutor:
 
     async def _exec_send_message(self, data: dict) -> dict:
         text = self._resolve(data.get("text", ""))
+        channel_override = data.get("channel")  # "omni" means use conversation's channel
         if text and self.run.conversation_id:
-            await self._send_to_conversation(text)
+            await self._send_to_conversation(text, channel_override=channel_override)
         return {"status": "continue"}
 
     async def _exec_user_input(self, data: dict) -> dict:
@@ -264,18 +269,103 @@ class FlowExecutor:
     async def _exec_action(self, data: dict) -> dict:
         action = data.get("action", "")
         match action:
+            # ── Fields & tags ─────────────────────────────────────────────────
             case "set_field":
                 await self._action_set_field(data)
+            case "clear_field":
+                await self._action_clear_field(data)
             case "add_tag":
                 await self._action_add_tag(data)
             case "remove_tag":
                 await self._action_remove_tag(data)
+            # ── Conversation ──────────────────────────────────────────────────
             case "close_conversation":
                 await self._action_close_conversation()
+            case "clear_chat_history":
+                await self._action_clear_chat_history()
+            case "internal_note":
+                await self._action_internal_note(data)
+            case "pause_conversation":
+                await self._action_pause_conversation(True)
+            case "resume_conversation":
+                await self._action_pause_conversation(False)
+            # ── Contact ───────────────────────────────────────────────────────
+            case "delete_contact":
+                await self._action_delete_contact()
+            case "opt_out":
+                await self._action_set_contact_flag("opted_out", True)
+            case "opt_in":
+                await self._action_set_contact_flag("opted_out", False)
+            case "block_contact":
+                await self._action_set_contact_flag("is_blocked", True)
+            case "unblock_contact":
+                await self._action_set_contact_flag("is_blocked", False)
+            # ── Sequences & pipelines ──────────────────────────────────────────
+            case "assign_sequence":
+                await self._action_assign_sequence(data)
+            case "unassign_sequence":
+                await self._action_unassign_sequence(data)
+            case "pipeline_add":
+                await self._action_pipeline_add(data)
+            case "pipeline_move":
+                await self._action_pipeline_move(data)
+            case "pipeline_remove":
+                await self._action_pipeline_remove(data)
+            case "pipeline_update_value":
+                await self._action_pipeline_update_value(data)
+            # ── Flows ─────────────────────────────────────────────────────────
+            case "cancel_pending_flow":
+                await self._action_cancel_pending_flow(data)
+            # ── Outbound ──────────────────────────────────────────────────────
+            case "send_sms":
+                await self._action_send_sms(data)
+            case "send_email":
+                await self._action_send_email(data)
+            case "send_push":
+                await self._action_send_push(data)
+            case "send_team_notification":
+                await self._action_send_team_notification(data)
+            case "outbound_call":
+                await self._action_outbound_call(data)
+            # ── Web ───────────────────────────────────────────────────────────
             case "send_webhook":
                 await self._action_send_webhook(data)
+            case "web_fetch":
+                await self._action_web_fetch(data)
+            # ── AI ────────────────────────────────────────────────────────────
+            case "ai_generate":
+                await self._action_ai_generate(data)
+            case "extract_data":
+                await self._action_extract_data(data)
+            case "execute_js":
+                await self._action_execute_js(data)
+            # ── Assignment ────────────────────────────────────────────────────
             case "assign_conversation":
                 await self._action_assign_conversation(data)
+            # ── Wallet ────────────────────────────────────────────────────────
+            case "wallet_action":
+                await self._action_wallet(data)
+            # ── Google Sheets ─────────────────────────────────────────────────
+            case "google_sheets":
+                await self._action_google_sheets(data)
+            # ── WhatsApp Template ─────────────────────────────────────────────
+            case "whatsapp_template":
+                await self._action_whatsapp_template(data)
+            # ── Channel config ────────────────────────────────────────────────
+            case "set_persistent_menu":
+                await self._action_channel_menu(data, set_mode=True)
+            case "delete_persistent_menu":
+                await self._action_channel_menu(data, set_mode=False)
+            case "set_telegram_commands":
+                await self._action_telegram_commands(data, set_mode=True)
+            case "delete_telegram_commands":
+                await self._action_telegram_commands(data, set_mode=False)
+            # ── Discord ───────────────────────────────────────────────────────
+            case "discord_action":
+                await self._action_discord(data)
+            # ── Social ────────────────────────────────────────────────────────
+            case "social_post":
+                await self._action_social_post(data)
         return {"status": "continue"}
 
     async def _exec_jump_to(self, data: dict) -> dict:
@@ -296,6 +386,114 @@ class FlowExecutor:
         weights = [p.get("weight", 1) for p in paths]
         chosen = random.choices(paths, weights=weights, k=1)[0]
         return {"status": "continue", "handle": chosen.get("handle", "0")}
+
+    async def _exec_ai_tasks(self, data: dict) -> dict:
+        """
+        AI Tasks node — drives a multi-step checklist via AI.
+        Each task is sent as a message; AI responses are evaluated for completion.
+        Branches to 'complete' or 'maxnudges' output handle.
+        """
+        tasks: list[str] = data.get("tasks", [])
+        model = data.get("model", "gpt-4o-mini")
+        max_nudges = int(data.get("max_nudges", 3))
+        gentle = data.get("gentle", True)
+
+        if not tasks:
+            return {"status": "continue", "handle": "complete"}
+
+        ctx = dict(self.run.context or {})
+        completed = ctx.get("_ai_tasks_completed", [])
+        nudge_count = int(ctx.get("_ai_tasks_nudges", 0))
+
+        pending = [t for t in tasks if t not in completed]
+        if not pending:
+            return {"status": "continue", "handle": "complete"}
+
+        if nudge_count >= max_nudges:
+            return {"status": "continue", "handle": "maxnudges"}
+
+        # Send next pending task as a message
+        task_text = pending[0]
+        tone = "gently remind" if gentle else "firmly ask"
+        prompt = f"Please {tone} the user to complete the following task: {task_text}"
+        llm = LLMRouter(model=model)
+        try:
+            resp = await llm.complete([ChatMessage(role="user", content=prompt)], max_tokens=256)
+            if self.run.conversation_id:
+                await self._send_to_conversation(resp.content.strip())
+        except Exception:
+            if self.run.conversation_id:
+                await self._send_to_conversation(task_text)
+
+        ctx["_ai_tasks_nudges"] = nudge_count + 1
+        self.run.context = ctx
+        return {"status": "waiting"}  # wait for user response to advance
+
+    async def _exec_ai_web(self, data: dict) -> dict:
+        """
+        AI Web node — Search, Fetch, or Browse mode.
+        Saves result to context variable; optionally sends summary as reply.
+        """
+        mode = data.get("mode", "fetch")   # "search" | "fetch" | "browse"
+        query_or_url = self._resolve(data.get("query", data.get("url", "")))
+        save_to = data.get("save_to", "web_result")
+        send_reply = data.get("send_reply", False)
+        model = data.get("model", "gpt-4o-mini")
+
+        result_text = ""
+        try:
+            if mode == "fetch":
+                async with httpx.AsyncClient(timeout=15, follow_redirects=True) as client:
+                    resp = await client.get(query_or_url, headers={"User-Agent": "ChatCraft/1.0"})
+                    # Strip HTML tags crudely for context injection
+                    import re as _re
+                    raw = resp.text[:8000]
+                    result_text = _re.sub(r"<[^>]+>", " ", raw).strip()
+
+            elif mode == "search":
+                # Use Perplexity or fall back to a DuckDuckGo instant answer
+                from app.core.config import settings
+                if settings.perplexity_api_key:
+                    llm = LLMRouter(model="sonar", provider_override="perplexity")
+                    r = await llm.complete(
+                        [ChatMessage(role="user", content=query_or_url)],
+                        max_tokens=512,
+                    )
+                    result_text = r.content.strip()
+                else:
+                    async with httpx.AsyncClient(timeout=10) as client:
+                        r = await client.get(
+                            "https://api.duckduckgo.com/",
+                            params={"q": query_or_url, "format": "json", "no_html": 1},
+                        )
+                        data_json = r.json()
+                        result_text = data_json.get("AbstractText") or data_json.get("Answer") or ""
+
+            elif mode == "browse":
+                # Delegate to browser service
+                from app.services.browser import BrowserService
+                bs = BrowserService()
+                result_text = await bs.fetch_content(query_or_url)
+
+        except Exception as exc:
+            result_text = f"[web error: {exc}]"
+
+        ctx = dict(self.run.context or {})
+        ctx[save_to] = result_text
+        self.run.context = ctx
+
+        if send_reply and result_text and self.run.conversation_id:
+            llm = LLMRouter(model=model)
+            try:
+                summary = await llm.complete(
+                    [ChatMessage(role="user", content=f"Summarise this in 2-3 sentences:\n{result_text[:3000]}")],
+                    max_tokens=256,
+                )
+                await self._send_to_conversation(summary.content.strip())
+            except Exception:
+                pass
+
+        return {"status": "continue"}
 
     # ── Action helpers ────────────────────────────────────────────────────────
 
@@ -418,9 +616,600 @@ class FlowExecutor:
                 assigned_to_user_id=uid,
             ))
 
+    async def _action_clear_field(self, data: dict) -> None:
+        field_key = data.get("field_key", "")
+        if not field_key or not self.run.contact_id:
+            return
+        from app.models.crm import CustomField, ContactFieldValue
+        result = await self.db.execute(
+            select(CustomField).where(
+                CustomField.field_key == field_key,
+                CustomField.user_id == self.flow.user_id,
+            )
+        )
+        field = result.scalar_one_or_none()
+        if not field:
+            return
+        fv_result = await self.db.execute(
+            select(ContactFieldValue).where(
+                ContactFieldValue.contact_id == self.run.contact_id,
+                ContactFieldValue.field_id == field.id,
+            )
+        )
+        fv = fv_result.scalar_one_or_none()
+        if fv:
+            await self.db.delete(fv)
+
+    async def _action_clear_chat_history(self) -> None:
+        if not self.run.conversation_id:
+            return
+        from app.models.message import Message
+        from sqlalchemy import delete
+        await self.db.execute(
+            delete(Message).where(Message.conversation_id == self.run.conversation_id)
+        )
+
+    async def _action_internal_note(self, data: dict) -> None:
+        if not self.run.conversation_id:
+            return
+        note_text = self._resolve(data.get("note", ""))
+        if not note_text:
+            return
+        from app.models.inbox import InternalNote
+        self.db.add(InternalNote(
+            conversation_id=self.run.conversation_id,
+            content=note_text,
+        ))
+
+    async def _action_pause_conversation(self, paused: bool) -> None:
+        if not self.run.conversation_id:
+            return
+        from app.models.conversation import Conversation
+        conv = await self.db.get(Conversation, self.run.conversation_id)
+        if conv:
+            conv.ai_paused = paused
+
+    async def _action_delete_contact(self) -> None:
+        if not self.run.contact_id:
+            return
+        from app.models.crm import Contact
+        contact = await self.db.get(Contact, self.run.contact_id)
+        if contact:
+            await self.db.delete(contact)
+
+    async def _action_set_contact_flag(self, flag: str, value: bool) -> None:
+        if not self.run.contact_id:
+            return
+        from app.models.crm import Contact
+        contact = await self.db.get(Contact, self.run.contact_id)
+        if contact and hasattr(contact, flag):
+            setattr(contact, flag, value)
+
+    async def _action_assign_sequence(self, data: dict) -> None:
+        sequence_id_str = data.get("sequence_id", "")
+        if not sequence_id_str or not self.run.contact_id:
+            return
+        from app.models.automation import SequenceEnrollment
+        sid = uuid.UUID(sequence_id_str)
+        existing = await self.db.execute(
+            select(SequenceEnrollment).where(
+                SequenceEnrollment.sequence_id == sid,
+                SequenceEnrollment.contact_id == self.run.contact_id,
+            )
+        )
+        if not existing.scalar_one_or_none():
+            self.db.add(SequenceEnrollment(
+                sequence_id=sid,
+                contact_id=self.run.contact_id,
+                current_step=0,
+            ))
+
+    async def _action_unassign_sequence(self, data: dict) -> None:
+        sequence_id_str = data.get("sequence_id", "")
+        if not sequence_id_str or not self.run.contact_id:
+            return
+        from app.models.automation import SequenceEnrollment
+        from sqlalchemy import delete
+        sid = uuid.UUID(sequence_id_str)
+        await self.db.execute(
+            delete(SequenceEnrollment).where(
+                SequenceEnrollment.sequence_id == sid,
+                SequenceEnrollment.contact_id == self.run.contact_id,
+            )
+        )
+
+    async def _action_pipeline_add(self, data: dict) -> None:
+        pipeline_id_str = data.get("pipeline_id", "")
+        stage_id_str = data.get("stage_id", "")
+        if not pipeline_id_str or not self.run.contact_id:
+            return
+        from app.models.crm import Deal
+        self.db.add(Deal(
+            pipeline_id=uuid.UUID(pipeline_id_str),
+            stage_id=uuid.UUID(stage_id_str) if stage_id_str else None,
+            contact_id=self.run.contact_id,
+            user_id=self.flow.user_id,
+            title=self._resolve(data.get("title", "Deal")),
+            value=float(data.get("value", 0)),
+        ))
+
+    async def _action_pipeline_move(self, data: dict) -> None:
+        deal_id_str = data.get("deal_id", "")
+        stage_id_str = data.get("stage_id", "")
+        if not deal_id_str or not stage_id_str:
+            return
+        from app.models.crm import Deal
+        deal = await self.db.get(Deal, uuid.UUID(deal_id_str))
+        if deal:
+            deal.stage_id = uuid.UUID(stage_id_str)
+
+    async def _action_pipeline_remove(self, data: dict) -> None:
+        deal_id_str = data.get("deal_id", "")
+        if not deal_id_str:
+            return
+        from app.models.crm import Deal
+        deal = await self.db.get(Deal, uuid.UUID(deal_id_str))
+        if deal:
+            await self.db.delete(deal)
+
+    async def _action_pipeline_update_value(self, data: dict) -> None:
+        deal_id_str = data.get("deal_id", "")
+        if not deal_id_str:
+            return
+        from app.models.crm import Deal
+        deal = await self.db.get(Deal, uuid.UUID(deal_id_str))
+        if deal:
+            deal.value = float(self._resolve(str(data.get("value", 0))))
+
+    async def _action_cancel_pending_flow(self, data: dict) -> None:
+        if not self.run.contact_id:
+            return
+        from app.models.flow import FlowRun
+        from sqlalchemy import update
+        target_flow_id_str = data.get("flow_id", "")
+        stmt = (
+            update(FlowRun)
+            .where(
+                FlowRun.contact_id == self.run.contact_id,
+                FlowRun.status.in_(["running", "waiting"]),
+                FlowRun.id != self.run.id,
+            )
+        )
+        if target_flow_id_str:
+            stmt = stmt.where(FlowRun.flow_id == uuid.UUID(target_flow_id_str))
+        await self.db.execute(stmt.values(status="cancelled"))
+
+    async def _action_send_sms(self, data: dict) -> None:
+        to = self._resolve(data.get("to", ""))
+        body = self._resolve(data.get("body", ""))
+        if not to or not body:
+            return
+        from app.core.config import settings
+        if not settings.twilio_account_sid:
+            return
+        try:
+            from twilio.rest import Client
+            client = Client(settings.twilio_account_sid, settings.twilio_auth_token)
+            client.messages.create(body=body, from_=settings.twilio_phone_number, to=to)
+        except Exception:
+            pass
+
+    async def _action_send_email(self, data: dict) -> None:
+        to = self._resolve(data.get("to", ""))
+        subject = self._resolve(data.get("subject", ""))
+        body = self._resolve(data.get("body", ""))
+        if not to or not subject:
+            return
+        from app.services.email import send_custom_email
+        try:
+            await send_custom_email(to=to, subject=subject, html=body)
+        except Exception:
+            pass
+
+    async def _action_send_push(self, data: dict) -> None:
+        title = self._resolve(data.get("title", ""))
+        body = self._resolve(data.get("body", ""))
+        contact_id = self.run.contact_id
+        if not contact_id or not title:
+            return
+        try:
+            from app.services.push import send_push_to_contact
+            await send_push_to_contact(contact_id=contact_id, title=title, body=body, db=self.db)
+        except Exception:
+            pass
+
+    async def _action_send_team_notification(self, data: dict) -> None:
+        message = self._resolve(data.get("message", ""))
+        if not message:
+            return
+        from app.core.config import settings
+        if settings.slack_alert_webhook_url:
+            try:
+                async with httpx.AsyncClient(timeout=5) as client:
+                    await client.post(
+                        settings.slack_alert_webhook_url,
+                        json={"text": f"[Flow: {self.flow.name}] {message}"},
+                    )
+            except Exception:
+                pass
+
+    async def _action_outbound_call(self, data: dict) -> None:
+        to = self._resolve(data.get("to", ""))
+        if not to:
+            return
+        from app.core.config import settings
+        if not settings.twilio_account_sid:
+            return
+        try:
+            from twilio.rest import Client
+            twiml_url = self._resolve(data.get("twiml_url", f"{settings.api_base_url}/api/webhooks/twilio/voice/answer"))
+            client = Client(settings.twilio_account_sid, settings.twilio_auth_token)
+            client.calls.create(to=to, from_=settings.twilio_phone_number, url=twiml_url)
+        except Exception:
+            pass
+
+    async def _action_web_fetch(self, data: dict) -> None:
+        url = self._resolve(data.get("url", ""))
+        save_to = data.get("save_to", "fetch_result")
+        if not url:
+            return
+        try:
+            async with httpx.AsyncClient(timeout=15, follow_redirects=True) as client:
+                resp = await client.get(url, headers={"User-Agent": "ChatCraft/1.0"})
+                import re as _re
+                text = _re.sub(r"<[^>]+>", " ", resp.text[:6000]).strip()
+            ctx = dict(self.run.context or {})
+            ctx[save_to] = text
+            self.run.context = ctx
+        except Exception as exc:
+            ctx = dict(self.run.context or {})
+            ctx[f"{save_to}_error"] = str(exc)
+            self.run.context = ctx
+
+    async def _action_ai_generate(self, data: dict) -> None:
+        prompt = self._resolve(data.get("prompt", ""))
+        model = data.get("model", "gpt-4o-mini")
+        save_to = data.get("save_to", "ai_result")
+        if not prompt:
+            return
+        llm = LLMRouter(model=model)
+        try:
+            resp = await llm.complete([ChatMessage(role="user", content=prompt)], max_tokens=1024)
+            ctx = dict(self.run.context or {})
+            ctx[save_to] = resp.content.strip()
+            self.run.context = ctx
+        except Exception:
+            pass
+
+    async def _action_extract_data(self, data: dict) -> None:
+        schema_desc = data.get("schema", "")
+        save_to = data.get("save_to", "extracted")
+        conversation_context = ""
+        if self.run.conversation_id:
+            from app.models.message import Message
+            from sqlalchemy import select as _select
+            msgs = await self.db.execute(
+                _select(Message)
+                .where(Message.conversation_id == self.run.conversation_id)
+                .order_by(Message.created_at.desc())
+                .limit(10)
+            )
+            conversation_context = "\n".join(
+                f"{m.role}: {m.content}" for m in reversed(msgs.scalars().all())
+            )
+        prompt = (
+            f"Extract the following data from this conversation as JSON: {schema_desc}\n\n"
+            f"Conversation:\n{conversation_context}\n\n"
+            "Return only valid JSON, no explanation."
+        )
+        llm = LLMRouter(model="gpt-4o-mini")
+        try:
+            resp = await llm.complete([ChatMessage(role="user", content=prompt)], max_tokens=512)
+            import json as _json
+            extracted = _json.loads(resp.content.strip().strip("```json").strip("```"))
+            ctx = dict(self.run.context or {})
+            ctx[save_to] = extracted
+            if isinstance(extracted, dict):
+                ctx.update(extracted)
+            self.run.context = ctx
+        except Exception:
+            pass
+
+    async def _action_execute_js(self, data: dict) -> None:
+        code = data.get("code", "")
+        save_to = data.get("save_to", "js_result")
+        if not code:
+            return
+        ctx = dict(self.run.context or {})
+        # Sandboxed exec with restricted builtins + context injection
+        sandbox: dict = {
+            "__builtins__": {"str": str, "int": int, "float": float, "bool": bool,
+                             "list": list, "dict": dict, "len": len, "range": range,
+                             "print": lambda *a: None},
+            "context": dict(ctx),
+            "result": None,
+        }
+        try:
+            exec(compile(code, "<flow_js>", "exec"), sandbox)  # noqa: S102
+            ctx[save_to] = sandbox.get("result")
+            self.run.context = ctx
+        except Exception as exc:
+            ctx[f"{save_to}_error"] = str(exc)
+            self.run.context = ctx
+
+    async def _action_wallet(self, data: dict) -> None:
+        serial = self._resolve(data.get("serial", ""))
+        action = data.get("wallet_action", "")
+        if not serial or not action:
+            return
+        try:
+            from app.services.wallet.service import WalletService
+            ws = WalletService(db=self.db)
+            await ws.perform_action(
+                serial=serial,
+                action=action,
+                value=data.get("value"),
+                user_id=self.flow.user_id,
+            )
+        except Exception:
+            pass
+
+    async def _action_google_sheets(self, data: dict) -> None:
+        """Google Sheets action: append_row / update_row / get_row / search_rows."""
+        sheet_id = self._resolve(data.get("sheet_id", ""))
+        tab = self._resolve(data.get("tab", "Sheet1"))
+        op = data.get("operation", "append_row")
+        save_to = data.get("save_to", "sheets_result")
+        if not sheet_id:
+            return
+        try:
+            import gspread
+            from google.oauth2.service_account import Credentials
+            from app.core.config import settings
+
+            creds_json = getattr(settings, "google_service_account_json", None)
+            if not creds_json:
+                return
+            import json as _json
+            creds = Credentials.from_service_account_info(
+                _json.loads(creds_json),
+                scopes=["https://www.googleapis.com/auth/spreadsheets"],
+            )
+            gc = gspread.authorize(creds)
+            sh = gc.open_by_key(sheet_id)
+            ws = sh.worksheet(tab)
+
+            ctx = dict(self.run.context or {})
+            if op == "append_row":
+                row_data: list = data.get("row_data", [])
+                resolved = [self._resolve(str(v)) for v in row_data]
+                ws.append_row(resolved)
+                ctx[save_to] = {"appended": resolved}
+            elif op == "get_row":
+                row_num = int(self._resolve(str(data.get("row_number", 1))))
+                row = ws.row_values(row_num)
+                ctx[save_to] = row
+            elif op == "search_rows":
+                query = self._resolve(data.get("query", ""))
+                all_rows = ws.get_all_records()
+                matches = [r for r in all_rows if query.lower() in str(r).lower()]
+                ctx[save_to] = matches[:10]
+            elif op == "update_row":
+                row_num = int(self._resolve(str(data.get("row_number", 1))))
+                row_data = data.get("row_data", [])
+                resolved = [self._resolve(str(v)) for v in row_data]
+                ws.update(f"A{row_num}", [resolved])
+                ctx[save_to] = {"updated_row": row_num}
+            self.run.context = ctx
+        except Exception as exc:
+            ctx = dict(self.run.context or {})
+            ctx[f"{save_to}_error"] = str(exc)
+            self.run.context = ctx
+
+    async def _action_whatsapp_template(self, data: dict) -> None:
+        """Send a WhatsApp template message via the conversation's WhatsApp integration."""
+        template_name = self._resolve(data.get("template_name", ""))
+        language_code = data.get("language_code", "en")
+        components: list = data.get("components", [])
+        if not template_name or not self.run.conversation_id:
+            return
+        try:
+            from app.models.conversation import Conversation
+            from app.models.channel_integration import ChannelIntegration
+            from sqlalchemy import select as _sel
+            conv = await self.db.get(Conversation, self.run.conversation_id)
+            if not conv:
+                return
+            r = await self.db.execute(
+                _sel(ChannelIntegration).where(
+                    ChannelIntegration.chatbot_id == conv.chatbot_id,
+                    ChannelIntegration.channel == "whatsapp",
+                    ChannelIntegration.is_active.is_(True),
+                )
+            )
+            integ = r.scalar_one_or_none()
+            if not integ:
+                return
+            from app.services.channels.whatsapp import WhatsAppSender
+            sender = WhatsAppSender(integ.config)
+            # Resolve component text placeholders
+            resolved_components = []
+            for comp in components:
+                rc = dict(comp)
+                if "parameters" in rc:
+                    rc["parameters"] = [
+                        {**p, "text": self._resolve(p.get("text", ""))} if p.get("type") == "text" else p
+                        for p in rc["parameters"]
+                    ]
+                resolved_components.append(rc)
+            recipient_id = conv.guest_id or ""
+            if not recipient_id:
+                return
+            await sender.send_rich(recipient_id, {
+                "type": "template",
+                "template": {
+                    "name": template_name,
+                    "language": {"code": language_code},
+                    "components": resolved_components,
+                },
+            })
+        except Exception:
+            pass
+
+    async def _action_channel_menu(self, data: dict, set_mode: bool) -> None:
+        """Set or delete a Messenger/Instagram persistent menu."""
+        channel = data.get("channel", "facebook")
+        menu_items: list = data.get("menu_items", [])
+        if not self.run.conversation_id:
+            return
+        try:
+            from app.models.conversation import Conversation
+            from app.models.channel_integration import ChannelIntegration
+            from sqlalchemy import select as _sel
+            conv = await self.db.get(Conversation, self.run.conversation_id)
+            if not conv:
+                return
+            r = await self.db.execute(
+                _sel(ChannelIntegration).where(
+                    ChannelIntegration.chatbot_id == conv.chatbot_id,
+                    ChannelIntegration.channel == channel,
+                    ChannelIntegration.is_active.is_(True),
+                )
+            )
+            integ = r.scalar_one_or_none()
+            if not integ:
+                return
+            from app.services.channels.facebook import FacebookSender
+            sender = FacebookSender(integ.config)
+            if set_mode:
+                await sender.set_persistent_menu(menu_items)
+            else:
+                await sender.delete_persistent_menu()
+        except Exception:
+            pass
+
+    async def _action_telegram_commands(self, data: dict, set_mode: bool) -> None:
+        """Set or delete Telegram bot commands."""
+        commands: list = data.get("commands", [])
+        if not self.run.conversation_id:
+            return
+        try:
+            from app.models.conversation import Conversation
+            from app.models.channel_integration import ChannelIntegration
+            from sqlalchemy import select as _sel
+            conv = await self.db.get(Conversation, self.run.conversation_id)
+            if not conv:
+                return
+            r = await self.db.execute(
+                _sel(ChannelIntegration).where(
+                    ChannelIntegration.chatbot_id == conv.chatbot_id,
+                    ChannelIntegration.channel == "telegram",
+                    ChannelIntegration.is_active.is_(True),
+                )
+            )
+            integ = r.scalar_one_or_none()
+            if not integ:
+                return
+            from app.services.channels.telegram import TelegramSender
+            sender = TelegramSender(integ.config)
+            if set_mode:
+                await sender.set_commands(commands)
+            else:
+                await sender.delete_commands()
+        except Exception:
+            pass
+
+    async def _action_discord(self, data: dict) -> None:
+        """Discord actions: send_message / send_embed / add_role / remove_role."""
+        op = data.get("discord_op", "send_message")
+        if not self.run.conversation_id:
+            return
+        try:
+            from app.models.conversation import Conversation
+            from app.models.channel_integration import ChannelIntegration
+            from sqlalchemy import select as _sel
+            conv = await self.db.get(Conversation, self.run.conversation_id)
+            if not conv:
+                return
+            r = await self.db.execute(
+                _sel(ChannelIntegration).where(
+                    ChannelIntegration.chatbot_id == conv.chatbot_id,
+                    ChannelIntegration.channel == "discord",
+                    ChannelIntegration.is_active.is_(True),
+                )
+            )
+            integ = r.scalar_one_or_none()
+            if not integ:
+                return
+            from app.services.channels.discord import DiscordSender
+            sender = DiscordSender(integ.config)
+            channel_id = self._resolve(data.get("channel_id", "")) or conv.guest_id or ""
+            if op == "send_message":
+                text = self._resolve(data.get("message", ""))
+                if text and channel_id:
+                    await sender.send(channel_id, text)
+            elif op == "send_embed":
+                embed = {k: self._resolve(str(v)) for k, v in data.get("embed", {}).items()}
+                if channel_id:
+                    await sender.send_rich(channel_id, {"type": "embed", "embed": embed})
+            elif op == "add_role":
+                guild_id = self._resolve(data.get("guild_id", ""))
+                user_id = self._resolve(data.get("user_id", ""))
+                role_id = self._resolve(data.get("role_id", ""))
+                if guild_id and user_id and role_id:
+                    await sender.add_role(guild_id, user_id, role_id)
+            elif op == "remove_role":
+                guild_id = self._resolve(data.get("guild_id", ""))
+                user_id = self._resolve(data.get("user_id", ""))
+                role_id = self._resolve(data.get("role_id", ""))
+                if guild_id and user_id and role_id:
+                    await sender.remove_role(guild_id, user_id, role_id)
+        except Exception:
+            pass
+
+    async def _action_social_post(self, data: dict) -> None:
+        """Post to connected social accounts (Facebook, Instagram, X)."""
+        content = self._resolve(data.get("content", ""))
+        image_url = self._resolve(data.get("image_url", "")) or None
+        platforms: list[str] = data.get("platforms", ["facebook"])
+        if not content:
+            return
+        try:
+            from app.models.broadcast import SocialAccount
+            from sqlalchemy import select as _sel
+            r = await self.db.execute(
+                _sel(SocialAccount).where(
+                    SocialAccount.user_id == self.flow.user_id,
+                    SocialAccount.platform.in_(platforms),
+                )
+            )
+            accounts = r.scalars().all()
+            import httpx
+            _GRAPH = "https://graph.facebook.com/v19.0"
+            async with httpx.AsyncClient(timeout=15) as client:
+                for account in accounts:
+                    token = account.access_token
+                    if account.platform == "facebook" and account.page_id:
+                        params: dict = {"message": content, "access_token": token}
+                        if image_url:
+                            params["link"] = image_url
+                        await client.post(f"{_GRAPH}/{account.page_id}/feed", params=params)
+                    elif account.platform == "instagram" and account.page_id and image_url:
+                        c = await client.post(f"{_GRAPH}/{account.page_id}/media",
+                            params={"image_url": image_url, "caption": content, "access_token": token})
+                        cid = c.json().get("id")
+                        if cid:
+                            await client.post(f"{_GRAPH}/{account.page_id}/media_publish",
+                                params={"creation_id": cid, "access_token": token})
+        except Exception:
+            pass
+
     # ── Graph helpers ─────────────────────────────────────────────────────────
 
     def _find_start_node_id(self) -> str | None:
+        # Explicit entry point set by user
+        if self.flow.starting_node_id:
+            return self.flow.starting_node_id
         for node in (self.flow.nodes or []):
             if node.get("type") == "start":
                 return node["id"]
@@ -458,7 +1247,7 @@ class FlowExecutor:
             return str(val)
         return re.sub(r"\{\{(.+?)\}\}", replacer, text)
 
-    async def _send_to_conversation(self, text: str) -> None:
+    async def _send_to_conversation(self, text: str, channel_override: str | None = None) -> None:
         """Persist a message and deliver it via the conversation's channel."""
         from app.models.conversation import Conversation
         from app.models.message import Message, MessageRole
@@ -476,24 +1265,38 @@ class FlowExecutor:
         self.db.add(msg)
         conv.last_message_at = datetime.now(timezone.utc)
 
+        # Determine which channel to use
+        effective_channel = (
+            channel_override if channel_override and channel_override != "omni"
+            else conv.channel
+        )
+
         # Send outbound via channel
-        if conv.channel and conv.channel != "web" and conv.guest_id:
+        if effective_channel and effective_channel not in ("web", "web_widget") and conv.guest_id:
             from app.models.channel_integration import ChannelIntegration
-            from app.services.channels import get_sender
+            from app.services.channels import get_sender, is_within_meta_window, META_WINDOW_CHANNELS
             result = await self.db.execute(
                 select(ChannelIntegration).where(
                     ChannelIntegration.chatbot_id == conv.chatbot_id,
-                    ChannelIntegration.channel == conv.channel,
+                    ChannelIntegration.channel == effective_channel,
                     ChannelIntegration.is_active.is_(True),
                 )
             )
             integration = result.scalar_one_or_none()
             if integration:
-                try:
-                    sender = get_sender(conv.channel, integration.config)
-                    await sender.send(conv.guest_id, text)
-                except Exception:
+                # Enforce 24-hour window for Meta channels on proactive outbound
+                if effective_channel in META_WINDOW_CHANNELS and not is_within_meta_window(
+                    effective_channel, conv.last_user_message_at
+                ):
+                    # Outside window — skip delivery (WhatsApp could fall back to a template
+                    # but that requires a pre-approved template name we don't have here)
                     pass
+                else:
+                    try:
+                        sender = get_sender(effective_channel, integration.config)
+                        await sender.send(conv.guest_id, text)
+                    except Exception:
+                        pass
 
     async def _contact_has_tag(self, tag_name: str) -> bool:
         if not self.run.contact_id:
