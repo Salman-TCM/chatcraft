@@ -46,6 +46,7 @@ from app.models.crm import (  # noqa: F401
 )
 from app.models.api_token import ApiToken  # noqa: F401
 from app.models.user_api_key import UserApiKey  # noqa: F401
+from app.models.user_communication_setting import UserCommunicationSetting  # noqa: F401
 from app.models.white_label import (  # noqa: F401
     PlatformConfig,
     Agency,
