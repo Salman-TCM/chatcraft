@@ -14,11 +14,12 @@ import httpx
 from bs4 import BeautifulSoup
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
-from sqlalchemy import select, update
+from sqlalchemy import func, select, update
 
 from app.core.config import settings
 from app.core.dependencies import CurrentUser, DBSession
 from app.models.browser import BrowserSession
+from app.models.user import UserRole
 
 router = APIRouter(prefix="/api/v1/browser", tags=["browser"])
 
@@ -47,6 +48,15 @@ class CreateSessionRequest(BaseModel):
     block_private_ips: bool = True
 
 
+_MONTHLY_LIMITS: dict[UserRole, int] = {
+    UserRole.free: 50,
+    UserRole.trial: 100,
+    UserRole.premium: 500,
+    UserRole.creator: 2000,
+    UserRole.admin: 999999,
+}
+
+
 @router.post("/sessions")
 async def create_session(
     body: CreateSessionRequest,
@@ -54,6 +64,29 @@ async def create_session(
     db: DBSession,
 ):
     """Create a new browser session."""
+    # ── Monthly session limit check ───────────────────────────────────────────
+    monthly_limit = _MONTHLY_LIMITS.get(current_user.role, 50)
+    if monthly_limit < 999999:
+        now = datetime.now(timezone.utc)
+        month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+        count_result = await db.execute(
+            select(func.count()).select_from(BrowserSession).where(
+                BrowserSession.user_id == current_user.id,
+                BrowserSession.created_at >= month_start,
+            )
+        )
+        monthly_count = count_result.scalar_one()
+        if monthly_count >= monthly_limit:
+            raise HTTPException(
+                status_code=429,
+                detail={
+                    "code": "BROWSER_SESSION_LIMIT_REACHED",
+                    "message": f"Monthly browser session limit reached ({monthly_limit} sessions). Upgrade your plan for more.",
+                    "limit": monthly_limit,
+                    "used": monthly_count,
+                },
+            )
+
     token = secrets.token_urlsafe(32)
     external_id: str | None = None
 
@@ -224,11 +257,16 @@ async def session_view(session_id: str, current_user: CurrentUser, db: DBSession
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
 
+    cfg = session.config or {}
+    # Private mode: hide live browser feed from the end-user
+    if cfg.get("private"):
+        return {"success": True, "data": {"live_url": None, "private": True}}
+
     live_url = None
     if session.external_session_id and settings.browserbase_api_key:
         live_url = f"https://www.browserbase.com/sessions/{session.external_session_id}/live"
 
-    return {"success": True, "data": {"live_url": live_url}}
+    return {"success": True, "data": {"live_url": live_url, "private": False}}
 
 
 # ─── Helpers ──────────────────────────────────────────────────────────────────
