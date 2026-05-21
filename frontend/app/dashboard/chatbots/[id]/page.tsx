@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
+import Link from "next/link";
 import {
   ArrowLeft,
   Check,
@@ -11,6 +12,8 @@ import {
   Code2,
   BookOpen,
   Radio,
+  AlertCircle,
+  LayoutGrid,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -19,16 +22,15 @@ import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
 import { apiClient } from "@/lib/api";
 
-const MODELS = [
-  { value: "claude-sonnet-4-6",  label: "Claude Sonnet 4.6",  badge: "Recommended" },
-  { value: "claude-opus-4-7",    label: "Claude Opus 4.7",    badge: "Most capable" },
-  { value: "claude-haiku-4-5",   label: "Claude Haiku 4.5",   badge: "Fastest" },
-  { value: "gpt-4o",             label: "GPT-4o",             badge: "" },
-  { value: "gpt-4o-mini",        label: "GPT-4o Mini",        badge: "Budget" },
-  { value: "gemini-1.5-pro",     label: "Gemini 1.5 Pro",     badge: "" },
-  { value: "gemini-1.5-flash",   label: "Gemini 1.5 Flash",   badge: "" },
-  { value: "gemini-2.0-flash",   label: "Gemini 2.0 Flash",   badge: "" },
-];
+interface ProviderMeta {
+  label: string;
+  models: string[];
+}
+
+interface KeyStatus {
+  provider: string;
+  configured: boolean;
+}
 
 interface BotSettings {
   name: string;
@@ -37,7 +39,49 @@ interface BotSettings {
   allow_model_switch: boolean;
   system_prompt: string;
   published: boolean;
+  temperature: number | null;
+  streaming_mode: "normal" | "fast";
+  max_agent_steps: number;
 }
+
+const RICH_TEMPLATES = [
+  {
+    id: "quick_replies",
+    label: "Quick Replies",
+    description: "Show tappable reply buttons below your response",
+    instruction: `When presenting options to the user, end your reply with a quick replies block in this exact format:
+<<<RICH>>>
+{"type":"quick_replies","replies":["Option A","Option B","Option C"]}
+<<<END>>>`,
+  },
+  {
+    id: "buttons",
+    label: "Action Buttons",
+    description: "URL, phone, email, or postback buttons",
+    instruction: `When providing links or actions, include a buttons block:
+<<<RICH>>>
+{"type":"buttons","text":"Choose an action:","buttons":[{"type":"url","label":"Learn More","url":"https://example.com"},{"type":"phone","label":"Call Us","phone":"+1234567890"}]}
+<<<END>>>`,
+  },
+  {
+    id: "card",
+    label: "Info Card",
+    description: "Structured card with title, image, and buttons",
+    instruction: `When showcasing a product or service, use a card block:
+<<<RICH>>>
+{"type":"card","title":"Product Name","subtitle":"Brief description here","image_url":"https://example.com/image.jpg","buttons":[{"type":"url","label":"View Details","url":"https://example.com"}]}
+<<<END>>>`,
+  },
+  {
+    id: "carousel",
+    label: "Carousel",
+    description: "Swipeable multi-item cards (max 10)",
+    instruction: `When presenting multiple options (e.g. products, services), use a carousel:
+<<<RICH>>>
+{"type":"carousel","items":[{"title":"Item 1","subtitle":"Description","buttons":[{"type":"url","label":"Select","url":"https://example.com/1"}]},{"title":"Item 2","subtitle":"Description","buttons":[{"type":"url","label":"Select","url":"https://example.com/2"}]}]}
+<<<END>>>`,
+  },
+];
 
 export default function ChatbotSettingsPage() {
   const { id } = useParams<{ id: string }>();
@@ -50,14 +94,24 @@ export default function ChatbotSettingsPage() {
     allow_model_switch: false,
     system_prompt: "",
     published: false,
+    temperature: null,
+    streaming_mode: "normal",
+    max_agent_steps: 5,
   });
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [savedOk, setSavedOk] = useState(false);
 
+  const [providerMeta, setProviderMeta] = useState<Record<string, ProviderMeta>>({});
+  const [configuredProviders, setConfiguredProviders] = useState<Set<string>>(new Set());
+
   useEffect(() => {
-    apiClient.get(`/api/chatbots/${id}`).then(({ data }) => {
-      const b = data.data;
+    Promise.all([
+      apiClient.get(`/api/chatbots/${id}`),
+      apiClient.get("/api/settings/model-keys/providers"),
+      apiClient.get("/api/settings/model-keys"),
+    ]).then(([botRes, metaRes, statusRes]) => {
+      const b = botRes.data.data;
       setSettings({
         name: b.name ?? "",
         default_model: b.default_model ?? "claude-sonnet-4-6",
@@ -65,7 +119,17 @@ export default function ChatbotSettingsPage() {
         allow_model_switch: b.allow_model_switch ?? false,
         system_prompt: b.system_prompt ?? "",
         published: b.published ?? false,
+        temperature: b.temperature ?? null,
+        streaming_mode: b.streaming_mode ?? "normal",
+        max_agent_steps: b.max_agent_steps ?? 5,
       });
+      setProviderMeta(metaRes.data.data);
+      const configured = new Set<string>(
+        (statusRes.data.data as KeyStatus[])
+          .filter((s) => s.configured)
+          .map((s) => s.provider)
+      );
+      setConfiguredProviders(configured);
     }).catch(() => router.replace("/dashboard/chatbots"))
       .finally(() => setLoading(false));
   }, [id]);
@@ -85,6 +149,9 @@ export default function ChatbotSettingsPage() {
         allow_model_switch: payload.allow_model_switch,
         system_prompt: payload.system_prompt || null,
         published: payload.published,
+        temperature: payload.temperature,
+        streaming_mode: payload.streaming_mode,
+        max_agent_steps: payload.max_agent_steps,
       });
       if (overrides) setSettings((prev) => ({ ...prev, ...overrides }));
       setSavedOk(true);
@@ -165,33 +232,39 @@ export default function ChatbotSettingsPage() {
       {/* Model */}
       <Section title="AI Model">
         <div className="space-y-3">
+          {configuredProviders.size === 0 && (
+            <div className="flex items-start gap-2 rounded-md border border-amber-200 bg-amber-50 dark:border-amber-800 dark:bg-amber-950/30 px-3 py-2.5 text-xs text-amber-700 dark:text-amber-400">
+              <AlertCircle className="h-3.5 w-3.5 mt-0.5 shrink-0" />
+              <span>
+                No AI model keys configured yet.{" "}
+                <Link href="/dashboard/settings/integrations" className="underline font-medium">
+                  Set up your API keys in Integrations
+                </Link>{" "}
+                to activate this chatbot.
+              </span>
+            </div>
+          )}
+
           <div>
             <Label className="text-xs text-muted-foreground mb-1.5 block">Default Model</Label>
-            <select
+            <ModelSelect
               value={settings.default_model}
-              onChange={(e) => set("default_model", e.target.value)}
-              className="w-full rounded-md border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-ring"
-            >
-              {MODELS.map((m) => (
-                <option key={m.value} value={m.value}>
-                  {m.label}{m.badge ? ` — ${m.badge}` : ""}
-                </option>
-              ))}
-            </select>
+              onChange={(v) => set("default_model", v)}
+              providerMeta={providerMeta}
+              configuredProviders={configuredProviders}
+              includeNone={false}
+            />
           </div>
 
           <div>
             <Label className="text-xs text-muted-foreground mb-1.5 block">Fallback Model <span className="opacity-60">(optional)</span></Label>
-            <select
+            <ModelSelect
               value={settings.fallback_model}
-              onChange={(e) => set("fallback_model", e.target.value)}
-              className="w-full rounded-md border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-ring"
-            >
-              <option value="">None</option>
-              {MODELS.map((m) => (
-                <option key={m.value} value={m.value}>{m.label}</option>
-              ))}
-            </select>
+              onChange={(v) => set("fallback_model", v)}
+              providerMeta={providerMeta}
+              configuredProviders={configuredProviders}
+              includeNone
+            />
           </div>
 
           <div className="flex items-center justify-between">
@@ -200,6 +273,111 @@ export default function ChatbotSettingsPage() {
               <p className="text-xs text-muted-foreground">Let users choose the model in the chat window</p>
             </div>
             <Toggle checked={settings.allow_model_switch} onChange={(v) => set("allow_model_switch", v)} />
+          </div>
+        </div>
+      </Section>
+
+      <Separator />
+
+      {/* Generation settings */}
+      <Section title="Generation Settings">
+        <div className="space-y-4">
+          {/* Temperature */}
+          <div>
+            <div className="flex items-center justify-between mb-1.5">
+              <Label className="text-xs text-muted-foreground">
+                Temperature
+              </Label>
+              <span className="text-xs font-medium">
+                {settings.temperature === null ? "Default" : settings.temperature.toFixed(2)}
+              </span>
+            </div>
+            <input
+              type="range"
+              min={0}
+              max={1}
+              step={0.05}
+              value={settings.temperature ?? 0.7}
+              onChange={(e) => set("temperature", parseFloat(e.target.value))}
+              className="w-full accent-primary"
+            />
+            <div className="flex justify-between text-[10px] text-muted-foreground mt-0.5">
+              <span>Precise (0)</span>
+              <span>
+                <button
+                  className="underline-offset-2 hover:underline"
+                  onClick={() => set("temperature", null)}
+                >
+                  Reset to default
+                </button>
+              </span>
+              <span>Creative (1)</span>
+            </div>
+          </div>
+
+          {/* Streaming mode */}
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-sm font-medium">Fast Mode</p>
+              <p className="text-xs text-muted-foreground">Plain-text only — disables rich content, carousels, and function calls</p>
+            </div>
+            <Toggle
+              checked={settings.streaming_mode === "fast"}
+              onChange={(v) => set("streaming_mode", v ? "fast" : "normal")}
+            />
+          </div>
+
+          {/* Max agent steps */}
+          <div>
+            <div className="flex items-center justify-between mb-1.5">
+              <Label className="text-xs text-muted-foreground">Max Agent Steps</Label>
+              <span className="text-xs font-medium">{settings.max_agent_steps}</span>
+            </div>
+            <input
+              type="range"
+              min={1}
+              max={20}
+              step={1}
+              value={settings.max_agent_steps}
+              onChange={(e) => set("max_agent_steps", parseInt(e.target.value))}
+              className="w-full accent-primary"
+            />
+            <div className="flex justify-between text-[10px] text-muted-foreground mt-0.5">
+              <span>1</span>
+              <span>Max tool-call iterations per turn</span>
+              <span>20</span>
+            </div>
+          </div>
+        </div>
+      </Section>
+
+      <Separator />
+
+      {/* Dynamic content builder */}
+      <Section title="Dynamic Content">
+        <div className="space-y-2">
+          <Label className="text-xs text-muted-foreground block">
+            Insert rich-content templates into your system prompt. The AI will wrap content in{" "}
+            <code className="rounded bg-muted px-1 py-0.5 text-[11px]">{"<<<RICH>>>...<<<END>>>"}</code>{" "}
+            markers for the chat window to render as interactive UI.
+          </Label>
+          <div className="grid grid-cols-2 gap-2">
+            {RICH_TEMPLATES.map((tpl) => (
+              <button
+                key={tpl.id}
+                onClick={() => {
+                  const sep = settings.system_prompt.endsWith("\n") || !settings.system_prompt ? "" : "\n\n";
+                  set("system_prompt", settings.system_prompt + sep + tpl.instruction);
+                }}
+                className="flex items-start gap-2 rounded-lg border bg-muted/40 p-2.5 text-left text-xs hover:bg-muted transition-colors"
+              >
+                <LayoutGrid className="mt-0.5 h-3.5 w-3.5 shrink-0 text-primary" />
+                <div>
+                  <p className="font-medium">{tpl.label}</p>
+                  <p className="text-muted-foreground mt-0.5">{tpl.description}</p>
+                </div>
+              </button>
+            ))}
           </div>
         </div>
       </Section>
@@ -260,6 +438,48 @@ function Section({ title, children }: { title: string; children: React.ReactNode
       <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">{title}</p>
       {children}
     </div>
+  );
+}
+
+function ModelSelect({
+  value,
+  onChange,
+  providerMeta,
+  configuredProviders,
+  includeNone,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  providerMeta: Record<string, ProviderMeta>;
+  configuredProviders: Set<string>;
+  includeNone: boolean;
+}) {
+  const configured = Object.entries(providerMeta).filter(([p]) => configuredProviders.has(p));
+  const unconfigured = Object.entries(providerMeta).filter(([p]) => !configuredProviders.has(p));
+  return (
+    <select
+      value={value}
+      onChange={(e) => onChange(e.target.value)}
+      className="w-full rounded-md border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-ring"
+    >
+      {includeNone && <option value="">None</option>}
+      {configured.map(([provider, info]) => (
+        <optgroup key={provider} label={info.label}>
+          {info.models.map((m) => (
+            <option key={m} value={m}>{m}</option>
+          ))}
+        </optgroup>
+      ))}
+      {unconfigured.length > 0 && (
+        <optgroup label="── No key configured ──" disabled>
+          {unconfigured.map(([provider, info]) =>
+            info.models.map((m) => (
+              <option key={m} value={m} disabled>{info.label} — {m}</option>
+            ))
+          )}
+        </optgroup>
+      )}
+    </select>
   );
 }
 

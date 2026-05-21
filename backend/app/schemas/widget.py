@@ -13,6 +13,7 @@ class WidgetConfigResponse(BaseModel):
     position: str
     show_branding: bool
     embed_token: str
+    persistent_menu: list | None = None
     created_at: datetime
     updated_at: datetime
 
@@ -21,6 +22,7 @@ class WidgetConfigUpdate(BaseModel):
     allowed_domains: str | None = Field(None, max_length=2000)
     position: str | None = Field(None, pattern=r"^(bottom-right|bottom-left|top-right|top-left)$")
     show_branding: bool | None = None
+    persistent_menu: list | None = None
 
 
 class WidgetPublicConfig(BaseModel):
@@ -40,5 +42,12 @@ class WidgetPublicConfig(BaseModel):
     logo_url: str | None
     tts_enabled: bool
     stt_enabled: bool
+    auto_play_tts: bool
+    allow_model_switch: bool
+    voice_id: str | None
+    voice_stability: float
+    voice_similarity_boost: float
     position: str
     show_branding: bool
+    reply_delay_seconds: int = 0
+    persistent_menu: list | None = None

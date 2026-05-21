@@ -68,7 +68,9 @@ async def process_incoming(
             content=sanitized,
         )
         db.add(user_msg)
-        conv.last_message_at = datetime.now(timezone.utc)
+        now = datetime.now(timezone.utc)
+        conv.last_message_at = now
+        conv.last_user_message_at = now  # used for 24-hour window enforcement
         conv.unread_count = (conv.unread_count or 0) + 1
         await db.commit()
 

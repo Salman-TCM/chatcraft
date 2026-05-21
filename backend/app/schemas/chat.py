@@ -35,6 +35,11 @@ class ChatbotUpdateRequest(BaseModel):
     placeholder_text: str | None = Field(None, max_length=200)
     bubble_style: str | None = Field(None, pattern=r"^(rounded|square|pill)$")
     dark_mode: bool | None = None
+    reply_delay_seconds: int | None = Field(None, ge=0, le=30)
+    ai_paused: bool | None = None
+    temperature: float | None = Field(None, ge=0.0, le=1.0)
+    streaming_mode: str | None = Field(None, pattern=r"^(normal|fast)$")
+    max_agent_steps: int | None = Field(None, ge=1, le=20)
     # Voice
     tts_enabled: bool | None = None
     stt_enabled: bool | None = None
@@ -42,6 +47,9 @@ class ChatbotUpdateRequest(BaseModel):
     voice_id: str | None = Field(None, max_length=100)
     voice_stability: float | None = Field(None, ge=0.0, le=1.0)
     voice_similarity_boost: float | None = Field(None, ge=0.0, le=1.0)
+    # A2A
+    a2a_auth_required: bool | None = None
+    a2a_allowed_tokens: list[str] | None = None
 
 
 class ChatbotResponse(BaseModel):
@@ -64,6 +72,11 @@ class ChatbotResponse(BaseModel):
     placeholder_text: str
     bubble_style: str
     dark_mode: bool
+    reply_delay_seconds: int
+    ai_paused: bool
+    temperature: float | None
+    streaming_mode: str
+    max_agent_steps: int
     # Voice
     tts_enabled: bool
     stt_enabled: bool
@@ -71,6 +84,9 @@ class ChatbotResponse(BaseModel):
     voice_id: str | None
     voice_stability: float
     voice_similarity_boost: float
+    # A2A
+    a2a_auth_required: bool
+    a2a_allowed_tokens: list[str] | None
     created_at: datetime
     updated_at: datetime
 

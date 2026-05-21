@@ -4,6 +4,7 @@ Flow Builder API.
 Routes:
   GET    /api/v1/flows                      — list flows
   POST   /api/v1/flows                      — create
+  POST   /api/v1/flows/generate             — AI-generate flow from NL description
   GET    /api/v1/flows/{id}                 — detail (with nodes + edges)
   PATCH  /api/v1/flows/{id}                 — update
   DELETE /api/v1/flows/{id}                 — delete
@@ -12,7 +13,15 @@ Routes:
   POST   /api/v1/flows/{id}/trigger         — manually trigger for a contact
   GET    /api/v1/flows/{id}/runs            — run history
   POST   /webhooks/flow/{flow_id}/{secret}  — external webhook trigger (no auth)
+
+Folder routes:
+  GET    /api/v1/flows/folders              — list folders
+  POST   /api/v1/flows/folders              — create folder
+  PATCH  /api/v1/flows/folders/{id}         — rename / recolour
+  DELETE /api/v1/flows/folders/{id}         — delete (flows moved to no-folder)
 """
+import json
+import re
 import secrets
 import uuid
 from datetime import datetime, timezone
@@ -22,9 +31,116 @@ from fastapi import APIRouter, HTTPException, Query, status
 from sqlalchemy import func, select
 
 from app.core.dependencies import CurrentUser, DBSession
-from app.models.flow import Flow, FlowRun
+from app.models.flow import Flow, FlowFolder, FlowRun
 
 router = APIRouter(tags=["flows"])
+
+
+# ── Simplified list (must be registered before /{flow_id} to avoid UUID parse) ─
+
+@router.get("/api/v1/flows/list", response_model=dict)
+async def list_flows_simple(user: CurrentUser, db: DBSession) -> dict:
+    """Minimal list for integrations — id, name, is_active only."""
+    result = await db.execute(
+        select(Flow)
+        .where(Flow.user_id == user.id)
+        .order_by(Flow.name)
+    )
+    flows = result.scalars().all()
+    return {
+        "success": True,
+        "data": [{"id": str(f.id), "name": f.name, "is_active": f.is_active} for f in flows],
+    }
+
+
+_FLOW_SYSTEM_PROMPT = """\
+You are an AI that converts natural-language descriptions into ChatCraft flow JSON.
+
+Output ONLY a valid JSON object with this exact shape:
+{
+  "name": "<flow name>",
+  "description": "<short description>",
+  "trigger_type": "manual" | "keyword" | "webhook",
+  "trigger_config": {},
+  "nodes": [ ...node objects... ],
+  "edges": [ ...edge objects... ]
+}
+
+Node shape: { "id": "<unique string>", "type": "<type>", "position": {"x": <int>, "y": <int>}, "data": { ...fields... } }
+Edge shape: { "id": "<unique string>", "source": "<nodeId>", "target": "<nodeId>", "sourceHandle": "<handle or null>" }
+
+Available node types and their data fields:
+- start: {} — always present, id "start-1"
+- end: {} — always present, id "end-1"
+- send_message: { "message": "<text>", "channel": "omni" }
+- user_input: { "question": "<text>", "inputType": "text", "saveToField": null }
+- condition: { "field": "<var>", "operator": "eq|neq|contains|gt|lt|has_tag|is_empty", "value": "<val>", "trueHandle": "true", "falseHandle": "false" }
+- ai_response: { "model": "claude-sonnet-4-6", "prompt": "<system prompt>", "temperature": 0.7 }
+- ai_tasks: { "tasks": ["<task1>","<task2>"], "maxNudges": 3 }
+- delay: { "duration": 5, "unit": "minutes" }
+- http_request: { "method": "POST", "url": "<url>", "body": {}, "saveResponseAs": "response" }
+- randomizer: { "branches": [{"label":"A","weight":50},{"label":"B","weight":50}] }
+- action: { "actionType": "<type>", ...action-specific fields }
+  action types: set_field, add_tag, remove_tag, assign_conversation, send_webhook, send_sms, send_email, send_push, pause_conversation, resume_conversation, go_to_flow, add_to_pipeline
+- jump_to: { "targetNodeId": "<id>" }
+- notes: { "text": "<note>" }
+
+Layout guidance: start at x=250,y=50; space nodes 200px apart vertically; branch nodes go horizontally.
+Do not include markdown fences. Output raw JSON only.
+"""
+
+
+@router.post("/api/v1/flows/generate", response_model=dict, status_code=status.HTTP_201_CREATED)
+async def generate_flow(body: dict, user: CurrentUser, db: DBSession) -> dict:
+    """Generate a complete flow from a natural-language description using AI, then save it."""
+    description = (body.get("description") or "").strip()
+    if not description:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="description required")
+
+    from app.services.llm.base import ChatMessage
+    from app.services.llm.router import get_provider
+
+    provider = get_provider("claude-sonnet-4-6")
+    messages = [
+        ChatMessage(role="system", content=_FLOW_SYSTEM_PROMPT),
+        ChatMessage(role="user", content=f"Create a flow for: {description}"),
+    ]
+    try:
+        response = await provider.complete(messages, max_tokens=4096, temperature=0.3)
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"LLM error: {exc}") from exc
+
+    # Strip any accidental markdown fences
+    raw = response.content.strip()
+    raw = re.sub(r"^```[a-z]*\n?", "", raw)
+    raw = re.sub(r"\n?```$", "", raw)
+
+    try:
+        generated = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise HTTPException(status_code=502, detail=f"LLM returned invalid JSON: {exc}") from exc
+
+    # Validate required keys
+    for key in ("nodes", "edges"):
+        if not isinstance(generated.get(key), list):
+            raise HTTPException(status_code=502, detail=f"Generated flow missing '{key}' list")
+
+    flow = Flow(
+        user_id=user.id,
+        chatbot_id=body.get("chatbot_id"),
+        folder_id=body.get("folder_id"),
+        name=generated.get("name") or description[:80],
+        description=generated.get("description"),
+        trigger_type=generated.get("trigger_type", "manual"),
+        trigger_config=generated.get("trigger_config", {}),
+        nodes=generated["nodes"],
+        edges=generated["edges"],
+        webhook_secret=secrets.token_urlsafe(32),
+    )
+    db.add(flow)
+    await db.commit()
+    await db.refresh(flow)
+    return {"success": True, "data": _flow_dict(flow)}
 
 
 def _flow_dict(f: Flow, include_graph: bool = True) -> dict:
@@ -36,7 +152,9 @@ def _flow_dict(f: Flow, include_graph: bool = True) -> dict:
         "trigger_type": f.trigger_type,
         "trigger_config": f.trigger_config,
         "chatbot_id": str(f.chatbot_id) if f.chatbot_id else None,
+        "folder_id": str(f.folder_id) if f.folder_id else None,
         "webhook_secret": f.webhook_secret,
+        "starting_node_id": f.starting_node_id,
         "created_at": f.created_at.isoformat(),
         "updated_at": f.updated_at.isoformat(),
     }
@@ -110,6 +228,7 @@ async def create_flow(body: dict, user: CurrentUser, db: DBSession) -> dict:
     flow = Flow(
         user_id=user.id,
         chatbot_id=body.get("chatbot_id"),
+        folder_id=body.get("folder_id"),
         name=name,
         description=body.get("description"),
         trigger_type=body.get("trigger_type"),
@@ -133,7 +252,7 @@ async def get_flow(flow_id: uuid.UUID, user: CurrentUser, db: DBSession) -> dict
 @router.patch("/api/v1/flows/{flow_id}", response_model=dict)
 async def update_flow(flow_id: uuid.UUID, body: dict, user: CurrentUser, db: DBSession) -> dict:
     flow = await _get_owned_flow(flow_id, user.id, db)
-    for field in ("name", "description", "trigger_type", "trigger_config", "nodes", "edges", "chatbot_id"):
+    for field in ("name", "description", "trigger_type", "trigger_config", "nodes", "edges", "chatbot_id", "folder_id", "starting_node_id"):
         if field in body:
             setattr(flow, field, body[field])
     await db.commit()
@@ -175,6 +294,41 @@ async def toggle_flow(flow_id: uuid.UUID, user: CurrentUser, db: DBSession) -> d
     flow.is_active = not flow.is_active
     await db.commit()
     return {"success": True, "data": {"is_active": flow.is_active}}
+
+
+# ── Webhook config ────────────────────────────────────────────────────────────
+
+@router.get("/api/v1/flows/{flow_id}/webhook", response_model=dict)
+async def get_webhook_config(flow_id: uuid.UUID, user: CurrentUser, db: DBSession) -> dict:
+    flow = await _get_owned_flow(flow_id, user.id, db)
+    base = ""  # resolved client-side; secret is sufficient
+    return {
+        "success": True,
+        "data": {
+            "webhook_secret": flow.webhook_secret,
+            "webhook_enabled": flow.is_active,
+            "flow_id": str(flow.id),
+        },
+    }
+
+
+@router.post("/api/v1/flows/{flow_id}/webhook", response_model=dict)
+async def configure_webhook(flow_id: uuid.UUID, body: dict, user: CurrentUser, db: DBSession) -> dict:
+    flow = await _get_owned_flow(flow_id, user.id, db)
+    if body.get("regenerate"):
+        flow.webhook_secret = secrets.token_urlsafe(32)
+    if "enabled" in body:
+        flow.is_active = bool(body["enabled"])
+    await db.commit()
+    await db.refresh(flow)
+    return {
+        "success": True,
+        "data": {
+            "webhook_secret": flow.webhook_secret,
+            "webhook_enabled": flow.is_active,
+            "flow_id": str(flow.id),
+        },
+    }
 
 
 # ── Manual trigger ─────────────────────────────────────────────────────────────
@@ -250,6 +404,56 @@ async def list_runs(
         "page": page,
         "limit": limit,
     }
+
+
+# ── Folder CRUD ───────────────────────────────────────────────────────────────
+
+@router.get("/api/v1/flows/folders", response_model=dict)
+async def list_folders(user: CurrentUser, db: DBSession) -> dict:
+    result = await db.execute(
+        select(FlowFolder).where(FlowFolder.user_id == user.id).order_by(FlowFolder.name)
+    )
+    folders = result.scalars().all()
+    return {"success": True, "data": [
+        {"id": str(f.id), "name": f.name, "colour": f.colour, "created_at": f.created_at.isoformat()}
+        for f in folders
+    ]}
+
+
+@router.post("/api/v1/flows/folders", response_model=dict, status_code=status.HTTP_201_CREATED)
+async def create_folder(body: dict, user: CurrentUser, db: DBSession) -> dict:
+    name = (body.get("name") or "").strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="name is required")
+    folder = FlowFolder(user_id=user.id, name=name, colour=body.get("colour"))
+    db.add(folder)
+    await db.commit()
+    await db.refresh(folder)
+    return {"success": True, "data": {"id": str(folder.id), "name": folder.name, "colour": folder.colour}}
+
+
+@router.patch("/api/v1/flows/folders/{folder_id}", response_model=dict)
+async def update_folder(folder_id: uuid.UUID, body: dict, user: CurrentUser, db: DBSession) -> dict:
+    folder = await db.get(FlowFolder, folder_id)
+    if not folder or folder.user_id != user.id:
+        raise HTTPException(status_code=404, detail="Folder not found")
+    if "name" in body:
+        folder.name = body["name"].strip() or folder.name
+    if "colour" in body:
+        folder.colour = body["colour"]
+    await db.commit()
+    return {"success": True, "data": {"id": str(folder.id), "name": folder.name, "colour": folder.colour}}
+
+
+@router.delete("/api/v1/flows/folders/{folder_id}", response_model=dict)
+async def delete_folder(folder_id: uuid.UUID, user: CurrentUser, db: DBSession) -> dict:
+    folder = await db.get(FlowFolder, folder_id)
+    if not folder or folder.user_id != user.id:
+        raise HTTPException(status_code=404, detail="Folder not found")
+    # Unset folder_id on contained flows (ON DELETE SET NULL handles this via FK)
+    await db.delete(folder)
+    await db.commit()
+    return {"success": True}
 
 
 # ── External webhook trigger ───────────────────────────────────────────────────

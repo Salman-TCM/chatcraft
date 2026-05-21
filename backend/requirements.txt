@@ -71,6 +71,9 @@ websockets==14.2
 # Utils
 python-dotenv==1.0.1
 
+# Web Push
+pywebpush==2.0.0
+
 # Testing
 pytest==9.0.3
 pytest-asyncio==1.3.0

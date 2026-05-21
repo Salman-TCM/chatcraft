@@ -24,6 +24,7 @@ interface BrandingState {
   placeholderText: string;
   bubbleStyle: BubbleStyle;
   darkMode: boolean;
+  replyDelay: number;
   published: boolean;
 }
 
@@ -87,6 +88,7 @@ const DEFAULT_STATE: BrandingState = {
   placeholderText: "Type a message…",
   bubbleStyle: "rounded",
   darkMode: false,
+  replyDelay: 0,
   published: false,
 };
 
@@ -145,6 +147,7 @@ export default function BrandingPage() {
         placeholderText: b.placeholder_text ?? "Type a message…",
         bubbleStyle: (b.bubble_style as BubbleStyle) ?? "rounded",
         darkMode: b.dark_mode ?? false,
+        replyDelay: b.reply_delay_seconds ?? 0,
         published: b.published ?? false,
       });
     } catch {
@@ -196,6 +199,7 @@ export default function BrandingPage() {
         placeholder_text: branding.placeholderText,
         bubble_style: branding.bubbleStyle,
         dark_mode: branding.darkMode,
+        reply_delay_seconds: branding.replyDelay,
       };
       if (publish !== undefined) payload.published = publish;
       await apiClient.put(`/api/chatbots/${id}`, payload);
@@ -406,6 +410,29 @@ export default function BrandingPage() {
                 <p className="text-xs text-muted-foreground">Show widget with dark background</p>
               </div>
               <Toggle checked={branding.darkMode} onChange={(v) => set("darkMode", v)} />
+            </div>
+
+            <div className="space-y-2 pt-1">
+              <div className="flex items-center justify-between">
+                <Label className="text-sm font-medium">
+                  AI Reply Delay
+                </Label>
+                <span className="text-xs text-muted-foreground tabular-nums">
+                  {branding.replyDelay === 0 ? "Instant" : `${branding.replyDelay}s`}
+                </span>
+              </div>
+              <input
+                type="range"
+                min={0}
+                max={30}
+                step={1}
+                value={branding.replyDelay}
+                onChange={(e) => set("replyDelay", Number(e.target.value))}
+                className="w-full accent-primary"
+              />
+              <p className="text-xs text-muted-foreground">
+                Show a typing indicator for this many seconds before the bot replies (0 = instant).
+              </p>
             </div>
           </Section>
         </div>

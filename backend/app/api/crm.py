@@ -155,7 +155,7 @@ async def update_contact(
     db: DBSession,
 ) -> dict:
     contact = await _get_contact(contact_id, user.id, db)
-    for field, value in body.model_dump(exclude_none=True).items():
+    for field, value in body.model_dump(exclude_unset=True).items():
         setattr(contact, field, value)
     await db.commit()
     await db.refresh(contact)
@@ -315,7 +315,7 @@ async def update_tag(
     tag = result.scalar_one_or_none()
     if not tag:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Tag not found")
-    for field, value in body.model_dump(exclude_none=True).items():
+    for field, value in body.model_dump(exclude_unset=True).items():
         setattr(tag, field, value)
     await db.commit()
     await db.refresh(tag)
@@ -373,7 +373,7 @@ async def update_custom_field(
     cf = result.scalar_one_or_none()
     if not cf:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Custom field not found")
-    for field, value in body.model_dump(exclude_none=True).items():
+    for field, value in body.model_dump(exclude_unset=True).items():
         setattr(cf, field, value)
     await db.commit()
     await db.refresh(cf)
@@ -456,7 +456,7 @@ async def update_pipeline(
     db: DBSession,
 ) -> dict:
     pipeline = await _get_pipeline(pipeline_id, user.id, db)
-    for field, value in body.model_dump(exclude_none=True).items():
+    for field, value in body.model_dump(exclude_unset=True).items():
         setattr(pipeline, field, value)
     await db.commit()
     pipeline = await _get_pipeline(pipeline_id, user.id, db)
@@ -605,3 +605,93 @@ async def remove_deal(
     await db.delete(deal)
     await db.commit()
     return {"success": True, "data": None}
+
+
+# ── Contact messaging ─────────────────────────────────────────────────────────
+
+@router.post("/contacts/{contact_id}/messages", response_model=dict, status_code=201)
+async def send_message_to_contact(
+    contact_id: uuid.UUID,
+    body: dict,
+    user: CurrentUser,
+    db: DBSession,
+) -> dict:
+    """Send a message to a contact via their most recent chatbot conversation."""
+    contact = await _get_contact(contact_id, user.id, db)
+
+    chatbot_id = body.get("chatbot_id")
+    channel = body.get("channel", "web")
+    text = (body.get("text") or body.get("message") or "").strip()
+    if not text:
+        raise HTTPException(status_code=422, detail="text required")
+
+    from app.models.conversation import Conversation
+    from app.models.message import Message, MessageRole
+    from datetime import datetime, timezone
+
+    # Find an existing conversation for this contact
+    stmt = select(Conversation).where(Conversation.contact_id == contact_id)
+    if chatbot_id:
+        stmt = stmt.where(Conversation.chatbot_id == uuid.UUID(str(chatbot_id)))
+    stmt = stmt.order_by(Conversation.created_at.desc())
+    result = await db.execute(stmt)
+    conv = result.scalars().first()
+
+    if not conv:
+        # Create a new conversation
+        from app.models.chatbot_config import ChatbotConfig
+        if not chatbot_id:
+            # Find any chatbot owned by user
+            bot_result = await db.execute(
+                select(ChatbotConfig).where(ChatbotConfig.user_id == user.id).limit(1)
+            )
+            bot = bot_result.scalar_one_or_none()
+            if not bot:
+                raise HTTPException(status_code=422, detail="chatbot_id required")
+            chatbot_id = str(bot.id)
+        conv = Conversation(
+            chatbot_id=uuid.UUID(str(chatbot_id)),
+            contact_id=contact_id,
+            channel=channel,
+            external_id=str(contact_id),
+        )
+        db.add(conv)
+        await db.flush()
+
+    msg = Message(
+        conversation_id=conv.id,
+        role=MessageRole.assistant,
+        content=text,
+    )
+    db.add(msg)
+
+    # Try to send via channel sender
+    sent_via_channel = False
+    try:
+        from app.models.channel_integration import ChannelIntegration
+        from app.services.channels import get_sender
+        ci_result = await db.execute(
+            select(ChannelIntegration).where(
+                ChannelIntegration.chatbot_id == conv.chatbot_id,
+                ChannelIntegration.channel == channel,
+                ChannelIntegration.is_active.is_(True),
+            )
+        )
+        ci = ci_result.scalar_one_or_none()
+        if ci and contact.contact_id:
+            sender = get_sender(channel, ci.config)
+            await sender.send(contact.contact_id, text)
+            sent_via_channel = True
+    except Exception:
+        pass
+
+    await db.commit()
+
+    return {
+        "success": True,
+        "data": {
+            "message_id": str(msg.id),
+            "conversation_id": str(conv.id),
+            "sent_via_channel": sent_via_channel,
+        },
+    }

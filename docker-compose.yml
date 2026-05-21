@@ -1,21 +1,21 @@
 services:
 
   # ---------------------------------------------------------------------------
-  # PostgreSQL
+  # PostgreSQL + pgvector
   # ---------------------------------------------------------------------------
   postgres:
     image: pgvector/pgvector:pg16
     restart: unless-stopped
     environment:
-      POSTGRES_USER: chatcraft
-      POSTGRES_PASSWORD: chatcraft
-      POSTGRES_DB: chatcraft
+      POSTGRES_USER:     ${POSTGRES_USER:-chatcraft}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-chatcraft}
+      POSTGRES_DB:       ${POSTGRES_DB:-chatcraft}
     ports:
-      - "5433:5432"
+      - "${POSTGRES_HOST_PORT:-5433}:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U chatcraft -d chatcraft"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-chatcraft} -d ${POSTGRES_DB:-chatcraft}"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -29,7 +29,7 @@ services:
     restart: unless-stopped
     command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
     ports:
-      - "6379:6379"
+      - "${REDIS_HOST_PORT:-6379}:6379"
     volumes:
       - redis_data:/data
     healthcheck:
@@ -47,39 +47,65 @@ services:
       context: ./backend
       dockerfile: Dockerfile
     restart: unless-stopped
-    # start.sh runs `alembic upgrade head` then execs this command
     command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload --reload-dir app
     ports:
-      - "8000:8000"
+      - "${BACKEND_PORT:-8000}:8000"
     volumes:
       - ./backend:/app
     environment:
-      ENVIRONMENT: development
-      DEBUG: "true"
-      # Unbuffered output so logs appear immediately in docker compose logs
-      PYTHONUNBUFFERED: "1"
-      PYTHONDONTWRITEBYTECODE: "1"
-      # Force watchfiles to use polling — required on macOS/Windows Docker Desktop
+      ENVIRONMENT:              ${ENVIRONMENT:-development}
+      DEBUG:                    ${DEBUG:-true}
+      PYTHONUNBUFFERED:         "1"
+      PYTHONDONTWRITEBYTECODE:  "1"
       WATCHFILES_FORCE_POLLING: "true"
-      SECRET_KEY: ${SECRET_KEY:-dev-secret-change-in-production}
-      DATABASE_URL: postgresql+asyncpg://chatcraft:chatcraft@postgres:5432/chatcraft
-      REDIS_URL: redis://redis:6379/0
-      CORS_ORIGINS: '["http://localhost:3000"]'
-      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
-      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
-      GOOGLE_AI_API_KEY: ${GOOGLE_AI_API_KEY:-}
-      ELEVENLABS_API_KEY: ${ELEVENLABS_API_KEY:-}
-      STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY:-}
-      STRIPE_PUBLISHABLE_KEY: ${STRIPE_PUBLISHABLE_KEY:-}
-      STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET:-}
-      SUPABASE_URL: ${SUPABASE_URL:-}
-      SUPABASE_KEY: ${SUPABASE_KEY:-}
-      RESEND_API_KEY: ${RESEND_API_KEY:-}
-      SENTRY_DSN: ${SENTRY_DSN:-}
-      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-}
-      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-}
-      AWS_S3_BUCKET: ${AWS_S3_BUCKET:-}
-      AWS_REGION: ${AWS_REGION:-eu-west-2}
+      SECRET_KEY:               ${SECRET_KEY:-dev-secret-change-in-production}
+      DATABASE_URL:             postgresql+asyncpg://${POSTGRES_USER:-chatcraft}:${POSTGRES_PASSWORD:-chatcraft}@postgres:5432/${POSTGRES_DB:-chatcraft}
+      REDIS_URL:                redis://redis:6379/0
+      CORS_ORIGINS:             '["${FRONTEND_URL:-http://localhost:3000}"]'
+      FRONTEND_URL:             ${FRONTEND_URL:-http://localhost:3000}
+      API_BASE_URL:             ${API_BASE_URL:-http://localhost:8000}
+      ANTHROPIC_API_KEY:        ${ANTHROPIC_API_KEY:-}
+      OPENAI_API_KEY:           ${OPENAI_API_KEY:-}
+      GOOGLE_AI_API_KEY:        ${GOOGLE_AI_API_KEY:-}
+      ELEVENLABS_API_KEY:       ${ELEVENLABS_API_KEY:-}
+      GROQ_API_KEY:             ${GROQ_API_KEY:-}
+      DEEPSEEK_API_KEY:         ${DEEPSEEK_API_KEY:-}
+      PERPLEXITY_API_KEY:       ${PERPLEXITY_API_KEY:-}
+      XAI_API_KEY:              ${XAI_API_KEY:-}
+      STRIPE_SECRET_KEY:        ${STRIPE_SECRET_KEY:-}
+      STRIPE_PUBLISHABLE_KEY:   ${STRIPE_PUBLISHABLE_KEY:-}
+      STRIPE_WEBHOOK_SECRET:    ${STRIPE_WEBHOOK_SECRET:-}
+      STRIPE_CONNECT_CLIENT_ID: ${STRIPE_CONNECT_CLIENT_ID:-}
+      SUPABASE_URL:             ${SUPABASE_URL:-}
+      SUPABASE_KEY:             ${SUPABASE_KEY:-}
+      RESEND_API_KEY:           ${RESEND_API_KEY:-}
+      RESEND_FROM_EMAIL:        ${RESEND_FROM_EMAIL:-noreply@chatcraft.ai}
+      EMAIL_FROM:               ${EMAIL_FROM:-noreply@chatcraft.ai}
+      SENTRY_DSN:               ${SENTRY_DSN:-}
+      SLACK_ALERT_WEBHOOK_URL:  ${SLACK_ALERT_WEBHOOK_URL:-}
+      AXIOM_TOKEN:              ${AXIOM_TOKEN:-}
+      AXIOM_DATASET:            ${AXIOM_DATASET:-chatcraft-logs}
+      AWS_ACCESS_KEY_ID:        ${AWS_ACCESS_KEY_ID:-}
+      AWS_SECRET_ACCESS_KEY:    ${AWS_SECRET_ACCESS_KEY:-}
+      AWS_S3_BUCKET:            ${AWS_S3_BUCKET:-chatcraft-uploads}
+      AWS_REGION:               ${AWS_REGION:-us-east-1}
+      TWILIO_ACCOUNT_SID:       ${TWILIO_ACCOUNT_SID:-}
+      TWILIO_AUTH_TOKEN:        ${TWILIO_AUTH_TOKEN:-}
+      TWILIO_PHONE_NUMBER:      ${TWILIO_PHONE_NUMBER:-}
+      WHATSAPP_PHONE_NUMBER_ID: ${WHATSAPP_PHONE_NUMBER_ID:-}
+      WHATSAPP_ACCESS_TOKEN:    ${WHATSAPP_ACCESS_TOKEN:-}
+      BROWSERBASE_API_KEY:      ${BROWSERBASE_API_KEY:-}
+      BROWSERBASE_PROJECT_ID:   ${BROWSERBASE_PROJECT_ID:-}
+      VAPID_PUBLIC_KEY:         ${VAPID_PUBLIC_KEY:-}
+      VAPID_PRIVATE_KEY:        ${VAPID_PRIVATE_KEY:-}
+      VAPID_EMAIL:              ${VAPID_EMAIL:-mailto:admin@chatcraft.ai}
+      GOOGLE_WALLET_ISSUER_ID:  ${GOOGLE_WALLET_ISSUER_ID:-}
+      GOOGLE_WALLET_SERVICE_ACCOUNT: ${GOOGLE_WALLET_SERVICE_ACCOUNT:-}
+      CLAMAV_HOST:              ${CLAMAV_HOST:-clamav}
+      CLAMAV_PORT:              ${CLAMAV_PORT:-3310}
+      JWT_ALGORITHM:            ${JWT_ALGORITHM:-HS256}
+      ACCESS_TOKEN_EXPIRE_MINUTES: ${ACCESS_TOKEN_EXPIRE_MINUTES:-15}
+      REFRESH_TOKEN_EXPIRE_DAYS:   ${REFRESH_TOKEN_EXPIRE_DAYS:-7}
     depends_on:
       postgres:
         condition: service_healthy
@@ -93,35 +119,43 @@ services:
       start_period: 20s
 
   # ---------------------------------------------------------------------------
-  # Celery worker — processes background tasks (embeddings, emails, analytics)
+  # Celery worker — background tasks (embeddings, emails, analytics)
   # ---------------------------------------------------------------------------
   celery_worker:
     build:
       context: ./backend
       dockerfile: Dockerfile
     restart: unless-stopped
-    entrypoint: []   # skip migration entrypoint; backend already ran alembic upgrade head
+    entrypoint: []
     command: celery -A app.workers.celery_app worker --loglevel=info --concurrency=4
     volumes:
       - ./backend:/app
     environment:
-      ENVIRONMENT: development
-      PYTHONUNBUFFERED: "1"
-      PYTHONDONTWRITEBYTECODE: "1"
-      SECRET_KEY: ${SECRET_KEY:-dev-secret-change-in-production}
-      DATABASE_URL: postgresql+asyncpg://chatcraft:chatcraft@postgres:5432/chatcraft
-      REDIS_URL: redis://redis:6379/0
-      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
-      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
-      ELEVENLABS_API_KEY: ${ELEVENLABS_API_KEY:-}
-      RESEND_API_KEY: ${RESEND_API_KEY:-}
-      SUPABASE_URL: ${SUPABASE_URL:-}
-      SUPABASE_KEY: ${SUPABASE_KEY:-}
-      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-}
-      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-}
-      AWS_S3_BUCKET: ${AWS_S3_BUCKET:-}
-      AWS_REGION: ${AWS_REGION:-eu-west-2}
-      SENTRY_DSN: ${SENTRY_DSN:-}
+      ENVIRONMENT:              ${ENVIRONMENT:-development}
+      PYTHONUNBUFFERED:         "1"
+      PYTHONDONTWRITEBYTECODE:  "1"
+      SECRET_KEY:               ${SECRET_KEY:-dev-secret-change-in-production}
+      DATABASE_URL:             postgresql+asyncpg://${POSTGRES_USER:-chatcraft}:${POSTGRES_PASSWORD:-chatcraft}@postgres:5432/${POSTGRES_DB:-chatcraft}
+      REDIS_URL:                redis://redis:6379/0
+      ANTHROPIC_API_KEY:        ${ANTHROPIC_API_KEY:-}
+      OPENAI_API_KEY:           ${OPENAI_API_KEY:-}
+      GOOGLE_AI_API_KEY:        ${GOOGLE_AI_API_KEY:-}
+      ELEVENLABS_API_KEY:       ${ELEVENLABS_API_KEY:-}
+      RESEND_API_KEY:           ${RESEND_API_KEY:-}
+      RESEND_FROM_EMAIL:        ${RESEND_FROM_EMAIL:-noreply@chatcraft.ai}
+      EMAIL_FROM:               ${EMAIL_FROM:-noreply@chatcraft.ai}
+      SUPABASE_URL:             ${SUPABASE_URL:-}
+      SUPABASE_KEY:             ${SUPABASE_KEY:-}
+      AWS_ACCESS_KEY_ID:        ${AWS_ACCESS_KEY_ID:-}
+      AWS_SECRET_ACCESS_KEY:    ${AWS_SECRET_ACCESS_KEY:-}
+      AWS_S3_BUCKET:            ${AWS_S3_BUCKET:-chatcraft-uploads}
+      AWS_REGION:               ${AWS_REGION:-us-east-1}
+      STRIPE_SECRET_KEY:        ${STRIPE_SECRET_KEY:-}
+      SENTRY_DSN:               ${SENTRY_DSN:-}
+      AXIOM_TOKEN:              ${AXIOM_TOKEN:-}
+      AXIOM_DATASET:            ${AXIOM_DATASET:-chatcraft-logs}
+      CLAMAV_HOST:              ${CLAMAV_HOST:-clamav}
+      CLAMAV_PORT:              ${CLAMAV_PORT:-3310}
     depends_on:
       postgres:
         condition: service_healthy
@@ -135,27 +169,28 @@ services:
       start_period: 30s
 
   # ---------------------------------------------------------------------------
-  # Celery beat — cron scheduler (usage aggregation, billing sync)
+  # Celery beat — cron scheduler
   # ---------------------------------------------------------------------------
   celery_beat:
     build:
       context: ./backend
       dockerfile: Dockerfile
     restart: unless-stopped
-    entrypoint: []   # skip migration entrypoint
+    entrypoint: []
     command: celery -A app.workers.celery_app beat --loglevel=info --scheduler celery.beat.PersistentScheduler --schedule /tmp/celerybeat-schedule
     volumes:
       - ./backend:/app
       - celery_beat_data:/var/run/celerybeat
     environment:
-      ENVIRONMENT: development
+      ENVIRONMENT:      ${ENVIRONMENT:-development}
       PYTHONUNBUFFERED: "1"
       PYTHONDONTWRITEBYTECODE: "1"
-      SECRET_KEY: ${SECRET_KEY:-dev-secret-change-in-production}
-      DATABASE_URL: postgresql+asyncpg://chatcraft:chatcraft@postgres:5432/chatcraft
-      REDIS_URL: redis://redis:6379/0
-      RESEND_API_KEY: ${RESEND_API_KEY:-}
-      SENTRY_DSN: ${SENTRY_DSN:-}
+      SECRET_KEY:       ${SECRET_KEY:-dev-secret-change-in-production}
+      DATABASE_URL:     postgresql+asyncpg://${POSTGRES_USER:-chatcraft}:${POSTGRES_PASSWORD:-chatcraft}@postgres:5432/${POSTGRES_DB:-chatcraft}
+      REDIS_URL:        redis://redis:6379/0
+      RESEND_API_KEY:   ${RESEND_API_KEY:-}
+      STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY:-}
+      SENTRY_DSN:       ${SENTRY_DSN:-}
     depends_on:
       postgres:
         condition: service_healthy
@@ -163,6 +198,26 @@ services:
         condition: service_healthy
     healthcheck:
       disable: true
+
+  # ---------------------------------------------------------------------------
+  # ClamAV — virus scanning for uploaded files (optional, graceful fallback)
+  # freshclam downloads the signature DB on first start (~200 MB, takes ~60 s)
+  # ---------------------------------------------------------------------------
+  clamav:
+    image: clamav/clamav:stable
+    restart: unless-stopped
+    ports:
+      - "${CLAMAV_HOST_PORT:-3310}:3310"
+    volumes:
+      - clamav_data:/var/lib/clamav
+    environment:
+      CLAMAV_NO_FRESHCLAM: "false"
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/clamdcheck.sh"]
+      interval: 60s
+      timeout: 15s
+      retries: 3
+      start_period: 180s  # freshclam downloads DB on first start
 
   # ---------------------------------------------------------------------------
   # Next.js frontend — hot reload in dev
@@ -175,27 +230,28 @@ services:
     restart: unless-stopped
     command: sh -c "cd frontend && npm run dev"
     ports:
-      - "3000:3000"
+      - "${FRONTEND_PORT:-3000}:3000"
     volumes:
       - ./frontend:/app/frontend
       - ./shared:/app/shared
       - frontend_node_modules:/app/frontend/node_modules
       - shared_node_modules:/app/node_modules
     environment:
-      NEXTAUTH_URL: http://localhost:3000
-      NEXTAUTH_SECRET: ${NEXTAUTH_SECRET:-dev-nextauth-secret}
-      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
-      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
-      NEXT_PUBLIC_API_URL: http://localhost:8000
-      BACKEND_URL: http://backend:8000
-      NEXT_PUBLIC_APP_URL: http://localhost:3000
+      NEXTAUTH_URL:                    ${NEXTAUTH_URL:-http://localhost:3000}
+      NEXTAUTH_SECRET:                 ${NEXTAUTH_SECRET:-dev-nextauth-secret}
+      GOOGLE_CLIENT_ID:                ${GOOGLE_CLIENT_ID:-}
+      GOOGLE_CLIENT_SECRET:            ${GOOGLE_CLIENT_SECRET:-}
+      NEXT_PUBLIC_API_URL:             ${NEXT_PUBLIC_API_URL:-http://localhost:8000}
+      BACKEND_URL:                     http://backend:8000
+      NEXT_PUBLIC_APP_URL:             ${NEXT_PUBLIC_APP_URL:-http://localhost:3000}
       NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY: ${STRIPE_PUBLISHABLE_KEY:-}
-      NEXT_PUBLIC_POSTHOG_KEY: ${NEXT_PUBLIC_POSTHOG_KEY:-}
-      NEXT_PUBLIC_POSTHOG_HOST: ${NEXT_PUBLIC_POSTHOG_HOST:-https://eu.posthog.com}
-      NEXT_PUBLIC_SENTRY_DSN: ${NEXT_PUBLIC_SENTRY_DSN:-}
+      NEXT_PUBLIC_POSTHOG_KEY:         ${NEXT_PUBLIC_POSTHOG_KEY:-}
+      NEXT_PUBLIC_POSTHOG_HOST:        ${NEXT_PUBLIC_POSTHOG_HOST:-https://eu.posthog.com}
+      NEXT_PUBLIC_SENTRY_DSN:          ${NEXT_PUBLIC_SENTRY_DSN:-}
+      SENTRY_DSN:                      ${NEXT_PUBLIC_SENTRY_DSN:-}
       # Force filesystem polling for hot reload on macOS/Windows Docker Desktop
-      WATCHPACK_POLLING: "true"
-      CHOKIDAR_USEPOLLING: "true"
+      WATCHPACK_POLLING:               "true"
+      CHOKIDAR_USEPOLLING:             "true"
     depends_on:
       backend:
         condition: service_healthy
@@ -213,3 +269,4 @@ volumes:
   celery_beat_data:
   frontend_node_modules:
   shared_node_modules:
+  clamav_data:

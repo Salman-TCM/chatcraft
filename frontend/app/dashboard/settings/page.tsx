@@ -1,8 +1,9 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Check, Download, Loader2, Trash2 } from "lucide-react";
+import { Check, Download, Loader2, Trash2, Key, ExternalLink, Plug } from "lucide-react";
 import { signOut } from "next-auth/react";
+import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -213,6 +214,48 @@ export default function SettingsPage() {
             )}
           </Button>
         </div>
+      </Section>
+
+      <Separator />
+
+      {/* Integrations */}
+      <Section title="Integrations">
+        <Card className="flex items-center justify-between p-4">
+          <div>
+            <p className="text-sm font-medium flex items-center gap-2">
+              <Plug className="h-4 w-4" /> AI Model Integrations
+            </p>
+            <p className="text-xs text-muted-foreground mt-0.5">
+              Connect your own API keys (Anthropic, OpenAI, Google, etc.) to power your chatbots.
+            </p>
+          </div>
+          <Link href="/dashboard/settings/integrations">
+            <Button size="sm" variant="outline">
+              Manage <ExternalLink className="h-3.5 w-3.5 ml-1.5" />
+            </Button>
+          </Link>
+        </Card>
+      </Section>
+
+      <Separator />
+
+      {/* Developer */}
+      <Section title="Developer">
+        <Card className="flex items-center justify-between p-4">
+          <div>
+            <p className="text-sm font-medium flex items-center gap-2">
+              <Key className="h-4 w-4" /> API Tokens
+            </p>
+            <p className="text-xs text-muted-foreground mt-0.5">
+              Create bearer tokens for programmatic API access.
+            </p>
+          </div>
+          <Link href="/dashboard/settings/api-tokens">
+            <Button size="sm" variant="outline">
+              Manage <ExternalLink className="h-3.5 w-3.5 ml-1.5" />
+            </Button>
+          </Link>
+        </Card>
       </Section>
 
       <Separator />

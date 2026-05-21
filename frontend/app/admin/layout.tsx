@@ -5,15 +5,17 @@ import { usePathname, useRouter } from "next/navigation";
 import Link from "next/link";
 import {
   LayoutDashboard, Users, Bot, CreditCard, LogOut,
-  ShieldAlert, Menu, X,
+  ShieldAlert, Menu, X, Building2,
 } from "lucide-react";
 import { signOut, useSession } from "next-auth/react";
 
 const NAV = [
-  { href: "/admin",          label: "Overview",  icon: LayoutDashboard },
-  { href: "/admin/users",    label: "Users",     icon: Users },
-  { href: "/admin/chatbots", label: "Chatbots",  icon: Bot },
-  { href: "/admin/payments", label: "Payments",  icon: CreditCard },
+  { href: "/admin",                   label: "Overview",  icon: LayoutDashboard },
+  { href: "/admin/users",             label: "Users",     icon: Users },
+  { href: "/admin/chatbots",          label: "Chatbots",  icon: Bot },
+  { href: "/admin/payments",          label: "Payments",  icon: CreditCard },
+  { href: "/admin/agencies",          label: "Agencies",  icon: Building2 },
+  { href: "/admin/impersonation-log", label: "Audit Log", icon: ShieldAlert },
 ];
 
 export default function AdminLayout({ children }: { children: React.ReactNode }) {
@@ -52,7 +54,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
           A
         </div>
         <div>
-          <p className="text-sm font-semibold leading-none">ChatCraft</p>
+          <p className="text-sm font-semibold leading-none">ChatCraft AI</p>
           <p className="text-[10px] text-rose-600 font-semibold uppercase tracking-wide">Admin</p>
         </div>
       </div>

@@ -7,14 +7,8 @@ from app.core.config import settings
 from app.services.llm.base import ChatMessage, LLMProvider, LLMResponse, StreamChunk
 from app.services.llm.costs import calculate_cost
 
-_configured = False
-
-
-def _ensure_configured() -> None:
-    global _configured
-    if not _configured:
-        genai.configure(api_key=settings.google_ai_api_key)
-        _configured = True
+def _configure(api_key: str) -> None:
+    genai.configure(api_key=api_key)
 
 
 def _build_history(messages: list[ChatMessage]) -> tuple[str | None, list[dict], str]:
@@ -41,15 +35,16 @@ def _build_history(messages: list[ChatMessage]) -> tuple[str | None, list[dict],
 
 
 class GeminiProvider(LLMProvider):
-    def __init__(self, model: str = "gemini-1.5-flash") -> None:
+    def __init__(self, model: str = "gemini-1.5-flash", api_key: str | None = None) -> None:
         self._model = model
+        self._api_key = api_key or settings.google_ai_api_key
 
     @property
     def model_id(self) -> str:
         return self._model
 
     def _get_model(self, system: str | None) -> genai.GenerativeModel:
-        _ensure_configured()
+        _configure(self._api_key)
         kwargs: dict = {"model_name": self._model}
         if system:
             kwargs["system_instruction"] = system
