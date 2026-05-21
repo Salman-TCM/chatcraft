@@ -14,8 +14,12 @@ from fastapi import APIRouter, HTTPException, Query, status
 from sqlalchemy import func, or_, select, text
 from sqlalchemy.orm import selectinload
 
+from pydantic import BaseModel
+
 from app.core.dependencies import CurrentUser, DBSession
+from app.models.channel_integration import ChannelIntegration
 from app.models.chatbot_config import ChatbotConfig
+from app.models.crm import Contact, Tag
 from app.models.conversation import Conversation
 from app.models.inbox import InboxAssignment, InternalNote, TeamMember
 from app.models.message import Message, MessageRole
@@ -169,7 +173,6 @@ async def search_conversations(
     page: Annotated[int, Query(ge=1)] = 1,
     limit: Annotated[int, Query(ge=1, le=100)] = 30,
 ) -> dict:
-    from app.models.crm import Contact
     offset = (page - 1) * limit
 
     stmt = (
@@ -284,6 +287,11 @@ async def send_message(
     conv.last_message_at = datetime.now(timezone.utc)
     await db.commit()
     await db.refresh(msg)
+
+    # ── Outbound dispatch for email conversations ─────────────────────────────
+    if conv.channel == "email" and conv.contact and conv.contact.email:
+        await _dispatch_email_reply(conv, content, db)
+
     return {"success": True, "data": _msg_dict(msg)}
 
 
@@ -435,3 +443,221 @@ async def remove_team_member(member_id: uuid.UUID, user: CurrentUser, db: DBSess
     await db.delete(member)
     await db.commit()
     return {"success": True, "data": None}
+
+
+# ── Round-robin assignment ──────────────────────────────────────────────────────
+
+@router.post("/conversations/{conv_id}/assign-roundrobin", response_model=dict)
+async def assign_roundrobin(conv_id: uuid.UUID, user: CurrentUser, db: DBSession) -> dict:
+    """Assign conversation to the next available team member in round-robin order."""
+    conv = await _get_owned_conv(conv_id, user.id, db)
+
+    # Get active team members
+    members_result = await db.execute(
+        select(TeamMember)
+        .where(TeamMember.owner_user_id == user.id, TeamMember.status == "active", TeamMember.member_user_id.isnot(None))
+        .order_by(TeamMember.created_at)
+    )
+    members = members_result.scalars().all()
+    if not members:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No active team members to assign")
+
+    # Count existing assignments per member to find the one with fewest
+    counts_result = await db.execute(
+        select(
+            InboxAssignment.assigned_to_user_id,
+            func.count(InboxAssignment.id).label("cnt"),
+        )
+        .where(InboxAssignment.assigned_to_user_id.in_([m.member_user_id for m in members]))
+        .group_by(InboxAssignment.assigned_to_user_id)
+    )
+    counts = {row.assigned_to_user_id: row.cnt for row in counts_result}
+
+    # Pick member with fewest assignments (ties broken by creation order)
+    chosen = min(members, key=lambda m: counts.get(m.member_user_id, 0))
+
+    # Upsert assignment
+    existing_result = await db.execute(
+        select(InboxAssignment).where(InboxAssignment.conversation_id == conv.id)
+    )
+    assignment = existing_result.scalar_one_or_none()
+    if assignment:
+        assignment.assigned_to_user_id = chosen.member_user_id
+    else:
+        assignment = InboxAssignment(conversation_id=conv.id, assigned_to_user_id=chosen.member_user_id)
+        db.add(assignment)
+    await db.commit()
+    await db.refresh(assignment)
+
+    return {
+        "success": True,
+        "data": {
+            "conversation_id": str(conv.id),
+            "assigned_to_user_id": str(chosen.member_user_id),
+            "assigned_to_email": chosen.member_email,
+        },
+    }
+
+
+# ── Contact quick-edit ──────────────────────────────────────────────────────────
+
+class ContactUpdateRequest(BaseModel):
+    first_name: str | None = None
+    last_name: str | None = None
+    email: str | None = None
+    phone: str | None = None
+    company: str | None = None
+    tags: list[str] | None = None
+
+
+@router.get("/conversations/{conv_id}/contact", response_model=dict)
+async def get_conversation_contact(conv_id: uuid.UUID, user: CurrentUser, db: DBSession) -> dict:
+    """Return the contact linked to a conversation (quick-view in inbox sidebar)."""
+    conv = await _get_owned_conv(conv_id, user.id, db)
+    if not conv.contact_id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No contact linked")
+    result = await db.execute(select(Contact).where(Contact.id == conv.contact_id))
+    contact = result.scalar_one_or_none()
+    if not contact:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Contact not found")
+    return {
+        "success": True,
+        "data": {
+            "id": str(contact.id),
+            "first_name": contact.first_name,
+            "last_name": contact.last_name,
+            "email": contact.email,
+            "phone": contact.phone,
+            "company": contact.company,
+            "tags": [t.name for t in (contact.tags or [])],
+        },
+    }
+
+
+@router.patch("/conversations/{conv_id}/contact", response_model=dict)
+async def update_conversation_contact(
+    conv_id: uuid.UUID, body: ContactUpdateRequest, user: CurrentUser, db: DBSession
+) -> dict:
+    """Quick-edit the contact linked to a conversation from the inbox sidebar."""
+    conv = await _get_owned_conv(conv_id, user.id, db)
+    if not conv.contact_id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No contact linked")
+    result = await db.execute(select(Contact).where(Contact.id == conv.contact_id))
+    contact = result.scalar_one_or_none()
+    if not contact:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Contact not found")
+
+    if body.first_name is not None:
+        contact.first_name = body.first_name
+    if body.last_name is not None:
+        contact.last_name = body.last_name
+    if body.email is not None:
+        contact.email = body.email
+    if body.phone is not None:
+        contact.phone = body.phone
+    if body.company is not None:
+        contact.company = body.company
+    if body.tags is not None:
+        # Resolve or create Tag objects for this user
+        new_tags = []
+        for tag_name in body.tags:
+            tag_result = await db.execute(
+                select(Tag).where(Tag.user_id == user.id, Tag.name == tag_name)
+            )
+            tag = tag_result.scalar_one_or_none()
+            if not tag:
+                tag = Tag(user_id=user.id, name=tag_name)
+                db.add(tag)
+                await db.flush()
+            new_tags.append(tag)
+        contact.tags = new_tags
+
+    await db.commit()
+    await db.refresh(contact)
+    return {
+        "success": True,
+        "data": {
+            "id": str(contact.id),
+            "first_name": contact.first_name,
+            "last_name": contact.last_name,
+            "email": contact.email,
+            "phone": contact.phone,
+            "company": contact.company,
+            "tags": [t.name for t in (contact.tags or [])],
+        },
+    }
+
+
+# ── AI Email Body Composer ─────────────────────────────────────────────────────
+
+@router.post("/conversations/{conv_id}/ai-compose", response_model=dict)
+async def ai_compose_email(
+    conv_id: uuid.UUID,
+    body: dict,
+    user: CurrentUser,
+    db: DBSession,
+) -> dict:
+    """Generate an AI-drafted email body based on conversation context and an optional prompt."""
+    conv = await _get_owned_conv(conv_id, user.id, db)
+
+    tone: str = body.get("tone", "professional")  # professional / friendly / formal
+    instruction: str = body.get("instruction", "").strip()
+
+    # Build recent conversation history as context
+    recent = conv.messages[-10:] if conv.messages else []
+    history_text = "\n".join(
+        f"{'Customer' if m.role.value == 'user' else 'Support'}: {m.content[:400]}"
+        for m in recent
+    )
+
+    system_prompt = (
+        f"You are a {tone} email copywriter. "
+        "Draft a concise reply email body based on the conversation history. "
+        "Do not include a subject line or greeting — just the body text. "
+        "Keep it under 200 words."
+    )
+    user_message = f"Conversation history:\n{history_text}"
+    if instruction:
+        user_message += f"\n\nSpecific instruction: {instruction}"
+
+    try:
+        from app.services.llm.base import ChatMessage as LLMMsg
+        from app.services.llm.router import get_provider
+        provider = get_provider("claude-sonnet-4-6")
+        msgs = [
+            LLMMsg(role="system", content=system_prompt),
+            LLMMsg(role="user", content=user_message),
+        ]
+        resp = await provider.complete(msgs, max_tokens=400, temperature=0.7)
+        draft = resp.content.strip()
+    except Exception as exc:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=f"AI service error: {exc}")
+
+    return {"success": True, "data": {"draft": draft}}
+
+
+# ── Email outbound dispatch ────────────────────────────────────────────────────
+
+async def _dispatch_email_reply(conv: Conversation, content: str, db) -> None:
+    """Send outbound email reply for email-channel conversations."""
+    try:
+        result = await db.execute(
+            select(ChannelIntegration).where(
+                ChannelIntegration.chatbot_id == conv.chatbot_id,
+                ChannelIntegration.channel == "email",
+                ChannelIntegration.is_active.is_(True),
+            )
+        )
+        integration = result.scalar_one_or_none()
+        if not integration:
+            return
+
+        from app.services.channels.email_sender import EmailSender
+        sender = EmailSender(integration.config)
+        subject = conv.title or "Re: Your message"
+        if not subject.lower().startswith("re:"):
+            subject = f"Re: {subject}"
+        await sender.send(to=conv.contact.email, subject=subject, body=content)
+    except Exception as exc:
+        from loguru import logger
+        logger.error(f"Failed to send email reply for conv {conv.id}: {exc}")

@@ -220,6 +220,68 @@ async def send_campaign(campaign_id: uuid.UUID, user: CurrentUser, db: DBSession
     return {"success": True, "data": _campaign_dict(campaign)}
 
 
+@router.post("/api/v1/broadcasts/{campaign_id}/test", response_model=dict)
+async def test_campaign(campaign_id: uuid.UUID, body: dict, user: CurrentUser, db: DBSession) -> dict:
+    """Send a test message to a single address/phone/chat ID."""
+    campaign = await _get_campaign(campaign_id, user.id, db)
+    to: str = (body.get("to") or "").strip()
+    if not to:
+        raise HTTPException(status_code=422, detail="to is required")
+
+    sample_vars = {"first_name": "Test", "last_name": "User", "email": to}
+    msg = campaign.message_template or ""
+    for k, v in sample_vars.items():
+        msg = msg.replace(f"{{{{{k}}}}}", str(v))
+
+    try:
+        if campaign.channel == "email":
+            from app.services.channels.email_sender import EmailSender
+            from app.models.channel_integration import ChannelIntegration
+            from sqlalchemy import select as sel
+            r = await db.execute(
+                sel(ChannelIntegration).where(
+                    ChannelIntegration.user_id == user.id if hasattr(ChannelIntegration, "user_id") else True,
+                    ChannelIntegration.channel == "email",
+                    ChannelIntegration.is_active.is_(True),
+                )
+            )
+            integ = r.scalars().first()
+            if not integ:
+                raise HTTPException(status_code=400, detail="No active email integration configured")
+            sender = EmailSender(integ.config)
+            html = campaign.html_content
+            if html:
+                for k, v in sample_vars.items():
+                    html = html.replace(f"{{{{{k}}}}}", str(v))
+            await sender.send(
+                to=to,
+                subject=f"[TEST] {campaign.subject or campaign.name}",
+                body=html or msg,
+            )
+        elif campaign.channel == "sms":
+            from app.models.channel_integration import ChannelIntegration
+            from sqlalchemy import select as sel
+            r = await db.execute(
+                sel(ChannelIntegration).where(
+                    ChannelIntegration.channel == "sms",
+                    ChannelIntegration.is_active.is_(True),
+                )
+            )
+            integ = r.scalars().first()
+            if not integ:
+                raise HTTPException(status_code=400, detail="No active SMS integration")
+            from app.services.channels.sms import SMSSender
+            await SMSSender(integ.config).send(to, msg)
+        else:
+            raise HTTPException(status_code=422, detail=f"Test send not supported for {campaign.channel} channel")
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=str(exc))
+
+    return {"success": True, "data": {"sent_to": to, "channel": campaign.channel}}
+
+
 @router.get("/api/v1/broadcasts/{campaign_id}/stats", response_model=dict)
 async def campaign_stats(campaign_id: uuid.UUID, user: CurrentUser, db: DBSession) -> dict:
     campaign = await _get_campaign(campaign_id, user.id, db)

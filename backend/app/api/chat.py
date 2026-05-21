@@ -17,7 +17,7 @@ from datetime import datetime, timezone
 from typing import AsyncIterator
 
 import redis.asyncio as aioredis
-from fastapi import APIRouter, BackgroundTasks, Header, HTTPException, Request, status
+from fastapi import APIRouter, BackgroundTasks, Depends, Header, HTTPException, Request, status
 from fastapi.responses import StreamingResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from jose import JWTError
@@ -48,6 +48,8 @@ from app.services.llm import (
     build_system_prompt,
     sanitize,
 )
+from app.services.llm.key_store import get_all_keys
+from app.services.llm.router import get_model_provider
 
 router = APIRouter(prefix="/api/chat", tags=["chat"])
 
@@ -72,7 +74,7 @@ async def stream_chat(
     background_tasks: BackgroundTasks,
     db: DBSession,
     redis: RedisClient,
-    authorization: HTTPAuthorizationCredentials | None = _optional_bearer,
+    authorization: HTTPAuthorizationCredentials | None = Depends(_optional_bearer),
     x_guest_id: str | None = Header(default=None),
 ) -> StreamingResponse:
     # ── resolve identity ──────────────────────────────────────────────────────
@@ -168,10 +170,79 @@ async def stream_chat(
     if body.model and bot.allow_model_switch:
         model_id = body.model
 
+    # Load the chatbot owner's API keys (BYOK)
+    owner_id = bot.user_id
+    api_keys = await get_all_keys(owner_id, db)
+    provider_name = get_model_provider(model_id)
+    if not api_keys.get(provider_name):
+        raise HTTPException(
+            status_code=status.HTTP_402_PAYMENT_REQUIRED,
+            detail={
+                "success": False,
+                "error": f"No {provider_name.title()} API key configured. Go to Settings → Integrations to add your key.",
+                "code": "NO_API_KEY",
+                "provider": provider_name,
+            },
+        )
+
     llm_router = LLMRouter(
         model=model_id,
         fallback_model=bot.fallback_model or settings.default_fallback_model,
+        api_keys=api_keys,
     )
+
+    # ── Slash commands: /image and /video ────────────────────────────────────
+    if sanitized.startswith("/image ") or sanitized.lower().startswith("/image\n"):
+        image_prompt = sanitized[7:].strip()
+        if image_prompt:
+            image_url = await _generate_image(image_prompt, api_keys)
+            if image_url:
+                img_response = f"<<<RICH>>>{json.dumps({'type': 'image', 'url': image_url, 'alt': image_prompt})}<<<END>>>"
+                async def _image_event_generator() -> AsyncIterator[str]:
+                    assistant_msg = Message(
+                        conversation_id=conv.id,
+                        role=MessageRole.assistant,
+                        content=img_response,
+                        model=model_id,
+                        input_tokens=0,
+                        output_tokens=0,
+                    )
+                    async with _new_session() as session:
+                        session.add(assistant_msg)
+                        await session.commit()
+                        await session.refresh(assistant_msg)
+                    yield _sse(type="delta", content=img_response)
+                    yield _sse(type="done", model=model_id, input_tokens=0, output_tokens=0, cost_usd="0", conversation_id=str(conv.id), message_id=str(assistant_msg.id))
+                return StreamingResponse(_image_event_generator(), media_type="text/event-stream")
+
+    if sanitized.startswith("/video ") or sanitized.lower().startswith("/video\n"):
+        video_prompt = sanitized[7:].strip()
+        if video_prompt:
+            video_url = await _generate_video(video_prompt, api_keys)
+            if video_url:
+                vid_response = f"<<<RICH>>>{json.dumps({'type': 'video', 'url': video_url, 'alt': video_prompt})}<<<END>>>"
+                async def _video_event_generator() -> AsyncIterator[str]:
+                    assistant_msg = Message(
+                        conversation_id=conv.id,
+                        role=MessageRole.assistant,
+                        content=vid_response,
+                        model="veo-2",
+                        input_tokens=0,
+                        output_tokens=0,
+                    )
+                    async with _new_session() as session:
+                        session.add(assistant_msg)
+                        await session.commit()
+                        await session.refresh(assistant_msg)
+                    yield _sse(type="delta", content=vid_response)
+                    yield _sse(type="done", model="veo-2", input_tokens=0, output_tokens=0, cost_usd="0", conversation_id=str(conv.id), message_id=str(assistant_msg.id))
+                return StreamingResponse(_video_event_generator(), media_type="text/event-stream")
+            else:
+                error_text = "Video generation is unavailable. Please configure a Google AI API key (Gemini / Veo) in your agent settings."
+                async def _video_error_generator() -> AsyncIterator[str]:
+                    yield _sse(type="delta", content=error_text)
+                    yield _sse(type="done", model=model_id, input_tokens=0, output_tokens=0, cost_usd="0", conversation_id=str(conv.id), message_id="")
+                return StreamingResponse(_video_error_generator(), media_type="text/event-stream")
 
     # ── RAG context retrieval ─────────────────────────────────────────────────
     rag = RAGService(db)
@@ -198,12 +269,15 @@ async def stream_chat(
         full_content: list[str] = []
 
         try:
-            async for chunk in llm_router.stream(llm_messages):
+            stream_kwargs = {}
+            if bot.temperature is not None:
+                stream_kwargs["temperature"] = bot.temperature
+            async for chunk in llm_router.stream(llm_messages, **stream_kwargs):
                 if await request.is_disconnected():
                     break
 
                 if chunk.done:
-                    # Persist assistant message
+                    # Persist assistant message (full content including any <<<RICH>>> blocks)
                     assistant_msg = Message(
                         conversation_id=conv_id,
                         role=MessageRole.assistant,
@@ -275,7 +349,7 @@ async def get_history(
     db: DBSession,
     page: int = 1,
     per_page: int = 20,
-    authorization: HTTPAuthorizationCredentials | None = _optional_bearer,
+    authorization: HTTPAuthorizationCredentials | None = Depends(_optional_bearer),
 ) -> dict:
     user = await _resolve_user(authorization, db)
     if not user:
@@ -317,7 +391,7 @@ async def get_history(
 async def delete_conversation(
     conversation_id: uuid.UUID,
     db: DBSession,
-    authorization: HTTPAuthorizationCredentials | None = _optional_bearer,
+    authorization: HTTPAuthorizationCredentials | None = Depends(_optional_bearer),
 ) -> dict:
     user = await _resolve_user(authorization, db)
     if not user:
@@ -343,7 +417,7 @@ async def set_feedback(
     message_id: uuid.UUID,
     body: FeedbackRequest,
     db: DBSession,
-    authorization: HTTPAuthorizationCredentials | None = _optional_bearer,
+    authorization: HTTPAuthorizationCredentials | None = Depends(_optional_bearer),
 ) -> dict:
     user = await _resolve_user(authorization, db)
     if not user:
@@ -491,3 +565,98 @@ async def _generate_title(
                 await session.commit()
     except Exception:
         pass  # Title generation is best-effort; never crash the chat flow
+
+
+async def _generate_image(prompt: str, api_keys: dict) -> str | None:
+    """Generate an image from a text prompt. Returns URL or None on failure.
+
+    Tries xAI Aurora first (if api key available), then falls back to
+    OpenAI DALL-E 3 (if key available). Returns None if no provider available.
+    """
+    # Try xAI Aurora image generation
+    xai_key = api_keys.get("xai") or settings.xai_api_key
+    if xai_key:
+        try:
+            import httpx
+            async with httpx.AsyncClient(timeout=60) as client:
+                r = await client.post(
+                    "https://api.x.ai/v1/images/generations",
+                    headers={"Authorization": f"Bearer {xai_key}", "Content-Type": "application/json"},
+                    json={"model": "aurora", "prompt": prompt, "n": 1},
+                )
+                r.raise_for_status()
+                data = r.json()
+                url = data.get("data", [{}])[0].get("url") or data.get("data", [{}])[0].get("b64_json")
+                if url:
+                    if url.startswith("data:") or not url.startswith("http"):
+                        return None  # Skip base64 for now
+                    return url
+        except Exception:
+            pass
+
+    # Try OpenAI DALL-E 3
+    openai_key = api_keys.get("openai") or settings.openai_api_key
+    if openai_key:
+        try:
+            import httpx
+            async with httpx.AsyncClient(timeout=60) as client:
+                r = await client.post(
+                    "https://api.openai.com/v1/images/generations",
+                    headers={"Authorization": f"Bearer {openai_key}", "Content-Type": "application/json"},
+                    json={"model": "dall-e-3", "prompt": prompt, "n": 1, "size": "1024x1024"},
+                )
+                r.raise_for_status()
+                data = r.json()
+                return data.get("data", [{}])[0].get("url")
+        except Exception:
+            pass
+
+    return None
+
+
+async def _generate_video(prompt: str, api_keys: dict) -> str | None:
+    """Generate a short video via Google Veo 2. Returns a video URL or None.
+
+    Uses the Google AI API long-running operation pattern:
+    1. POST to trigger generation → get operation name
+    2. Poll until done (max 120 s in 5-s intervals)
+    3. Extract the video URI from the response
+    """
+    google_key = api_keys.get("google") or api_keys.get("gemini") or getattr(settings, "google_ai_api_key", None)
+    if not google_key:
+        return None
+    try:
+        import asyncio
+        import httpx
+        _BASE = "https://generativelanguage.googleapis.com/v1beta"
+        headers = {"x-goog-api-key": google_key, "Content-Type": "application/json"}
+        payload = {
+            "instances": [{"prompt": prompt}],
+            "parameters": {"aspectRatio": "16:9", "sampleCount": 1, "durationSeconds": 5},
+        }
+        async with httpx.AsyncClient(timeout=30) as client:
+            r = await client.post(
+                f"{_BASE}/models/veo-2.0-generate-001:predictLongRunning",
+                headers=headers,
+                json=payload,
+            )
+            r.raise_for_status()
+            op_name = r.json().get("name", "")
+            if not op_name:
+                return None
+
+            for _ in range(24):  # max 120 s
+                await asyncio.sleep(5)
+                status_r = await client.get(f"{_BASE}/{op_name}", headers=headers)
+                status_r.raise_for_status()
+                status_data = status_r.json()
+                if status_data.get("done"):
+                    predictions = status_data.get("response", {}).get("predictions", [])
+                    for pred in predictions:
+                        video_uri = pred.get("videoUri") or pred.get("bytesBase64Encoded")
+                        if video_uri and not video_uri.startswith("data:"):
+                            return video_uri
+                    return None
+    except Exception:
+        pass
+    return None

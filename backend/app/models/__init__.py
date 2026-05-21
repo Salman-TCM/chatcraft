@@ -44,3 +44,15 @@ from app.models.crm import (  # noqa: F401
     PipelineStage,
     PipelineDeal,
 )
+from app.models.api_token import ApiToken  # noqa: F401
+from app.models.user_api_key import UserApiKey  # noqa: F401
+from app.models.white_label import (  # noqa: F401
+    PlatformConfig,
+    Agency,
+    Tenant,
+    ImpersonationAuditLog,
+    ResellerSubscription,
+)
+from app.models.usage_log import UsageLog  # noqa: F401
+from app.models.analytics_daily import AnalyticsDaily  # noqa: F401
+from app.models.widget_license import WidgetLicense  # noqa: F401

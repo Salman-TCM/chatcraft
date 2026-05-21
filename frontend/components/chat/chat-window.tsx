@@ -99,11 +99,9 @@ export function ChatWindow({
     setLoadingHistory(false);
   }
 
-  const sendMessage = useCallback(async () => {
-    const text = input.trim();
+  // Core send function — takes text directly to avoid stale closure issues
+  const sendText = useCallback(async (text: string) => {
     if (!text || isStreaming) return;
-
-    setInput("");
 
     // Optimistic user message
     const tempUserId = `tmp-${Date.now()}`;
@@ -143,8 +141,17 @@ export function ChatWindow({
         const code = err?.detail?.code;
         if (code === "MESSAGE_CAP_REACHED") {
           openHardPaywall(err?.detail?.cap ?? 0);
+          setMessages((prev) => prev.filter((m) => m.id !== tempAiId));
+        } else {
+          const errorMsg = err?.detail?.error ?? err?.detail ?? `Request failed (${res.status})`;
+          setMessages((prev) =>
+            prev.map((m) =>
+              m.id === tempAiId
+                ? { ...m, content: `⚠️ ${errorMsg}`, isStreaming: false }
+                : m
+            )
+          );
         }
-        setMessages((prev) => prev.filter((m) => m.id !== tempAiId));
         return;
       }
 
@@ -223,7 +230,6 @@ export function ChatWindow({
           )
         );
       } else {
-        // Aborted — remove the empty streaming placeholder if nothing was received
         setMessages((prev) =>
           prev.map((m) =>
             m.id === tempAiId ? { ...m, isStreaming: false } : m
@@ -234,7 +240,14 @@ export function ChatWindow({
       setIsStreaming(false);
       abortRef.current = null;
     }
-  }, [input, isStreaming, conversationId, accessToken, chatbot, selectedModel, openHardPaywall, onConversationCreated]);
+  }, [isStreaming, conversationId, accessToken, chatbot, selectedModel, openHardPaywall, onConversationCreated]);
+
+  const sendMessage = useCallback(async () => {
+    const text = input.trim();
+    if (!text) return;
+    setInput("");
+    await sendText(text);
+  }, [input, sendText]);
 
   function handleStop() {
     abortRef.current?.abort();
@@ -249,82 +262,7 @@ export function ChatWindow({
       const idx = prev.findLastIndex((m) => m.role === "assistant");
       return idx >= 0 ? prev.filter((_, i) => i !== idx) : prev;
     });
-    setInput(lastUser.content);
-    // Let the input settle then send
-    setTimeout(() => {
-      setInput("");
-      // Re-use sendMessage logic inline to avoid stale closure
-      const text = lastUser.content;
-      const tempAiId = `tmp-ai-regen-${Date.now()}`;
-      setMessages((prev) => [
-        ...prev,
-        { id: tempAiId, role: "assistant", content: "", isStreaming: true },
-      ]);
-      void regenerateSend(text, tempAiId);
-    }, 0);
-  }
-
-  async function regenerateSend(text: string, tempAiId: string) {
-    setIsStreaming(true);
-    const ctrl = new AbortController();
-    abortRef.current = ctrl;
-    try {
-      const headers: Record<string, string> = {
-        "Content-Type": "application/json",
-        "X-Guest-ID": getGuestId(),
-      };
-      if (accessToken) headers["Authorization"] = `Bearer ${accessToken}`;
-
-      const res = await fetch(`${API_BASE}/api/chat/${chatbot.id}`, {
-        method: "POST",
-        headers,
-        body: JSON.stringify({
-          message: text,
-          conversation_id: conversationId,
-          model: chatbot.allowModelSwitch ? selectedModel : undefined,
-        }),
-        signal: ctrl.signal,
-      });
-
-      if (!res.ok) return;
-      const reader = res.body?.getReader();
-      if (!reader) return;
-      const decoder = new TextDecoder();
-      let buffer = "";
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        buffer += decoder.decode(value, { stream: true });
-        const parts = buffer.split("\n\n");
-        buffer = parts.pop() ?? "";
-        for (const part of parts) {
-          const line = part.startsWith("data: ") ? part.slice(6) : part;
-          if (!line.trim()) continue;
-          try {
-            const event = JSON.parse(line);
-            if (event.type === "delta") {
-              setMessages((prev) =>
-                prev.map((m) =>
-                  m.id === tempAiId ? { ...m, content: m.content + event.content } : m
-                )
-              );
-            } else if (event.type === "done") {
-              setMessages((prev) =>
-                prev.map((m) =>
-                  m.id === tempAiId
-                    ? { ...m, id: event.message_id, isStreaming: false, model: event.model }
-                    : m
-                )
-              );
-            }
-          } catch {}
-        }
-      }
-    } catch {}
-    finally {
-      setIsStreaming(false);
-      abortRef.current = null;
-    }
+    void sendText(lastUser.content);
   }
 
   const lastAssistantMsg = [...messages].reverse().find((m) => m.role === "assistant");
@@ -338,9 +276,7 @@ export function ChatWindow({
           accessToken={accessToken}
           onTranscriptSend={(text) => {
             setVoiceModeOpen(false);
-            setInput(text);
-            // Slight delay so input state settles before sending
-            setTimeout(() => sendMessage(), 50);
+            void sendText(text);
           }}
           onClose={() => setVoiceModeOpen(false)}
         />
@@ -393,6 +329,8 @@ export function ChatWindow({
                   prev.map((m) => (m.id === id ? { ...m, feedback: fb } : m))
                 )
               }
+              onQuickReply={(reply) => { void sendText(reply); }}
+              onPostback={(payload) => { void sendText(payload); }}
               ttsEnabled={chatbot.ttsEnabled}
               autoPlayTts={chatbot.autoPlayTts}
               accessToken={accessToken}

@@ -9,6 +9,15 @@ from app.services.llm.costs import calculate_cost
 
 _client: anthropic.AsyncAnthropic | None = None
 
+# Map user-facing short IDs to actual Anthropic API model IDs
+_MODEL_ALIASES: dict[str, str] = {
+    "claude-haiku-4-5": "claude-haiku-4-5-20251001",
+}
+
+
+def _resolve_model(model: str) -> str:
+    return _MODEL_ALIASES.get(model, model)
+
 
 def _get_client() -> anthropic.AsyncAnthropic:
     global _client
@@ -32,8 +41,13 @@ def _split_messages(
 
 
 class AnthropicProvider(LLMProvider):
-    def __init__(self, model: str = "claude-sonnet-4-6") -> None:
+    def __init__(self, model: str = "claude-sonnet-4-6", api_key: str | None = None) -> None:
         self._model = model
+        self._api_model = _resolve_model(model)
+        self._api_key = api_key or settings.anthropic_api_key
+
+    def _client(self) -> anthropic.AsyncAnthropic:
+        return anthropic.AsyncAnthropic(api_key=self._api_key)
 
     @property
     def model_id(self) -> str:
@@ -48,7 +62,7 @@ class AnthropicProvider(LLMProvider):
     ) -> LLMResponse:
         system, turns = _split_messages(messages)
         kwargs: dict = dict(
-            model=self._model,
+            model=self._api_model,
             max_tokens=max_tokens,
             temperature=temperature,
             messages=turns,
@@ -56,7 +70,7 @@ class AnthropicProvider(LLMProvider):
         if system:
             kwargs["system"] = system
 
-        resp = await _get_client().messages.create(**kwargs)
+        resp = await self._client().messages.create(**kwargs)
         input_tok = resp.usage.input_tokens
         output_tok = resp.usage.output_tokens
         return LLMResponse(
@@ -76,7 +90,7 @@ class AnthropicProvider(LLMProvider):
     ) -> AsyncIterator[StreamChunk]:
         system, turns = _split_messages(messages)
         kwargs: dict = dict(
-            model=self._model,
+            model=self._api_model,
             max_tokens=max_tokens,
             temperature=temperature,
             messages=turns,
@@ -87,7 +101,7 @@ class AnthropicProvider(LLMProvider):
         input_tok = 0
         output_tok = 0
 
-        async with _get_client().messages.stream(**kwargs) as stream:
+        async with self._client().messages.stream(**kwargs) as stream:
             async for text in stream.text_stream:
                 yield StreamChunk(delta=text)
 

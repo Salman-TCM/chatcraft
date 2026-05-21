@@ -32,6 +32,7 @@ from app.services.storage import (
     detect_doc_type,
     upload_file,
 )
+from app.services.virus_scan import scan_bytes
 
 router = APIRouter(prefix="/api/kb", tags=["knowledge-base"])
 
@@ -62,6 +63,18 @@ async def upload_document(
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail={"success": False, "error": "Empty file", "code": "EMPTY_FILE"},
+        )
+
+    # ── Virus scan ────────────────────────────────────────────────────────────
+    scan = await scan_bytes(data)
+    if not scan.clean:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={
+                "success": False,
+                "error": f"File rejected: malware detected ({scan.threat})",
+                "code": "MALWARE_DETECTED",
+            },
         )
 
     # ── MIME / extension validation ───────────────────────────────────────────

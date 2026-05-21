@@ -9,7 +9,10 @@ import {
   ChevronRight,
   Copy,
   Loader2,
+  Plus,
   RefreshCw,
+  Send,
+  Shield,
   Trash2,
   Wifi,
   WifiOff,
@@ -84,6 +87,18 @@ const CHANNELS: ChannelDef[] = [
     setupUrl: "https://developers.facebook.com/docs/messenger-platform",
   },
   {
+    key: "instagram",
+    label: "Instagram DM",
+    icon: "📸",
+    color: "bg-pink-50 border-pink-200",
+    description: "Receive and reply to Instagram Direct Messages via the Instagram Graph API.",
+    fields: [
+      { key: "page_access_token", label: "Page Access Token", placeholder: "EAAGm...", secret: true },
+      { key: "verify_token", label: "Webhook Verify Token", placeholder: "my_verify_token_123" },
+    ],
+    setupUrl: "https://developers.facebook.com/docs/instagram-api/guides/messaging",
+  },
+  {
     key: "sms",
     label: "SMS (Twilio)",
     icon: "📱",
@@ -95,6 +110,19 @@ const CHANNELS: ChannelDef[] = [
       { key: "from_number", label: "From Number", placeholder: "+15551234567" },
     ],
     setupUrl: "https://console.twilio.com/",
+  },
+  {
+    key: "discord",
+    label: "Discord",
+    icon: "🎮",
+    color: "bg-indigo-50 border-indigo-200",
+    description: "Connect a Discord bot to reply to messages in your server channels.",
+    fields: [
+      { key: "bot_token", label: "Bot Token", placeholder: "MTxxxxxxxxxxxxxxxxxxxxxxxx.xxxxxx.xxxxx", secret: true },
+      { key: "application_id", label: "Application ID", placeholder: "1234567890123456789" },
+    ],
+    webhookNote: "Set your Discord bot's Interactions Endpoint URL to the webhook URL below.",
+    setupUrl: "https://discord.com/developers/applications",
   },
 ];
 
@@ -176,8 +204,10 @@ export default function ChannelsPage() {
         ? `@${info.username} (${info.first_name})`
         : channel === "whatsapp"
         ? `${info.verified_name} · ${info.display_phone_number}`
-        : channel === "facebook"
+        : channel === "facebook" || channel === "instagram"
         ? `${info.page_name} (${info.page_id})`
+        : channel === "discord"
+        ? `@${info.username}#${info.discriminator} (${info.bot_id})`
         : `${info.friendly_name} · ${info.status}`;
       setTestResult(prev => ({ ...prev, [channel]: { ok: true, msg } }));
     } catch (e: any) {
@@ -423,7 +453,7 @@ export default function ChannelsPage() {
       })}
 
       {/* A2A Protocol */}
-      <A2ASection chatbotId={id as string} />
+      <A2ASection chatbotId={chatbotId} />
 
       {/* Info box */}
       <Card className="bg-muted/40 p-4">
@@ -440,9 +470,27 @@ export default function ChannelsPage() {
 
 function A2ASection({ chatbotId }: { chatbotId: string }) {
   const [copied, setCopied] = useState<string | null>(null);
+  const [testing, setTesting] = useState(false);
+  const [testResult, setTestResult] = useState<{ ok: boolean; msg: string } | null>(null);
+  const [authRequired, setAuthRequired] = useState(false);
+  const [tokens, setTokens] = useState<string[]>([]);
+  const [newToken, setNewToken] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [saveOk, setSaveOk] = useState(false);
+  const [loaded, setLoaded] = useState(false);
+
   const apiBase = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
   const agentCardUrl = `${apiBase}/a2a/widgets/${chatbotId}/agent.json`;
   const messageUrl = `${apiBase}/a2a/widgets/${chatbotId}`;
+
+  useEffect(() => {
+    apiClient.get(`/api/v1/chatbots/${chatbotId}`).then(({ data }) => {
+      const bot = data.data;
+      setAuthRequired(bot.a2a_auth_required ?? false);
+      setTokens(bot.a2a_allowed_tokens ?? []);
+      setLoaded(true);
+    }).catch(() => setLoaded(true));
+  }, [chatbotId]);
 
   function copy(text: string, key: string) {
     navigator.clipboard.writeText(text);
@@ -450,27 +498,83 @@ function A2ASection({ chatbotId }: { chatbotId: string }) {
     setTimeout(() => setCopied(null), 2000);
   }
 
+  async function quickTest() {
+    setTesting(true);
+    setTestResult(null);
+    try {
+      const resp = await fetch(messageUrl, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          jsonrpc: "2.0",
+          id: 1,
+          method: "message/send",
+          params: {
+            message: {
+              role: "user",
+              parts: [{ type: "text", text: "Hello! Can you introduce yourself briefly?" }],
+            },
+          },
+        }),
+      });
+      const json = await resp.json();
+      if (json.error) {
+        setTestResult({ ok: false, msg: json.error.message });
+      } else {
+        const reply = json.result?.artifacts?.[0]?.parts?.[0]?.text ?? "OK";
+        setTestResult({ ok: true, msg: reply.slice(0, 200) });
+      }
+    } catch (e: any) {
+      setTestResult({ ok: false, msg: e.message });
+    } finally {
+      setTesting(false);
+    }
+  }
+
+  async function saveAuth() {
+    setSaving(true);
+    try {
+      await apiClient.put(`/api/v1/chatbots/${chatbotId}`, {
+        a2a_auth_required: authRequired,
+        a2a_allowed_tokens: tokens.length > 0 ? tokens : null,
+      });
+      setSaveOk(true);
+      setTimeout(() => setSaveOk(false), 2000);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  function addToken() {
+    const t = newToken.trim();
+    if (t && !tokens.includes(t)) {
+      setTokens(prev => [...prev, t]);
+    }
+    setNewToken("");
+  }
+
+  if (!loaded) return null;
+
   return (
-    <Card className="p-5 space-y-3">
-      <div>
-        <h3 className="font-semibold text-sm">Google A2A Protocol</h3>
-        <p className="text-xs text-muted-foreground mt-0.5">
-          Allow other AI agents to discover and communicate with this chatbot using the
-          Agent-to-Agent (A2A) open standard.
-        </p>
+    <Card className="p-5 space-y-4">
+      <div className="flex items-center gap-2">
+        <Shield className="h-4 w-4 text-indigo-500" />
+        <div>
+          <h3 className="font-semibold text-sm">Google A2A Protocol</h3>
+          <p className="text-xs text-muted-foreground mt-0.5">
+            Allow other AI agents to discover and communicate with this chatbot using the
+            Agent-to-Agent (A2A) open standard.
+          </p>
+        </div>
       </div>
 
+      {/* Endpoint URLs */}
       <div className="space-y-2">
         <div>
           <Label className="text-xs text-muted-foreground">Agent Card (discovery)</Label>
           <div className="flex gap-2 mt-1">
             <Input value={agentCardUrl} readOnly className="text-xs font-mono h-8" />
-            <Button
-              size="sm"
-              variant="outline"
-              className="h-8 w-8 p-0"
-              onClick={() => copy(agentCardUrl, "card")}
-            >
+            <Button size="sm" variant="outline" className="h-8 w-8 p-0" onClick={() => copy(agentCardUrl, "card")}>
               {copied === "card" ? <Check className="h-3.5 w-3.5 text-green-500" /> : <Copy className="h-3.5 w-3.5" />}
             </Button>
           </div>
@@ -479,22 +583,82 @@ function A2ASection({ chatbotId }: { chatbotId: string }) {
           <Label className="text-xs text-muted-foreground">Message endpoint (JSON-RPC 2.0)</Label>
           <div className="flex gap-2 mt-1">
             <Input value={messageUrl} readOnly className="text-xs font-mono h-8" />
-            <Button
-              size="sm"
-              variant="outline"
-              className="h-8 w-8 p-0"
-              onClick={() => copy(messageUrl, "rpc")}
-            >
+            <Button size="sm" variant="outline" className="h-8 w-8 p-0" onClick={() => copy(messageUrl, "rpc")}>
               {copied === "rpc" ? <Check className="h-3.5 w-3.5 text-green-500" /> : <Copy className="h-3.5 w-3.5" />}
             </Button>
           </div>
         </div>
       </div>
 
-      <div className="bg-muted/50 rounded p-3 text-xs text-muted-foreground">
-        <strong>Quick test:</strong> <code>curl {agentCardUrl}</code> — returns the agent card JSON.
-        <br />
-        POST to the message endpoint with <code>{`{"jsonrpc":"2.0","id":1,"method":"message/send","params":{"message":{"role":"user","parts":[{"type":"text","text":"Hello"}]}}}`}</code>
+      {/* Quick test */}
+      <div className="space-y-2">
+        <Button
+          size="sm"
+          variant="outline"
+          className="h-8 text-xs"
+          onClick={quickTest}
+          disabled={testing}
+        >
+          {testing ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Send className="h-3.5 w-3.5" />}
+          Quick Test
+        </Button>
+        {testResult && (
+          <div className={`flex items-start gap-2 rounded-md px-3 py-2 text-xs ${testResult.ok ? "bg-green-50 text-green-700" : "bg-red-50 text-red-700"}`}>
+            {testResult.ok ? <Check className="h-3.5 w-3.5 mt-0.5 shrink-0" /> : <X className="h-3.5 w-3.5 mt-0.5 shrink-0" />}
+            <span className="break-all">{testResult.msg}</span>
+          </div>
+        )}
+      </div>
+
+      {/* Auth settings */}
+      <div className="border-t pt-4 space-y-3">
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => setAuthRequired(v => !v)}
+            className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${authRequired ? "bg-primary" : "bg-muted"}`}
+          >
+            <span className={`inline-block h-3.5 w-3.5 rounded-full bg-white shadow transition-transform ${authRequired ? "translate-x-4.5" : "translate-x-0.5"}`} />
+          </button>
+          <span className="text-xs font-medium">Require Bearer token authentication</span>
+        </div>
+        {authRequired && (
+          <div className="space-y-2">
+            <Label className="text-xs text-muted-foreground">Allowed tokens (callers must present one of these)</Label>
+            <div className="space-y-1">
+              {tokens.map((t, i) => (
+                <div key={i} className="flex items-center gap-2">
+                  <Input value={t} readOnly className="h-7 text-xs font-mono flex-1" />
+                  <Button
+                    size="icon"
+                    variant="ghost"
+                    className="h-7 w-7 text-destructive hover:text-destructive"
+                    onClick={() => setTokens(prev => prev.filter((_, j) => j !== i))}
+                  >
+                    <X className="h-3 w-3" />
+                  </Button>
+                </div>
+              ))}
+            </div>
+            <div className="flex gap-2">
+              <Input
+                placeholder="Paste token or API key…"
+                value={newToken}
+                onChange={e => setNewToken(e.target.value)}
+                onKeyDown={e => e.key === "Enter" && addToken()}
+                className="h-7 text-xs font-mono flex-1"
+              />
+              <Button size="sm" variant="outline" className="h-7 text-xs" onClick={addToken}>
+                <Plus className="h-3 w-3" />
+                Add
+              </Button>
+            </div>
+          </div>
+        )}
+        <Button size="sm" className="h-8 text-xs" onClick={saveAuth} disabled={saving}>
+          {saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : saveOk ? <Check className="h-3.5 w-3.5 text-green-500" /> : <Check className="h-3.5 w-3.5" />}
+          {saveOk ? "Saved!" : "Save Auth Settings"}
+        </Button>
       </div>
     </Card>
   );

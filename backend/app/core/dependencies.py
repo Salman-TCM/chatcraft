@@ -26,7 +26,9 @@ async def get_current_user(
     credentials: BearerToken,
     db: DBSession,
 ):
-    """Validate JWT and return the authenticated User. 401 on any failure."""
+    """Validate JWT (or API token) and return the authenticated User. 401 on any failure."""
+    import hashlib
+    from sqlalchemy import select
     from app.models.user import User
 
     exc = HTTPException(
@@ -34,8 +36,38 @@ async def get_current_user(
         detail={"success": False, "error": "Not authenticated", "code": "NOT_AUTHENTICATED"},
         headers={"WWW-Authenticate": "Bearer"},
     )
+
+    token = credentials.credentials
+
+    # ── API token path (starts with "cc_") ──────────────────────────────────
+    if token.startswith("cc_"):
+        from datetime import datetime, timezone
+        from app.models.api_token import ApiToken
+
+        token_hash = hashlib.sha256(token.encode()).hexdigest()
+        result = await db.execute(
+            select(ApiToken).where(ApiToken.token_hash == token_hash)
+        )
+        api_token = result.scalar_one_or_none()
+        if not api_token:
+            raise exc
+
+        user = await db.get(User, api_token.user_id)
+        if not user:
+            raise exc
+
+        # Update last_used_at asynchronously (best-effort; ignore failures)
+        try:
+            api_token.last_used_at = datetime.now(timezone.utc)
+            await db.commit()
+        except Exception:
+            await db.rollback()
+
+        return user
+
+    # ── JWT path ─────────────────────────────────────────────────────────────
     try:
-        payload = decode_token(credentials.credentials)
+        payload = decode_token(token)
     except JWTError:
         raise exc
 

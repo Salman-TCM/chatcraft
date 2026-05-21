@@ -2,7 +2,7 @@ import secrets
 import uuid
 
 from sqlalchemy import Boolean, ForeignKey, String, Text
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import Base, TimestampMixin
@@ -40,9 +40,16 @@ class WidgetConfig(TimestampMixin, Base):
         index=True,
     )
 
+    # Persistent menu items shown in the chat widget
+    # Each item: {"type": "url"|"phone"|"flow"|"postback", "label": str, "value": str}
+    persistent_menu: Mapped[list | None] = mapped_column(JSONB, nullable=True, default=None)
+
     # Relationships
     chatbot: Mapped["ChatbotConfig"] = relationship(  # type: ignore[name-defined]
         "ChatbotConfig", back_populates="widget_config"
+    )
+    licenses: Mapped[list["WidgetLicense"]] = relationship(  # type: ignore[name-defined]
+        "WidgetLicense", back_populates="widget_config", cascade="all, delete-orphan"
     )
 
     def __repr__(self) -> str:

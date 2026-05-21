@@ -1,9 +1,10 @@
+import json
 import secrets
 import urllib.parse
 from datetime import datetime, timedelta, timezone
 
 import httpx
-from fastapi import APIRouter, Cookie, HTTPException, Query, Response, status
+from fastapi import APIRouter, Cookie, Header, HTTPException, Query, Response, status
 from fastapi.responses import RedirectResponse
 from jose import JWTError
 from sqlalchemy import select
@@ -125,6 +126,7 @@ async def login(
     return LoginResponse(
         data=TokenData(
             access_token=access_token,
+            refresh_token=refresh_token,
             user=UserResponse.model_validate(user),
         )
     )
@@ -161,9 +163,13 @@ async def refresh(
     response: Response,
     db: DBSession,
     redis: RedisClient,
-    refresh_token: str | None = Cookie(default=None, alias=REFRESH_TOKEN_COOKIE),
+    refresh_token_cookie: str | None = Cookie(default=None, alias=REFRESH_TOKEN_COOKIE),
+    x_refresh_token: str | None = Header(default=None, alias="X-Refresh-Token"),
 ) -> RefreshResponse:
-    """Rotate refresh token. Old JTI is revoked; new tokens are issued."""
+    """Rotate refresh token. Old JTI is revoked; new tokens are issued.
+    Accepts refresh token via httpOnly cookie OR X-Refresh-Token header
+    (header is used by server-side NextAuth which can't access browser cookies)."""
+    refresh_token = x_refresh_token or refresh_token_cookie
     if not refresh_token:
         raise _INVALID_REFRESH
 
@@ -181,10 +187,34 @@ async def refresh(
     redis_key = f"refresh:{jti}"
     stored = await redis.get(redis_key)
     if not stored:
+        # Handle concurrent refresh race — multiple NextAuth jwt callbacks can
+        # fire simultaneously for the same expired token. The first succeeds and
+        # rotates the JTI; the rest arrive with the now-revoked JTI. Instead of
+        # 401-ing them (which causes a refresh flood), return the cached tokens
+        # from the winning request for a short grace window.
+        grace_key = f"refresh:{jti}:grace"
+        cached = await redis.get(grace_key)
+        if cached:
+            cached_data = json.loads(cached)
+            user = await db.get(User, cached_data["user_id"])
+            if user:
+                response.set_cookie(
+                    key=REFRESH_TOKEN_COOKIE,
+                    value=cached_data["refresh_token"],
+                    httponly=True,
+                    secure=True,
+                    samesite="lax",
+                    max_age=_REFRESH_TTL,
+                    path="/api/auth",
+                )
+                return RefreshResponse(
+                    data=TokenData(
+                        access_token=cached_data["access_token"],
+                        refresh_token=cached_data["refresh_token"],
+                        user=UserResponse.model_validate(user),
+                    )
+                )
         raise _INVALID_REFRESH
-
-    # Revoke the used token immediately (rotation)
-    await redis.delete(redis_key)
 
     user = await db.get(User, user_id)
     if not user:
@@ -193,6 +223,21 @@ async def refresh(
     access_token = create_access_token(user.id, user.role.value)
     new_refresh_token, new_jti = create_refresh_token(user.id)
     await redis.setex(f"refresh:{new_jti}", _REFRESH_TTL, str(user.id))
+
+    # Set grace key BEFORE deleting old key — eliminates the race window where
+    # a concurrent request finds the old key gone but grace not yet written.
+    await redis.setex(
+        f"refresh:{jti}:grace",
+        30,
+        json.dumps({
+            "access_token": access_token,
+            "refresh_token": new_refresh_token,
+            "user_id": str(user.id),
+        }),
+    )
+
+    # Revoke old token after grace key is in place
+    await redis.delete(redis_key)
 
     response.set_cookie(
         key=REFRESH_TOKEN_COOKIE,
@@ -207,6 +252,7 @@ async def refresh(
     return RefreshResponse(
         data=TokenData(
             access_token=access_token,
+            refresh_token=new_refresh_token,
             user=UserResponse.model_validate(user),
         )
     )
@@ -535,6 +581,7 @@ async def google_sync(
     return LoginResponse(
         data=TokenData(
             access_token=access_token,
+            refresh_token=refresh_token,
             user=UserResponse.model_validate(user),
         )
     )

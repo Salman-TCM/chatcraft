@@ -8,8 +8,15 @@ import {
   ChevronDown,
   ChevronRight,
   Copy,
+  ExternalLink,
+  Key,
   Loader2,
+  Menu,
+  Phone,
+  Plus,
   RefreshCw,
+  Trash2,
+  Zap,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -19,6 +26,16 @@ import { apiClient } from "@/lib/api";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
+interface License {
+  id: string;
+  label: string;
+  license_key: string;
+  allowed_domain: string | null;
+  status: "active" | "revoked";
+  expires_at: string | null;
+  created_at: string;
+}
+
 interface WidgetConfig {
   id: string;
   chatbot_id: string;
@@ -26,7 +43,21 @@ interface WidgetConfig {
   position: string;
   show_branding: boolean;
   embed_token: string;
+  persistent_menu: MenuItem[] | null;
 }
+
+interface MenuItem {
+  type: "url" | "phone" | "flow" | "postback";
+  label: string;
+  value: string;
+}
+
+const MENU_ITEM_TYPES = [
+  { value: "url",      label: "URL Link",         icon: ExternalLink },
+  { value: "phone",    label: "Phone Number",      icon: Phone },
+  { value: "postback", label: "Postback Message",  icon: Zap },
+  { value: "flow",     label: "Trigger Flow",      icon: Zap },
+];
 
 const POSITION_OPTIONS = [
   { value: "bottom-right", label: "Bottom Right" },
@@ -37,6 +68,7 @@ const POSITION_OPTIONS = [
 
 const CDN_BASE = process.env.NEXT_PUBLIC_CDN_URL ?? "https://cdn.chatcraft.ai";
 const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "https://api.chatcraft.ai";
+const APP_BASE = process.env.NEXT_PUBLIC_APP_URL ?? "https://app.chatcraft.ai";
 
 // ── Guides ────────────────────────────────────────────────────────────────────
 
@@ -95,13 +127,23 @@ export default function WidgetPage() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [rotating, setRotating] = useState(false);
-  const [copied, setCopied] = useState(false);
+  const [copied, setCopied] = useState<string | null>(null);
+  const [copiedKey, setCopiedKey] = useState<string | null>(null);
   const [openGuide, setOpenGuide] = useState<string | null>(null);
+  const [deployMode, setDeployMode] = useState<"launcher" | "iframe" | "voice">("launcher");
+
+  // Licenses
+  const [licenses, setLicenses] = useState<License[]>([]);
+  const [newLabel, setNewLabel] = useState("");
+  const [newDomain, setNewDomain] = useState("");
+  const [creatingLicense, setCreatingLicense] = useState(false);
+  const [revokingId, setRevokingId] = useState<string | null>(null);
 
   // Form state (mirrors config)
   const [domains, setDomains] = useState("");
   const [position, setPosition] = useState("bottom-right");
   const [showBranding, setShowBranding] = useState(true);
+  const [menuItems, setMenuItems] = useState<MenuItem[]>([]);
 
   useEffect(() => {
     loadData();
@@ -109,12 +151,14 @@ export default function WidgetPage() {
 
   async function loadData() {
     try {
-      const [botRes, widgetRes] = await Promise.all([
+      const [botRes, widgetRes, licRes] = await Promise.all([
         apiClient.get(`/api/chatbots/${id}`),
         apiClient.get(`/api/widget/manage/${id}`),
+        apiClient.get(`/api/widget/manage/${id}/licenses`),
       ]);
       setChatbotName(botRes.data.data.name);
       applyConfig(widgetRes.data.data);
+      setLicenses(licRes.data.data);
     } catch {
       router.replace("/dashboard/chatbots");
     } finally {
@@ -122,11 +166,44 @@ export default function WidgetPage() {
     }
   }
 
+  async function handleCreateLicense() {
+    setCreatingLicense(true);
+    try {
+      const { data } = await apiClient.post(`/api/widget/manage/${id}/licenses`, {
+        label: newLabel.trim() || "Unnamed",
+        allowed_domain: newDomain.trim() || null,
+      });
+      setLicenses((prev) => [data.data, ...prev]);
+      setNewLabel("");
+      setNewDomain("");
+    } finally {
+      setCreatingLicense(false);
+    }
+  }
+
+  async function handleRevoke(licenseId: string) {
+    if (!confirm("Revoke this license? The widget will stop working on that site immediately.")) return;
+    setRevokingId(licenseId);
+    try {
+      await apiClient.delete(`/api/widget/manage/${id}/licenses/${licenseId}`);
+      setLicenses((prev) => prev.map((l) => l.id === licenseId ? { ...l, status: "revoked" as const } : l));
+    } finally {
+      setRevokingId(null);
+    }
+  }
+
+  async function copyKey(key: string) {
+    await navigator.clipboard.writeText(key);
+    setCopiedKey(key);
+    setTimeout(() => setCopiedKey(null), 2000);
+  }
+
   function applyConfig(wc: WidgetConfig) {
     setConfig(wc);
     setDomains(wc.allowed_domains ?? "");
     setPosition(wc.position);
     setShowBranding(wc.show_branding);
+    setMenuItems(wc.persistent_menu ?? []);
   }
 
   async function handleSave() {
@@ -136,11 +213,25 @@ export default function WidgetPage() {
         allowed_domains: domains.trim() || null,
         position,
         show_branding: showBranding,
+        persistent_menu: menuItems.length > 0 ? menuItems : null,
       });
       applyConfig(data.data);
     } finally {
       setSaving(false);
     }
+  }
+
+  function addMenuItem() {
+    if (menuItems.length >= 5) return;
+    setMenuItems((prev) => [...prev, { type: "url", label: "", value: "" }]);
+  }
+
+  function updateMenuItem(index: number, field: keyof MenuItem, value: string) {
+    setMenuItems((prev) => prev.map((item, i) => i === index ? { ...item, [field]: value } : item));
+  }
+
+  function removeMenuItem(index: number) {
+    setMenuItems((prev) => prev.filter((_, i) => i !== index));
   }
 
   async function handleRotate() {
@@ -154,14 +245,30 @@ export default function WidgetPage() {
     }
   }
 
-  const snippet = config
-    ? `<script\n  src="${CDN_BASE}/widget.js"\n  data-chatbot-id="${id}"\n  data-widget-token="${config.embed_token}"\n  data-position="${position}"\n  data-api-base="${API_BASE}"\n></script>`
+  const baseAttrs = config
+    ? `  src="${CDN_BASE}/widget.js"\n  data-chatbot-id="${id}"\n  data-widget-token="${config.embed_token}"\n  data-api-base="${API_BASE}"`
     : "";
+
+  const snippet = config
+    ? deployMode === "iframe"
+      ? `<div data-chatcraft-iframe="${id}"></div>\n\n<script\n${baseAttrs}\n  data-type="iframe"\n></script>`
+      : deployMode === "voice"
+      ? `<script\n${baseAttrs}\n  data-type="voice"\n  data-position="${position}"\n></script>`
+      : `<script\n${baseAttrs}\n  data-position="${position}"\n></script>`
+    : "";
+
+  const directLink = `${APP_BASE}/widgets/${id}`;
 
   async function copySnippet() {
     await navigator.clipboard.writeText(snippet);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
+    setCopied("snippet");
+    setTimeout(() => setCopied(null), 2000);
+  }
+
+  async function copyLink() {
+    await navigator.clipboard.writeText(directLink);
+    setCopied("link");
+    setTimeout(() => setCopied(null), 2000);
   }
 
   if (loading) {
@@ -190,6 +297,62 @@ export default function WidgetPage() {
 
       <div className="mx-auto max-w-2xl space-y-8 px-4 py-8">
 
+        {/* ── Deploy Mode ──────────────────────────────────────────────── */}
+        <Section title="Deploy Mode" description="Choose how to embed your chatbot.">
+          <div className="space-y-2">
+            {(
+              [
+                {
+                  value: "launcher",
+                  label: "Floating Launcher",
+                  desc: "A chat bubble fixed to the corner of the page. Best for most sites.",
+                },
+                {
+                  value: "iframe",
+                  label: "Inline Iframe",
+                  desc: "Embed the chat panel directly inside a container element on your page.",
+                },
+                {
+                  value: "voice",
+                  label: "Voice Launcher",
+                  desc: "A microphone bubble for voice conversations. Opens a chat panel on tap.",
+                },
+              ] as const
+            ).map((opt) => (
+              <button
+                key={opt.value}
+                onClick={() => setDeployMode(opt.value)}
+                className={`flex w-full items-start gap-3 rounded-lg border px-4 py-3 text-left transition-colors ${
+                  deployMode === opt.value
+                    ? "border-primary bg-primary/5"
+                    : "hover:bg-muted"
+                }`}
+              >
+                <span
+                  className={`mt-0.5 h-4 w-4 shrink-0 rounded-full border-2 flex items-center justify-center ${
+                    deployMode === opt.value ? "border-primary" : "border-muted-foreground"
+                  }`}
+                >
+                  {deployMode === opt.value && (
+                    <span className="h-2 w-2 rounded-full bg-primary" />
+                  )}
+                </span>
+                <div>
+                  <p className="text-sm font-medium">{opt.label}</p>
+                  <p className="text-xs text-muted-foreground">{opt.desc}</p>
+                </div>
+              </button>
+            ))}
+          </div>
+          {deployMode === "iframe" && (
+            <p className="text-xs text-muted-foreground bg-muted rounded-md px-3 py-2">
+              Add <code className="font-mono text-[11px]">{`<div data-chatcraft-iframe="${id}"></div>`}</code> where you want the chat panel to appear. The snippet below will mount into it automatically.
+            </p>
+          )}
+        </Section>
+
+        <Separator />
+
         {/* ── Snippet ─────────────────────────────────────────────────── */}
         <Section title="Embed Snippet" description="Paste this before the </body> tag on any page.">
           <div className="relative">
@@ -202,8 +365,8 @@ export default function WidgetPage() {
               className="absolute right-2 top-2 h-7 gap-1.5 text-xs"
               onClick={copySnippet}
             >
-              {copied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
-              {copied ? "Copied!" : "Copy"}
+              {copied === "snippet" ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
+              {copied === "snippet" ? "Copied!" : "Copy"}
             </Button>
           </div>
         </Section>
@@ -241,6 +404,59 @@ export default function WidgetPage() {
               </div>
               <Toggle checked={showBranding} onChange={setShowBranding} />
             </div>
+          </div>
+        </Section>
+
+        <Separator />
+
+        {/* ── Persistent Menu ──────────────────────────────────────────── */}
+        <Section
+          title="Persistent Menu"
+          description="Quick-access buttons shown at the bottom of the chat widget (max 5 items)."
+        >
+          <div className="space-y-2">
+            {menuItems.map((item, index) => (
+              <div key={index} className="flex items-center gap-2 rounded-lg border p-3">
+                <Menu className="h-4 w-4 shrink-0 text-muted-foreground" />
+                <div className="flex-1 grid grid-cols-3 gap-2 min-w-0">
+                  <select
+                    value={item.type}
+                    onChange={(e) => updateMenuItem(index, "type", e.target.value)}
+                    className="h-8 rounded-md border bg-background px-2 text-xs"
+                  >
+                    {MENU_ITEM_TYPES.map((t) => (
+                      <option key={t.value} value={t.value}>{t.label}</option>
+                    ))}
+                  </select>
+                  <input
+                    value={item.label}
+                    onChange={(e) => updateMenuItem(index, "label", e.target.value)}
+                    placeholder="Label"
+                    className="h-8 rounded-md border bg-background px-2 text-xs focus:outline-none focus:ring-1 focus:ring-ring"
+                  />
+                  <input
+                    value={item.value}
+                    onChange={(e) => updateMenuItem(index, "value", e.target.value)}
+                    placeholder={item.type === "url" ? "https://..." : item.type === "phone" ? "+1234567890" : "Message text or Flow ID"}
+                    className="h-8 rounded-md border bg-background px-2 text-xs font-mono focus:outline-none focus:ring-1 focus:ring-ring"
+                  />
+                </div>
+                <button
+                  onClick={() => removeMenuItem(index)}
+                  className="shrink-0 p-1 rounded hover:bg-destructive/10 text-destructive"
+                >
+                  <Trash2 className="h-3.5 w-3.5" />
+                </button>
+              </div>
+            ))}
+            {menuItems.length < 5 && (
+              <Button variant="outline" size="sm" className="w-full gap-1.5 text-xs" onClick={addMenuItem}>
+                <Plus className="h-3.5 w-3.5" /> Add Menu Item
+              </Button>
+            )}
+            {menuItems.length === 0 && (
+              <p className="text-xs text-muted-foreground">No menu items. Add up to 5 quick-action buttons.</p>
+            )}
           </div>
         </Section>
 
@@ -286,6 +502,106 @@ export default function WidgetPage() {
             >
               {rotating ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
               Rotate
+            </Button>
+          </div>
+        </Section>
+
+        <Separator />
+
+        {/* ── License keys ─────────────────────────────────────────────── */}
+        <Section
+          title="License Keys"
+          description="Generate per-client license keys so each site can embed your widget independently. Use data-license instead of data-widget-token in the snippet."
+        >
+          {/* Create form */}
+          <div className="flex gap-2 flex-wrap">
+            <input
+              value={newLabel}
+              onChange={(e) => setNewLabel(e.target.value)}
+              placeholder="Label (e.g. Client Name)"
+              className="flex-1 min-w-36 rounded-md border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-ring"
+            />
+            <input
+              value={newDomain}
+              onChange={(e) => setNewDomain(e.target.value)}
+              placeholder="Domain (optional, e.g. client.com)"
+              className="flex-1 min-w-36 rounded-md border bg-background px-3 py-2 text-sm font-mono focus:outline-none focus:ring-1 focus:ring-ring"
+            />
+            <Button size="sm" className="h-9 gap-1.5 text-xs shrink-0" disabled={creatingLicense} onClick={handleCreateLicense}>
+              {creatingLicense ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <><Plus className="h-3.5 w-3.5" />Generate</>}
+            </Button>
+          </div>
+
+          {/* List */}
+          {licenses.length > 0 ? (
+            <div className="mt-3 space-y-2">
+              {licenses.map((lic) => (
+                <div key={lic.id} className={`flex items-center gap-2 rounded-lg border p-3 ${lic.status === "revoked" ? "opacity-50" : ""}`}>
+                  <Key className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                  <div className="flex-1 min-w-0">
+                    <p className="text-xs font-medium truncate">{lic.label || "Unnamed"}</p>
+                    <p className="text-[10px] text-muted-foreground font-mono truncate">{lic.license_key}</p>
+                    {lic.allowed_domain && (
+                      <p className="text-[10px] text-muted-foreground">Domain: {lic.allowed_domain}</p>
+                    )}
+                  </div>
+                  <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded ${lic.status === "active" ? "bg-green-100 text-green-700" : "bg-muted text-muted-foreground"}`}>
+                    {lic.status}
+                  </span>
+                  <button
+                    className="shrink-0 p-1 rounded hover:bg-muted text-muted-foreground"
+                    title="Copy key"
+                    onClick={() => copyKey(lic.license_key)}
+                  >
+                    {copiedKey === lic.license_key ? <Check className="h-3.5 w-3.5 text-green-600" /> : <Copy className="h-3.5 w-3.5" />}
+                  </button>
+                  {lic.status === "active" && (
+                    <button
+                      className="shrink-0 p-1 rounded hover:bg-destructive/10 text-destructive"
+                      title="Revoke"
+                      disabled={revokingId === lic.id}
+                      onClick={() => handleRevoke(lic.id)}
+                    >
+                      {revokingId === lic.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
+                    </button>
+                  )}
+                </div>
+              ))}
+            </div>
+          ) : (
+            <p className="text-xs text-muted-foreground mt-2">No license keys yet. Generate one above to give a client embed access.</p>
+          )}
+        </Section>
+
+        <Separator />
+
+        {/* ── Direct Link ──────────────────────────────────────────────── */}
+        <Section
+          title="Direct Link"
+          description="Share this URL to let anyone chat with your bot directly — no embed needed. Works in any browser."
+        >
+          <div className="flex items-center gap-2">
+            <Input
+              readOnly
+              value={directLink}
+              className="font-mono text-xs text-muted-foreground"
+            />
+            <Button
+              size="sm"
+              variant="outline"
+              className="h-9 shrink-0 gap-1.5 text-xs"
+              onClick={copyLink}
+            >
+              {copied === "link" ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
+              {copied === "link" ? "Copied!" : "Copy"}
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              className="h-9 shrink-0 text-xs"
+              onClick={() => window.open(directLink, "_blank")}
+            >
+              Open
             </Button>
           </div>
         </Section>

@@ -36,6 +36,12 @@ from app.api.browser import router as browser_router
 from app.api.mcp_servers import router as mcp_servers_router
 from app.api.a2a import router as a2a_router
 from app.api.realtime_proxy import router as realtime_router
+from app.api.tokens import router as tokens_router
+from app.api.manage import router as manage_router
+from app.api.white_label import router as white_label_router
+from app.api.push import router as push_router
+from app.api.model_keys import router as model_keys_router
+from app.api.agents import router as agents_router
 from app.core.security_headers import SecurityHeadersMiddleware
 from app.core.ip_abuse import IPAbuseMiddleware
 from app.core.config import settings
@@ -118,6 +124,12 @@ app.include_router(browser_router)
 app.include_router(mcp_servers_router)
 app.include_router(a2a_router)
 app.include_router(realtime_router)
+app.include_router(tokens_router)
+app.include_router(manage_router)
+app.include_router(white_label_router)
+app.include_router(push_router)
+app.include_router(model_keys_router)
+app.include_router(agents_router)
 
 
 @app.get("/", tags=["health"])
