@@ -9,6 +9,19 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.models.base import Base, TimestampMixin
 
 
+class FlowFolder(TimestampMixin, Base):
+    __tablename__ = "flow_folders"
+
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False, index=True,
+    )
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    colour: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
+
+    flows: Mapped[list["Flow"]] = relationship("Flow", back_populates="folder")
+
+
 class Flow(TimestampMixin, Base):
     __tablename__ = "flows"
 
@@ -20,6 +33,11 @@ class Flow(TimestampMixin, Base):
         UUID(as_uuid=True), ForeignKey("chatbot_configs.id", ondelete="SET NULL"),
         nullable=True, index=True,
     )
+    folder_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("flow_folders.id", ondelete="SET NULL"),
+        nullable=True, index=True,
+    )
+    folder: Mapped[Optional["FlowFolder"]] = relationship("FlowFolder", back_populates="flows")
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
@@ -31,6 +49,8 @@ class Flow(TimestampMixin, Base):
     edges: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
     # Webhook
     webhook_secret: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
+    # Explicit entry point (if None, executor falls back to start-type node or first with no incoming edges)
+    starting_node_id: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
 
     runs: Mapped[list["FlowRun"]] = relationship(
         "FlowRun", back_populates="flow", cascade="all, delete-orphan"

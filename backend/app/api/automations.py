@@ -34,7 +34,7 @@ from sqlalchemy import func, select
 
 from app.core.dependencies import CurrentUser, DBSession
 from app.models.automation import (
-    Automation, Keyword, Sequence, SequenceEnrollment,
+    Automation, AutomationRun, Keyword, Sequence, SequenceEnrollment,
 )
 
 router = APIRouter(prefix="/api/v1", tags=["automations"])
@@ -173,6 +173,42 @@ async def toggle_automation(auto_id: uuid.UUID, user: CurrentUser, db: DBSession
     return {"success": True, "data": {"enabled": a.enabled}}
 
 
+@router.get("/automations/{auto_id}/runs", response_model=dict)
+async def list_automation_runs(
+    auto_id: uuid.UUID,
+    user: CurrentUser,
+    db: DBSession,
+    limit: Annotated[int, Query(ge=1, le=100)] = 50,
+) -> dict:
+    a = await db.get(Automation, auto_id)
+    if not a or a.user_id != user.id:
+        raise HTTPException(status_code=404, detail="Automation not found")
+    result = await db.execute(
+        select(AutomationRun)
+        .where(AutomationRun.automation_id == auto_id)
+        .order_by(AutomationRun.executed_at.desc())
+        .limit(limit)
+    )
+    runs = result.scalars().all()
+    success_count = sum(1 for r in runs if r.status == "success")
+    failed_count = sum(1 for r in runs if r.status == "failed")
+    return {
+        "success": True,
+        "data": [
+            {
+                "id": str(r.id),
+                "trigger_type": r.trigger_type,
+                "action_type": r.action_type,
+                "status": r.status,
+                "error": r.error,
+                "executed_at": r.executed_at.isoformat(),
+            }
+            for r in runs
+        ],
+        "stats": {"success": success_count, "failed": failed_count, "total": len(runs)},
+    }
+
+
 # ══════════════════════════════════════════════════════════════════════════════
 # SEQUENCES
 # ══════════════════════════════════════════════════════════════════════════════
@@ -302,6 +338,7 @@ async def list_enrollments(seq_id: uuid.UUID, user: CurrentUser, db: DBSession) 
     enrollments = result.scalars().all()
     total_active = sum(1 for e in enrollments if e.status == "active")
     total_completed = sum(1 for e in enrollments if e.status == "completed")
+    total_cancelled = sum(1 for e in enrollments if e.status == "cancelled")
 
     return {
         "success": True,
@@ -316,7 +353,12 @@ async def list_enrollments(seq_id: uuid.UUID, user: CurrentUser, db: DBSession) 
             }
             for e in enrollments
         ],
-        "stats": {"active": total_active, "completed": total_completed, "total": len(enrollments)},
+        "stats": {
+            "active": total_active,
+            "completed": total_completed,
+            "cancelled": total_cancelled,
+            "total": len(enrollments),
+        },
     }
 
 

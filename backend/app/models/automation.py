@@ -31,6 +31,23 @@ class Automation(TimestampMixin, Base):
     last_executed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
+class AutomationRun(Base):
+    __tablename__ = "automation_runs"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, server_default="gen_random_uuid()",
+    )
+    automation_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("automations.id", ondelete="CASCADE"),
+        nullable=False, index=True,
+    )
+    trigger_type: Mapped[str] = mapped_column(String(80), nullable=False)
+    action_type: Mapped[str] = mapped_column(String(80), nullable=False)
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default="success", server_default="success")
+    error: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    executed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default="now()", nullable=False)
+
+
 class Sequence(TimestampMixin, Base):
     __tablename__ = "sequences"
 
