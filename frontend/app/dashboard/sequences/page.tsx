@@ -177,16 +177,20 @@ export default function SequencesPage() {
               {isExpanded && seqStats && (
                 <div className="border-t bg-muted/30 px-4 py-3 flex gap-6 text-sm">
                   <div className="text-center">
-                    <p className="text-lg font-semibold">{seqStats.stats?.active ?? 0}</p>
+                    <p className="text-lg font-semibold text-primary">{seqStats.stats?.active ?? 0}</p>
                     <p className="text-xs text-muted-foreground">Active</p>
                   </div>
                   <div className="text-center">
-                    <p className="text-lg font-semibold">{seqStats.stats?.completed ?? 0}</p>
+                    <p className="text-lg font-semibold text-green-600">{seqStats.stats?.completed ?? 0}</p>
                     <p className="text-xs text-muted-foreground">Completed</p>
                   </div>
                   <div className="text-center">
+                    <p className="text-lg font-semibold text-muted-foreground">{seqStats.stats?.cancelled ?? 0}</p>
+                    <p className="text-xs text-muted-foreground">Cancelled</p>
+                  </div>
+                  <div className="text-center">
                     <p className="text-lg font-semibold">{seqStats.stats?.total ?? 0}</p>
-                    <p className="text-xs text-muted-foreground">Total enrolled</p>
+                    <p className="text-xs text-muted-foreground">Total</p>
                   </div>
                 </div>
               )}
