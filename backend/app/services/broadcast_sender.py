@@ -227,6 +227,84 @@ async def _send_whatsapp(campaign: Any, recipients: list[dict]) -> tuple[int, in
         return 0, len(recipients)
 
 
+async def _send_push(campaign: Any, db: AsyncSession) -> tuple[int, int]:
+    """Send push notification to all web chat subscribers of the campaign's chatbot."""
+    try:
+        import json as _json
+        from pywebpush import webpush
+        from app.core.config import settings
+        from app.db.session import AsyncSessionLocal
+        from app.models.conversation import Conversation
+
+        vapid_private = getattr(settings, "vapid_private_key", None)
+        vapid_email = getattr(settings, "vapid_email", "mailto:admin@chatcraft.ai")
+        if not vapid_private:
+            return 0, 0
+
+        chatbot_id = getattr(campaign, "chatbot_id", None)
+
+        # Resolve all active web conversations for this chatbot (or user)
+        if chatbot_id:
+            convs_result = await db.execute(
+                select(Conversation).where(
+                    Conversation.chatbot_id == chatbot_id,
+                    Conversation.channel == "web",
+                    Conversation.status != "closed",
+                )
+            )
+        else:
+            convs_result = await db.execute(
+                select(Conversation).where(
+                    Conversation.channel == "web",
+                    Conversation.status != "closed",
+                )
+            )
+        convs = convs_result.scalars().all()
+
+        from app.db.redis import get_async_redis
+        title = campaign.name
+        body_tmpl = campaign.message_template or title
+        url = campaign.target_filter.get("url", "/") if campaign.target_filter else "/"
+
+        sent = failed = 0
+        redis = get_async_redis()
+        for conv in convs:
+            sub_raw = await redis.get(f"push:widget:conv:{conv.id}")
+            if not sub_raw:
+                continue
+            sub = _json.loads(sub_raw)
+            ctx = {
+                "name": "Friend",
+                "first_name": "",
+                "last_name": "",
+                "email": "",
+                "phone": "",
+            }
+            if conv.contact:
+                ctx["name"] = f"{conv.contact.first_name or ''} {conv.contact.last_name or ''}".strip() or "Friend"
+                ctx["first_name"] = conv.contact.first_name or ""
+                ctx["last_name"] = conv.contact.last_name or ""
+                ctx["email"] = conv.contact.email or ""
+                ctx["phone"] = conv.contact.phone or ""
+
+            body = _render(body_tmpl, ctx)
+            payload = _json.dumps({"title": title, "body": body, "url": url})
+            try:
+                webpush(
+                    subscription_info=sub,
+                    data=payload,
+                    vapid_private_key=vapid_private,
+                    vapid_claims={"sub": vapid_email},
+                )
+                sent += 1
+            except Exception:
+                failed += 1
+
+        return sent, failed
+    except Exception:
+        return 0, 0
+
+
 async def deliver(campaign: Any, db: AsyncSession) -> tuple[int, int]:
     """Route delivery to appropriate channel sender. Returns (sent, failed)."""
     channel = campaign.channel
@@ -240,5 +318,7 @@ async def deliver(campaign: Any, db: AsyncSession) -> tuple[int, int]:
         return await _send_telegram(campaign, db)
     elif channel == "whatsapp":
         return await _send_whatsapp(campaign, recipients)
+    elif channel == "push":
+        return await _send_push(campaign, db)
     else:
         return 0, 0

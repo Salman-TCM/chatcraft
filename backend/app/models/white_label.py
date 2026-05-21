@@ -88,6 +88,52 @@ class ImpersonationAuditLog(Base):
     ip_address: Mapped[Optional[str]] = mapped_column(String(45), nullable=True)
 
 
+class AgencyTeamMember(TimestampMixin, Base):
+    """Users invited to help manage an agency portal."""
+    __tablename__ = "agency_team_members"
+    __table_args__ = (
+        UniqueConstraint("agency_id", "member_email", name="uq_agency_team_email"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, server_default="gen_random_uuid()"
+    )
+    agency_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("agencies.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    member_email: Mapped[str] = mapped_column(String(320), nullable=False)
+    role: Mapped[str] = mapped_column(String(50), nullable=False, default="agent", server_default="agent")
+    status: Mapped[str] = mapped_column(String(50), nullable=False, default="pending", server_default="pending")
+    invited_by: Mapped[Optional[uuid.UUID]] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+
+    agency: Mapped["Agency"] = relationship("Agency")
+
+
+class AgencyPricingTier(Base):
+    """Custom pricing tiers defined by agency owners."""
+    __tablename__ = "agency_pricing_tiers"
+    __table_args__ = (
+        UniqueConstraint("agency_id", "plan_key", name="uq_agency_plan_key"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, server_default="gen_random_uuid()"
+    )
+    agency_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("agencies.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    plan_key: Mapped[str] = mapped_column(String(50), nullable=False)
+    display_name: Mapped[str] = mapped_column(String(100), nullable=False)
+    price_monthly: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    price_yearly: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    features: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default="true")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default="now()")
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default="now()")
+
+
 class ResellerSubscription(Base):
     __tablename__ = "subscriptions_reseller"
 

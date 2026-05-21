@@ -16,22 +16,32 @@ def _cron(**kwargs) -> crontab:
 default_exchange = Exchange("default", type="direct")
 priority_exchange = Exchange("priority", type="direct")
 
+chat_exchange = Exchange("chat", type="direct")
+
 QUEUES = (
-    Queue("default", default_exchange, routing_key="default"),
-    Queue("embeddings", default_exchange, routing_key="embeddings"),
-    Queue("emails", default_exchange, routing_key="emails"),
-    Queue("analytics", default_exchange, routing_key="analytics"),
-    Queue("priority", priority_exchange, routing_key="priority"),
+    Queue("default",    default_exchange,  routing_key="default"),
+    Queue("chat",       chat_exchange,     routing_key="chat"),       # high: flow/seq execution
+    Queue("embeddings", default_exchange,  routing_key="embeddings"), # low: document processing
+    Queue("emails",     default_exchange,  routing_key="emails"),
+    Queue("analytics",  default_exchange,  routing_key="analytics"),
+    Queue("priority",   priority_exchange, routing_key="priority"),   # crit: billing/trial ops
 )
 
 TASK_ROUTES = {
-    "workers.process_document": {"queue": "embeddings", "routing_key": "embeddings"},
-    "workers.send_email": {"queue": "emails", "routing_key": "emails"},
-    "workers.aggregate_daily_usage": {"queue": "analytics", "routing_key": "analytics"},
-    "workers.sync_stripe_metered_billing": {"queue": "analytics", "routing_key": "analytics"},
-    "workers.send_usage_alerts": {"queue": "analytics", "routing_key": "analytics"},
-    "workers.expire_trials": {"queue": "priority", "routing_key": "priority"},
-    "workers.expire_payment_grace_periods": {"queue": "priority", "routing_key": "priority"},
+    # ── High priority: chat-adjacent real-time tasks ──────────────────────────
+    "workers.execute_flow":           {"queue": "chat",       "routing_key": "chat"},
+    "workers.run_sequence_step":      {"queue": "chat",       "routing_key": "chat"},
+    "workers.send_broadcast_message": {"queue": "chat",       "routing_key": "chat"},
+    # ── Low priority: background processing ───────────────────────────────────
+    "workers.process_document":       {"queue": "embeddings", "routing_key": "embeddings"},
+    # ── Email ─────────────────────────────────────────────────────────────────
+    "workers.send_email":             {"queue": "emails",     "routing_key": "emails"},
+    # ── Analytics / billing ───────────────────────────────────────────────────
+    "workers.aggregate_daily_usage":         {"queue": "analytics", "routing_key": "analytics"},
+    "workers.sync_stripe_metered_billing":   {"queue": "analytics", "routing_key": "analytics"},
+    "workers.send_usage_alerts":             {"queue": "analytics", "routing_key": "analytics"},
+    "workers.expire_trials":                 {"queue": "priority",  "routing_key": "priority"},
+    "workers.expire_payment_grace_periods":  {"queue": "priority",  "routing_key": "priority"},
 }
 
 # ---------------------------------------------------------------------------

@@ -160,6 +160,51 @@ async def toggle_publish(page_id: uuid.UUID, user: CurrentUser, db: DBSession) -
     return {"success": True, "data": {"is_published": page.is_published, "slug": page.slug}}
 
 
+@router.get("/api/v1/landing-pages/{page_id}/attribution", response_model=dict)
+async def get_attribution(page_id: uuid.UUID, user: CurrentUser, db: DBSession) -> dict:
+    from app.models.attribution import AttributionEvent
+    page = await _get_owned(page_id, user.id, db)
+
+    result = await db.execute(
+        select(AttributionEvent)
+        .where(AttributionEvent.landing_page_id == page.id)
+        .order_by(AttributionEvent.occurred_at.desc())
+        .limit(200)
+    )
+    events = result.scalars().all()
+
+    # Aggregate by source
+    sources: dict[str, int] = {}
+    mediums: dict[str, int] = {}
+    campaigns: dict[str, int] = {}
+    refs: dict[str, int] = {}
+
+    for ev in events:
+        src = ev.utm_source or "direct"
+        sources[src] = sources.get(src, 0) + 1
+        if ev.utm_medium:
+            mediums[ev.utm_medium] = mediums.get(ev.utm_medium, 0) + 1
+        if ev.utm_campaign:
+            campaigns[ev.utm_campaign] = campaigns.get(ev.utm_campaign, 0) + 1
+        if ev.ref:
+            refs[ev.ref] = refs.get(ev.ref, 0) + 1
+
+    def top(d: dict, n: int = 10) -> list[dict]:
+        return [{"key": k, "count": v} for k, v in sorted(d.items(), key=lambda x: -x[1])[:n]]
+
+    return {
+        "success": True,
+        "data": {
+            "total_visits": len(events),
+            "scan_count": page.scan_count or 0,
+            "top_sources": top(sources),
+            "top_mediums": top(mediums),
+            "top_campaigns": top(campaigns),
+            "top_refs": top(refs),
+        },
+    }
+
+
 # ── QR code ───────────────────────────────────────────────────────────────────
 
 @router.get("/api/v1/landing-pages/{page_id}/qr")
@@ -170,6 +215,8 @@ async def get_qr(
     request: Request,
     fmt: str = Query(default="png", pattern="^(png|svg)$"),
     size: int = Query(default=300, ge=100, le=1000),
+    fill_color: str = Query(default="black", alias="fill"),
+    back_color: str = Query(default="white", alias="back"),
 ) -> Response:
     page = await _get_owned(page_id, user.id, db)
     base = str(request.base_url).rstrip("/")
@@ -178,18 +225,22 @@ async def get_qr(
     try:
         import qrcode
         import qrcode.image.svg
+        from qrcode.constants import ERROR_CORRECT_L
 
         if fmt == "svg":
             factory = qrcode.image.svg.SvgImage
-            qr = qrcode.make(url, image_factory=factory)
+            qr = qrcode.make(url, image_factory=factory, error_correction=ERROR_CORRECT_L)
             buf = io.BytesIO()
             qr.save(buf)
             return Response(buf.getvalue(), media_type="image/svg+xml")
         else:
-            qr = qrcode.make(url)
-            qr = qr.resize((size, size))
+            qr = qrcode.QRCode(error_correction=ERROR_CORRECT_L, box_size=10, border=4)
+            qr.add_data(url)
+            qr.make(fit=True)
+            img = qr.make_image(fill_color=fill_color, back_color=back_color)
+            img = img.resize((size, size))
             buf = io.BytesIO()
-            qr.save(buf, format="PNG")
+            img.save(buf, format="PNG")
             return Response(buf.getvalue(), media_type="image/png")
     except ImportError:
         raise HTTPException(status_code=500, detail="qrcode library not installed")
@@ -253,7 +304,27 @@ async def public_page(
     # Track QR scan if ?qr=1
     if request.query_params.get("qr"):
         page.scan_count = (page.scan_count or 0) + 1
-        await db.commit()
+
+    # Record attribution event (fire-and-forget; don't block the response)
+    import hashlib as _hashlib
+    from app.models.attribution import AttributionEvent
+    client_ip = request.client.host if request.client else ""
+    ip_hash = _hashlib.sha256(client_ip.encode()).hexdigest()[:16] if client_ip else None
+    db.add(AttributionEvent(
+        user_id=page.user_id,
+        landing_page_id=page.id,
+        touch_type="first",
+        ref=request.query_params.get("ref"),
+        utm_source=request.query_params.get("utm_source"),
+        utm_medium=request.query_params.get("utm_medium"),
+        utm_campaign=request.query_params.get("utm_campaign"),
+        utm_content=request.query_params.get("utm_content"),
+        utm_term=request.query_params.get("utm_term"),
+        page_slug=page.slug,
+        session_id=request.query_params.get("sid"),
+        ip_hash=ip_hash,
+    ))
+    await db.commit()
 
     # Pre-fill URL params substitution in html_content
     html = page.html_content
