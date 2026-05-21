@@ -17,6 +17,7 @@ from sqlalchemy.orm import selectinload
 from pydantic import BaseModel
 
 from app.core.dependencies import CurrentUser, DBSession
+from app.models.channel_integration import ChannelIntegration
 from app.models.chatbot_config import ChatbotConfig
 from app.models.crm import Contact, Tag
 from app.models.conversation import Conversation
@@ -286,6 +287,11 @@ async def send_message(
     conv.last_message_at = datetime.now(timezone.utc)
     await db.commit()
     await db.refresh(msg)
+
+    # ── Outbound dispatch for email conversations ─────────────────────────────
+    if conv.channel == "email" and conv.contact and conv.contact.email:
+        await _dispatch_email_reply(conv, content, db)
+
     return {"success": True, "data": _msg_dict(msg)}
 
 
@@ -580,3 +586,78 @@ async def update_conversation_contact(
             "tags": [t.name for t in (contact.tags or [])],
         },
     }
+
+
+# ── AI Email Body Composer ─────────────────────────────────────────────────────
+
+@router.post("/conversations/{conv_id}/ai-compose", response_model=dict)
+async def ai_compose_email(
+    conv_id: uuid.UUID,
+    body: dict,
+    user: CurrentUser,
+    db: DBSession,
+) -> dict:
+    """Generate an AI-drafted email body based on conversation context and an optional prompt."""
+    conv = await _get_owned_conv(conv_id, user.id, db)
+
+    tone: str = body.get("tone", "professional")  # professional / friendly / formal
+    instruction: str = body.get("instruction", "").strip()
+
+    # Build recent conversation history as context
+    recent = conv.messages[-10:] if conv.messages else []
+    history_text = "\n".join(
+        f"{'Customer' if m.role.value == 'user' else 'Support'}: {m.content[:400]}"
+        for m in recent
+    )
+
+    system_prompt = (
+        f"You are a {tone} email copywriter. "
+        "Draft a concise reply email body based on the conversation history. "
+        "Do not include a subject line or greeting — just the body text. "
+        "Keep it under 200 words."
+    )
+    user_message = f"Conversation history:\n{history_text}"
+    if instruction:
+        user_message += f"\n\nSpecific instruction: {instruction}"
+
+    try:
+        from app.services.llm.base import ChatMessage as LLMMsg
+        from app.services.llm.router import get_provider
+        provider = get_provider("claude-sonnet-4-6")
+        msgs = [
+            LLMMsg(role="system", content=system_prompt),
+            LLMMsg(role="user", content=user_message),
+        ]
+        resp = await provider.complete(msgs, max_tokens=400, temperature=0.7)
+        draft = resp.content.strip()
+    except Exception as exc:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=f"AI service error: {exc}")
+
+    return {"success": True, "data": {"draft": draft}}
+
+
+# ── Email outbound dispatch ────────────────────────────────────────────────────
+
+async def _dispatch_email_reply(conv: Conversation, content: str, db) -> None:
+    """Send outbound email reply for email-channel conversations."""
+    try:
+        result = await db.execute(
+            select(ChannelIntegration).where(
+                ChannelIntegration.chatbot_id == conv.chatbot_id,
+                ChannelIntegration.channel == "email",
+                ChannelIntegration.is_active.is_(True),
+            )
+        )
+        integration = result.scalar_one_or_none()
+        if not integration:
+            return
+
+        from app.services.channels.email_sender import EmailSender
+        sender = EmailSender(integration.config)
+        subject = conv.title or "Re: Your message"
+        if not subject.lower().startswith("re:"):
+            subject = f"Re: {subject}"
+        await sender.send(to=conv.contact.email, subject=subject, body=content)
+    except Exception as exc:
+        from loguru import logger
+        logger.error(f"Failed to send email reply for conv {conv.id}: {exc}")

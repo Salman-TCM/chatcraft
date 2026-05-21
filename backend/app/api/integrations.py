@@ -7,8 +7,17 @@ Routes (all require authenticated chatbot owner):
   DELETE /api/v1/chatbots/{chatbot_id}/integrations/{channel}
   POST   /api/v1/chatbots/{chatbot_id}/integrations/telegram/set-webhook
   POST   /api/v1/chatbots/{chatbot_id}/integrations/telegram/test
+  GET    /api/v1/chatbots/{chatbot_id}/integrations/telegram/commands
+  POST   /api/v1/chatbots/{chatbot_id}/integrations/telegram/commands
+  DELETE /api/v1/chatbots/{chatbot_id}/integrations/telegram/commands
   POST   /api/v1/chatbots/{chatbot_id}/integrations/whatsapp/test
+  GET    /api/v1/chatbots/{chatbot_id}/integrations/whatsapp/templates
+  POST   /api/v1/chatbots/{chatbot_id}/integrations/whatsapp/templates
+  DELETE /api/v1/chatbots/{chatbot_id}/integrations/whatsapp/templates/{name}
   POST   /api/v1/chatbots/{chatbot_id}/integrations/facebook/test
+  GET    /api/v1/chatbots/{chatbot_id}/integrations/facebook/menu
+  POST   /api/v1/chatbots/{chatbot_id}/integrations/facebook/menu
+  DELETE /api/v1/chatbots/{chatbot_id}/integrations/facebook/menu
   POST   /api/v1/chatbots/{chatbot_id}/integrations/sms/test
 """
 import secrets
@@ -24,10 +33,10 @@ from app.models.chatbot_config import ChatbotConfig
 
 router = APIRouter(prefix="/api/v1", tags=["integrations"])
 
-SUPPORTED_CHANNELS = {"telegram", "whatsapp", "facebook", "sms"}
+SUPPORTED_CHANNELS = {"telegram", "whatsapp", "facebook", "sms", "email", "discord", "instagram"}
 
 # Fields that should be masked in responses (contain credentials)
-_SECRET_FIELDS = {"bot_token", "access_token", "page_access_token", "auth_token", "app_secret"}
+_SECRET_FIELDS = {"bot_token", "access_token", "page_access_token", "auth_token", "app_secret", "smtp_password"}
 
 
 def _mask(config: dict) -> dict:
@@ -340,3 +349,195 @@ async def test_discord(chatbot_id: uuid.UUID, user: CurrentUser, db: DBSession) 
     except Exception as exc:
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc))
     return {"success": True, "data": {"bot_id": data.get("id"), "username": data.get("username"), "discriminator": data.get("discriminator")}}
+
+
+# ── Telegram Bot Commands ──────────────────────────────────────────────────────
+
+async def _get_telegram_sender(chatbot_id: uuid.UUID, user_id: uuid.UUID, db):
+    await _get_owned_bot(chatbot_id, user_id, db)
+    result = await db.execute(
+        select(ChannelIntegration).where(
+            ChannelIntegration.chatbot_id == chatbot_id,
+            ChannelIntegration.channel == "telegram",
+        )
+    )
+    integration = result.scalar_one_or_none()
+    if not integration:
+        raise HTTPException(status_code=404, detail="Telegram integration not configured")
+    from app.services.channels.telegram import TelegramSender
+    return TelegramSender(integration.config)
+
+
+@router.get("/chatbots/{chatbot_id}/integrations/telegram/commands", response_model=dict)
+async def get_telegram_commands(chatbot_id: uuid.UUID, user: CurrentUser, db: DBSession) -> dict:
+    sender = await _get_telegram_sender(chatbot_id, user.id, db)
+    try:
+        commands = await sender.get_commands()
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=str(exc))
+    return {"success": True, "data": commands}
+
+
+@router.post("/chatbots/{chatbot_id}/integrations/telegram/commands", response_model=dict)
+async def set_telegram_commands(
+    chatbot_id: uuid.UUID, body: dict, user: CurrentUser, db: DBSession
+) -> dict:
+    """body: { "commands": [{"command": "start", "description": "Start the bot"}] }"""
+    commands = body.get("commands", [])
+    if not isinstance(commands, list):
+        raise HTTPException(status_code=422, detail="commands must be a list")
+    sender = await _get_telegram_sender(chatbot_id, user.id, db)
+    try:
+        result = await sender.set_commands(commands)
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=str(exc))
+    return {"success": True, "data": result}
+
+
+@router.delete("/chatbots/{chatbot_id}/integrations/telegram/commands", response_model=dict)
+async def delete_telegram_commands(chatbot_id: uuid.UUID, user: CurrentUser, db: DBSession) -> dict:
+    sender = await _get_telegram_sender(chatbot_id, user.id, db)
+    try:
+        result = await sender.delete_commands()
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=str(exc))
+    return {"success": True, "data": result}
+
+
+# ── WhatsApp Templates ─────────────────────────────────────────────────────────
+
+async def _get_whatsapp_sender(chatbot_id: uuid.UUID, user_id: uuid.UUID, db):
+    await _get_owned_bot(chatbot_id, user_id, db)
+    result = await db.execute(
+        select(ChannelIntegration).where(
+            ChannelIntegration.chatbot_id == chatbot_id,
+            ChannelIntegration.channel == "whatsapp",
+        )
+    )
+    integration = result.scalar_one_or_none()
+    if not integration:
+        raise HTTPException(status_code=404, detail="WhatsApp integration not configured")
+    from app.services.channels.whatsapp import WhatsAppSender
+    return WhatsAppSender(integration.config)
+
+
+@router.get("/chatbots/{chatbot_id}/integrations/whatsapp/templates", response_model=dict)
+async def list_whatsapp_templates(chatbot_id: uuid.UUID, user: CurrentUser, db: DBSession) -> dict:
+    sender = await _get_whatsapp_sender(chatbot_id, user.id, db)
+    try:
+        templates = await sender.list_templates()
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=str(exc))
+    return {"success": True, "data": templates}
+
+
+@router.post("/chatbots/{chatbot_id}/integrations/whatsapp/templates", response_model=dict, status_code=201)
+async def create_whatsapp_template(
+    chatbot_id: uuid.UUID, body: dict, user: CurrentUser, db: DBSession
+) -> dict:
+    sender = await _get_whatsapp_sender(chatbot_id, user.id, db)
+    try:
+        result = await sender.create_template(body)
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=str(exc))
+    return {"success": True, "data": result}
+
+
+@router.delete("/chatbots/{chatbot_id}/integrations/whatsapp/templates/{template_name}", response_model=dict)
+async def delete_whatsapp_template(
+    chatbot_id: uuid.UUID, template_name: str, user: CurrentUser, db: DBSession
+) -> dict:
+    sender = await _get_whatsapp_sender(chatbot_id, user.id, db)
+    try:
+        await sender.delete_template(template_name)
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=str(exc))
+    return {"success": True}
+
+
+# ── Messenger Persistent Menu ──────────────────────────────────────────────────
+
+async def _get_facebook_sender(chatbot_id: uuid.UUID, user_id: uuid.UUID, db):
+    await _get_owned_bot(chatbot_id, user_id, db)
+    result = await db.execute(
+        select(ChannelIntegration).where(
+            ChannelIntegration.chatbot_id == chatbot_id,
+            ChannelIntegration.channel == "facebook",
+        )
+    )
+    integration = result.scalar_one_or_none()
+    if not integration:
+        raise HTTPException(status_code=404, detail="Facebook integration not configured")
+    from app.services.channels.facebook import FacebookSender
+    return FacebookSender(integration.config)
+
+
+@router.get("/chatbots/{chatbot_id}/integrations/facebook/menu", response_model=dict)
+async def get_messenger_menu(chatbot_id: uuid.UUID, user: CurrentUser, db: DBSession) -> dict:
+    sender = await _get_facebook_sender(chatbot_id, user.id, db)
+    try:
+        result = await sender.get_persistent_menu()
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=str(exc))
+    return {"success": True, "data": result}
+
+
+@router.post("/chatbots/{chatbot_id}/integrations/facebook/menu", response_model=dict)
+async def set_messenger_menu(
+    chatbot_id: uuid.UUID, body: dict, user: CurrentUser, db: DBSession
+) -> dict:
+    """body: { "menu_items": [{"type":"postback","title":"...","payload":"..."}] }"""
+    menu_items = body.get("menu_items", [])
+    if not isinstance(menu_items, list):
+        raise HTTPException(status_code=422, detail="menu_items must be a list")
+    sender = await _get_facebook_sender(chatbot_id, user.id, db)
+    try:
+        result = await sender.set_persistent_menu(menu_items)
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=str(exc))
+    return {"success": True, "data": result}
+
+
+@router.delete("/chatbots/{chatbot_id}/integrations/facebook/menu", response_model=dict)
+async def delete_messenger_menu(chatbot_id: uuid.UUID, user: CurrentUser, db: DBSession) -> dict:
+    sender = await _get_facebook_sender(chatbot_id, user.id, db)
+    try:
+        result = await sender.delete_persistent_menu()
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=str(exc))
+    return {"success": True, "data": result}
+
+
+# ── Email Integration: test send ───────────────────────────────────────────────
+
+@router.post("/chatbots/{chatbot_id}/integrations/email/test", response_model=dict)
+async def test_email_integration(
+    chatbot_id: uuid.UUID, body: dict, user: CurrentUser, db: DBSession
+) -> dict:
+    """Send a test email to verify SMTP config.  Body: { "to": "test@example.com" }"""
+    await _get_owned_bot(chatbot_id, user.id, db)
+    result = await db.execute(
+        select(ChannelIntegration).where(
+            ChannelIntegration.chatbot_id == chatbot_id,
+            ChannelIntegration.channel == "email",
+        )
+    )
+    integration = result.scalar_one_or_none()
+    if not integration:
+        raise HTTPException(status_code=404, detail="Email integration not configured")
+
+    to = (body.get("to") or "").strip()
+    if not to:
+        raise HTTPException(status_code=422, detail="to address required")
+
+    from app.services.channels.email_sender import EmailSender
+    sender = EmailSender(integration.config)
+    try:
+        await sender.send(
+            to=to,
+            subject="ChatCraft Email Integration Test",
+            body="This is a test email from your ChatCraft email channel integration. It's working!",
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"SMTP error: {exc}")
+    return {"success": True, "data": {"sent_to": to}}
