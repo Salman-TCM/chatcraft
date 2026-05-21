@@ -14,6 +14,7 @@ import { useEffect, useState } from "react";
 import { signOut } from "next-auth/react";
 import { useAppStore } from "@/store";
 import { ImpersonationBanner } from "@/components/impersonation-banner";
+import { PlatformLogo } from "@/components/platform-logo";
 
 // ─── Brand colour ─────────────────────────────────────────────────────────────
 const INDIGO = "#3B52D4";
@@ -59,6 +60,7 @@ const SECTIONS: { label: string; items: NavItem[]; defaultOpen?: boolean }[] = [
 ];
 
 const AI_TOOLS: NavItem[] = [
+  { href: "/dashboard/agents",       label: "Agent Builder", icon: Bot },
   { href: "/dashboard/voice-lab",    label: "Voice Lab",     icon: Mic },
   { href: "/dashboard/browser-agent",label: "Browser Agent", icon: Monitor },
   { href: "/dashboard/settings/mcp", label: "MCP Servers",   icon: Plug },
@@ -156,6 +158,9 @@ function SidebarContent({
   onNavigate: () => void;
 }) {
   const user = useAppStore((s) => s.user);
+  const agencyTheme = useAppStore((s) => s.agencyTheme);
+  const brandColour = agencyTheme?.primaryColour ?? INDIGO;
+  const platformName = agencyTheme?.name ?? "ChatCraft AI";
 
   // Collapsible section state — auto-open whichever section has the active route
   const [openSections, setOpenSections] = useState<Record<string, boolean>>(() =>
@@ -207,13 +212,19 @@ function SidebarContent({
 
       {/* ── Brand header (max 48px) ─────────────────────────────────────────── */}
       <div className="flex h-12 shrink-0 items-center gap-2.5 px-3">
-        <div
-          className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-sm font-bold text-white"
-          style={{ backgroundColor: INDIGO }}
-        >
-          C
-        </div>
-        <span className="text-sm font-semibold tracking-tight">ChatCraft AI</span>
+        {agencyTheme?.logo ? (
+          <PlatformLogo logoUrl={agencyTheme.logo} platformName={platformName} height={28} />
+        ) : (
+          <>
+            <div
+              className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-sm font-bold text-white"
+              style={{ backgroundColor: brandColour }}
+            >
+              {platformName[0]}
+            </div>
+            <span className="text-sm font-semibold tracking-tight">{platformName}</span>
+          </>
+        )}
       </div>
 
       {/* ── Scrollable body ─────────────────────────────────────────────────── */}
@@ -306,7 +317,7 @@ function SidebarContent({
           {/* Avatar */}
           <div
             className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-[11px] font-semibold text-white"
-            style={{ backgroundColor: INDIGO }}
+            style={{ backgroundColor: brandColour }}
           >
             {initials}
           </div>
@@ -348,6 +359,9 @@ function SidebarContent({
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const [mobileOpen, setMobileOpen] = useState(false);
+  const agencyTheme = useAppStore((s) => s.agencyTheme);
+  const brandColour = agencyTheme?.primaryColour ?? INDIGO;
+  const platformName = agencyTheme?.name ?? "ChatCraft AI";
 
   return (
     <div className="flex h-screen overflow-hidden bg-background">
@@ -382,13 +396,19 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
             {mobileOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
           </button>
           <div className="flex items-center gap-2">
-            <div
-              className="flex h-6 w-6 items-center justify-center rounded text-xs font-bold text-white"
-              style={{ backgroundColor: INDIGO }}
-            >
-              C
-            </div>
-            <span className="text-sm font-semibold">ChatCraft AI</span>
+            {agencyTheme?.logo ? (
+              <PlatformLogo logoUrl={agencyTheme.logo} platformName={platformName} height={24} />
+            ) : (
+              <>
+                <div
+                  className="flex h-6 w-6 items-center justify-center rounded text-xs font-bold text-white"
+                  style={{ backgroundColor: brandColour }}
+                >
+                  {platformName[0]}
+                </div>
+                <span className="text-sm font-semibold">{platformName}</span>
+              </>
+            )}
           </div>
         </div>
 
