@@ -500,7 +500,7 @@ function A2ASection({ chatbotId }: { chatbotId: string }) {
   const messageUrl = `${apiBase}/a2a/widgets/${chatbotId}`;
 
   useEffect(() => {
-    apiClient.get(`/api/v1/chatbots/${chatbotId}`).then(({ data }) => {
+    apiClient.get(`/api/chatbots/${chatbotId}`).then(({ data }) => {
       const bot = data.data;
       setAuthRequired(bot.a2a_auth_required ?? false);
       setTokens(bot.a2a_allowed_tokens ?? []);
@@ -550,7 +550,7 @@ function A2ASection({ chatbotId }: { chatbotId: string }) {
   async function saveAuth() {
     setSaving(true);
     try {
-      await apiClient.put(`/api/v1/chatbots/${chatbotId}`, {
+      await apiClient.put(`/api/chatbots/${chatbotId}`, {
         a2a_auth_required: authRequired,
         a2a_allowed_tokens: tokens.length > 0 ? tokens : null,
       });
