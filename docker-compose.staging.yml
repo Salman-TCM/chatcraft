@@ -1,0 +1,71 @@
+# Staging environment overrides for docker-compose.yml
+# Usage: docker compose -f docker-compose.yml -f docker-compose.staging.yml up -d
+#
+# Differences from dev:
+#   - ENVIRONMENT=staging, DEBUG=false
+#   - No hot-reload volumes (runs built images)
+#   - Resource limits on all services
+#   - Sentry + Axiom enabled
+#   - Seed data runs on first start via SEED_ON_START=true
+
+services:
+
+  backend:
+    volumes: []                             # no source-mount; run built image
+    environment:
+      ENVIRONMENT: staging
+      DEBUG: "false"
+      WATCHFILES_FORCE_POLLING: "false"
+      SEED_ON_START: "true"                 # entrypoint runs seed_data.py once
+    deploy:
+      resources:
+        limits:
+          cpus: "1"
+          memory: 1G
+
+  celery_worker:
+    volumes: []
+    environment:
+      ENVIRONMENT: staging
+      DEBUG: "false"
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 512M
+
+  celery_beat:
+    volumes: []
+    environment:
+      ENVIRONMENT: staging
+      DEBUG: "false"
+    deploy:
+      resources:
+        limits:
+          cpus: "0.25"
+          memory: 256M
+
+  frontend:
+    volumes: []
+    command: sh -c "cd frontend && npm run start"   # run built Next.js, not dev server
+    environment:
+      NODE_ENV: production
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 512M
+
+  postgres:
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 512M
+
+  redis:
+    deploy:
+      resources:
+        limits:
+          cpus: "0.25"
+          memory: 128M
