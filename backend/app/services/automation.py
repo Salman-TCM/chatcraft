@@ -20,7 +20,7 @@ from datetime import datetime, timezone
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.automation import Automation
+from app.models.automation import Automation, AutomationRun
 
 
 TRIGGER_TYPES = {
@@ -64,12 +64,22 @@ async def dispatch(
 
     for auto in automations:
         if _config_matches(auto.trigger_config, context):
+            run_status = "success"
+            run_error = None
             try:
                 await _execute_action(auto, context, db)
                 auto.execution_count = (auto.execution_count or 0) + 1
                 auto.last_executed_at = datetime.now(timezone.utc)
-            except Exception:
-                pass  # never crash the caller due to automation failure
+            except Exception as exc:
+                run_status = "failed"
+                run_error = str(exc)
+            db.add(AutomationRun(
+                automation_id=auto.id,
+                trigger_type=auto.trigger_type,
+                action_type=auto.action_type,
+                status=run_status,
+                error=run_error,
+            ))
 
     await db.commit()
 
