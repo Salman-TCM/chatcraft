@@ -8,11 +8,15 @@ import {
   ChevronDown,
   ChevronRight,
   Copy,
+  ExternalLink,
   Key,
   Loader2,
+  Menu,
+  Phone,
   Plus,
   RefreshCw,
   Trash2,
+  Zap,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -39,7 +43,21 @@ interface WidgetConfig {
   position: string;
   show_branding: boolean;
   embed_token: string;
+  persistent_menu: MenuItem[] | null;
 }
+
+interface MenuItem {
+  type: "url" | "phone" | "flow" | "postback";
+  label: string;
+  value: string;
+}
+
+const MENU_ITEM_TYPES = [
+  { value: "url",      label: "URL Link",         icon: ExternalLink },
+  { value: "phone",    label: "Phone Number",      icon: Phone },
+  { value: "postback", label: "Postback Message",  icon: Zap },
+  { value: "flow",     label: "Trigger Flow",      icon: Zap },
+];
 
 const POSITION_OPTIONS = [
   { value: "bottom-right", label: "Bottom Right" },
@@ -50,6 +68,7 @@ const POSITION_OPTIONS = [
 
 const CDN_BASE = process.env.NEXT_PUBLIC_CDN_URL ?? "https://cdn.chatcraft.ai";
 const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "https://api.chatcraft.ai";
+const APP_BASE = process.env.NEXT_PUBLIC_APP_URL ?? "https://app.chatcraft.ai";
 
 // ── Guides ────────────────────────────────────────────────────────────────────
 
@@ -108,9 +127,10 @@ export default function WidgetPage() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [rotating, setRotating] = useState(false);
-  const [copied, setCopied] = useState(false);
+  const [copied, setCopied] = useState<string | null>(null);
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
   const [openGuide, setOpenGuide] = useState<string | null>(null);
+  const [deployMode, setDeployMode] = useState<"launcher" | "iframe" | "voice">("launcher");
 
   // Licenses
   const [licenses, setLicenses] = useState<License[]>([]);
@@ -123,6 +143,7 @@ export default function WidgetPage() {
   const [domains, setDomains] = useState("");
   const [position, setPosition] = useState("bottom-right");
   const [showBranding, setShowBranding] = useState(true);
+  const [menuItems, setMenuItems] = useState<MenuItem[]>([]);
 
   useEffect(() => {
     loadData();
@@ -182,6 +203,7 @@ export default function WidgetPage() {
     setDomains(wc.allowed_domains ?? "");
     setPosition(wc.position);
     setShowBranding(wc.show_branding);
+    setMenuItems(wc.persistent_menu ?? []);
   }
 
   async function handleSave() {
@@ -191,11 +213,25 @@ export default function WidgetPage() {
         allowed_domains: domains.trim() || null,
         position,
         show_branding: showBranding,
+        persistent_menu: menuItems.length > 0 ? menuItems : null,
       });
       applyConfig(data.data);
     } finally {
       setSaving(false);
     }
+  }
+
+  function addMenuItem() {
+    if (menuItems.length >= 5) return;
+    setMenuItems((prev) => [...prev, { type: "url", label: "", value: "" }]);
+  }
+
+  function updateMenuItem(index: number, field: keyof MenuItem, value: string) {
+    setMenuItems((prev) => prev.map((item, i) => i === index ? { ...item, [field]: value } : item));
+  }
+
+  function removeMenuItem(index: number) {
+    setMenuItems((prev) => prev.filter((_, i) => i !== index));
   }
 
   async function handleRotate() {
@@ -209,14 +245,30 @@ export default function WidgetPage() {
     }
   }
 
-  const snippet = config
-    ? `<script\n  src="${CDN_BASE}/widget.js"\n  data-chatbot-id="${id}"\n  data-widget-token="${config.embed_token}"\n  data-position="${position}"\n  data-api-base="${API_BASE}"\n></script>`
+  const baseAttrs = config
+    ? `  src="${CDN_BASE}/widget.js"\n  data-chatbot-id="${id}"\n  data-widget-token="${config.embed_token}"\n  data-api-base="${API_BASE}"`
     : "";
+
+  const snippet = config
+    ? deployMode === "iframe"
+      ? `<div data-chatcraft-iframe="${id}"></div>\n\n<script\n${baseAttrs}\n  data-type="iframe"\n></script>`
+      : deployMode === "voice"
+      ? `<script\n${baseAttrs}\n  data-type="voice"\n  data-position="${position}"\n></script>`
+      : `<script\n${baseAttrs}\n  data-position="${position}"\n></script>`
+    : "";
+
+  const directLink = `${APP_BASE}/widgets/${id}`;
 
   async function copySnippet() {
     await navigator.clipboard.writeText(snippet);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
+    setCopied("snippet");
+    setTimeout(() => setCopied(null), 2000);
+  }
+
+  async function copyLink() {
+    await navigator.clipboard.writeText(directLink);
+    setCopied("link");
+    setTimeout(() => setCopied(null), 2000);
   }
 
   if (loading) {
@@ -245,6 +297,62 @@ export default function WidgetPage() {
 
       <div className="mx-auto max-w-2xl space-y-8 px-4 py-8">
 
+        {/* ── Deploy Mode ──────────────────────────────────────────────── */}
+        <Section title="Deploy Mode" description="Choose how to embed your chatbot.">
+          <div className="space-y-2">
+            {(
+              [
+                {
+                  value: "launcher",
+                  label: "Floating Launcher",
+                  desc: "A chat bubble fixed to the corner of the page. Best for most sites.",
+                },
+                {
+                  value: "iframe",
+                  label: "Inline Iframe",
+                  desc: "Embed the chat panel directly inside a container element on your page.",
+                },
+                {
+                  value: "voice",
+                  label: "Voice Launcher",
+                  desc: "A microphone bubble for voice conversations. Opens a chat panel on tap.",
+                },
+              ] as const
+            ).map((opt) => (
+              <button
+                key={opt.value}
+                onClick={() => setDeployMode(opt.value)}
+                className={`flex w-full items-start gap-3 rounded-lg border px-4 py-3 text-left transition-colors ${
+                  deployMode === opt.value
+                    ? "border-primary bg-primary/5"
+                    : "hover:bg-muted"
+                }`}
+              >
+                <span
+                  className={`mt-0.5 h-4 w-4 shrink-0 rounded-full border-2 flex items-center justify-center ${
+                    deployMode === opt.value ? "border-primary" : "border-muted-foreground"
+                  }`}
+                >
+                  {deployMode === opt.value && (
+                    <span className="h-2 w-2 rounded-full bg-primary" />
+                  )}
+                </span>
+                <div>
+                  <p className="text-sm font-medium">{opt.label}</p>
+                  <p className="text-xs text-muted-foreground">{opt.desc}</p>
+                </div>
+              </button>
+            ))}
+          </div>
+          {deployMode === "iframe" && (
+            <p className="text-xs text-muted-foreground bg-muted rounded-md px-3 py-2">
+              Add <code className="font-mono text-[11px]">{`<div data-chatcraft-iframe="${id}"></div>`}</code> where you want the chat panel to appear. The snippet below will mount into it automatically.
+            </p>
+          )}
+        </Section>
+
+        <Separator />
+
         {/* ── Snippet ─────────────────────────────────────────────────── */}
         <Section title="Embed Snippet" description="Paste this before the </body> tag on any page.">
           <div className="relative">
@@ -257,8 +365,8 @@ export default function WidgetPage() {
               className="absolute right-2 top-2 h-7 gap-1.5 text-xs"
               onClick={copySnippet}
             >
-              {copied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
-              {copied ? "Copied!" : "Copy"}
+              {copied === "snippet" ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
+              {copied === "snippet" ? "Copied!" : "Copy"}
             </Button>
           </div>
         </Section>
@@ -296,6 +404,59 @@ export default function WidgetPage() {
               </div>
               <Toggle checked={showBranding} onChange={setShowBranding} />
             </div>
+          </div>
+        </Section>
+
+        <Separator />
+
+        {/* ── Persistent Menu ──────────────────────────────────────────── */}
+        <Section
+          title="Persistent Menu"
+          description="Quick-access buttons shown at the bottom of the chat widget (max 5 items)."
+        >
+          <div className="space-y-2">
+            {menuItems.map((item, index) => (
+              <div key={index} className="flex items-center gap-2 rounded-lg border p-3">
+                <Menu className="h-4 w-4 shrink-0 text-muted-foreground" />
+                <div className="flex-1 grid grid-cols-3 gap-2 min-w-0">
+                  <select
+                    value={item.type}
+                    onChange={(e) => updateMenuItem(index, "type", e.target.value)}
+                    className="h-8 rounded-md border bg-background px-2 text-xs"
+                  >
+                    {MENU_ITEM_TYPES.map((t) => (
+                      <option key={t.value} value={t.value}>{t.label}</option>
+                    ))}
+                  </select>
+                  <input
+                    value={item.label}
+                    onChange={(e) => updateMenuItem(index, "label", e.target.value)}
+                    placeholder="Label"
+                    className="h-8 rounded-md border bg-background px-2 text-xs focus:outline-none focus:ring-1 focus:ring-ring"
+                  />
+                  <input
+                    value={item.value}
+                    onChange={(e) => updateMenuItem(index, "value", e.target.value)}
+                    placeholder={item.type === "url" ? "https://..." : item.type === "phone" ? "+1234567890" : "Message text or Flow ID"}
+                    className="h-8 rounded-md border bg-background px-2 text-xs font-mono focus:outline-none focus:ring-1 focus:ring-ring"
+                  />
+                </div>
+                <button
+                  onClick={() => removeMenuItem(index)}
+                  className="shrink-0 p-1 rounded hover:bg-destructive/10 text-destructive"
+                >
+                  <Trash2 className="h-3.5 w-3.5" />
+                </button>
+              </div>
+            ))}
+            {menuItems.length < 5 && (
+              <Button variant="outline" size="sm" className="w-full gap-1.5 text-xs" onClick={addMenuItem}>
+                <Plus className="h-3.5 w-3.5" /> Add Menu Item
+              </Button>
+            )}
+            {menuItems.length === 0 && (
+              <p className="text-xs text-muted-foreground">No menu items. Add up to 5 quick-action buttons.</p>
+            )}
           </div>
         </Section>
 
@@ -410,6 +571,39 @@ export default function WidgetPage() {
           ) : (
             <p className="text-xs text-muted-foreground mt-2">No license keys yet. Generate one above to give a client embed access.</p>
           )}
+        </Section>
+
+        <Separator />
+
+        {/* ── Direct Link ──────────────────────────────────────────────── */}
+        <Section
+          title="Direct Link"
+          description="Share this URL to let anyone chat with your bot directly — no embed needed. Works in any browser."
+        >
+          <div className="flex items-center gap-2">
+            <Input
+              readOnly
+              value={directLink}
+              className="font-mono text-xs text-muted-foreground"
+            />
+            <Button
+              size="sm"
+              variant="outline"
+              className="h-9 shrink-0 gap-1.5 text-xs"
+              onClick={copyLink}
+            >
+              {copied === "link" ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
+              {copied === "link" ? "Copied!" : "Copy"}
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              className="h-9 shrink-0 text-xs"
+              onClick={() => window.open(directLink, "_blank")}
+            >
+              Open
+            </Button>
+          </div>
         </Section>
 
         <Separator />
