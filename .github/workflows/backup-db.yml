@@ -1,0 +1,48 @@
+name: Database Backup → S3
+
+on:
+  schedule:
+    - cron: "0 2 * * *"   # 02:00 UTC daily
+  workflow_dispatch:        # allow manual trigger
+
+jobs:
+  backup:
+    name: pg_dump → S3
+    runs-on: ubuntu-latest
+
+    environment:
+      name: production
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install PostgreSQL client
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends postgresql-client
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id:     ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region:            ${{ vars.AWS_REGION || 'us-east-1' }}
+
+      - name: Run backup
+        env:
+          POSTGRES_DB:       ${{ secrets.POSTGRES_DB }}
+          POSTGRES_USER:     ${{ secrets.POSTGRES_USER }}
+          POSTGRES_PASSWORD: ${{ secrets.POSTGRES_PASSWORD }}
+          DB_HOST:           ${{ secrets.DB_HOST }}
+          DB_PORT:           ${{ secrets.DB_PORT || '5432' }}
+          BACKUP_S3_BUCKET:  ${{ secrets.AWS_S3_BUCKET }}
+          BACKUP_RETENTION_DAYS: "30"
+        run: bash scripts/backup_db.sh
+
+      - name: Notify on failure
+        if: failure()
+        run: |
+          curl -s -X POST "${{ secrets.SLACK_ALERT_WEBHOOK_URL }}" \
+            -H 'Content-type: application/json' \
+            --data '{"text":"⚠️ *ChatCraft DB backup failed* — check <${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|workflow run>"}' \
+            || true
