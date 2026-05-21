@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect } from "react";
+import { useAppStore } from "@/store";
 
 interface AgencyTheme {
   primaryColour?: string;
@@ -10,14 +11,18 @@ interface AgencyTheme {
 }
 
 export function ThemeInjector({ theme }: { theme: AgencyTheme | null }) {
-  useEffect(() => {
-    if (!theme?.primaryColour) return;
-    const root = document.documentElement;
-    root.style.setProperty("--brand-primary", theme.primaryColour);
-    // Darken by ~10% for hover
-    root.style.setProperty("--brand-primary-hover", theme.primaryColour);
+  const setAgencyTheme = useAppStore((s) => s.setAgencyTheme);
 
-    if (theme.favicon) {
+  useEffect(() => {
+    setAgencyTheme(theme);
+
+    if (theme?.primaryColour) {
+      const root = document.documentElement;
+      root.style.setProperty("--brand-primary", theme.primaryColour);
+      root.style.setProperty("--brand-primary-hover", theme.primaryColour);
+    }
+
+    if (theme?.favicon) {
       let link = document.querySelector<HTMLLinkElement>("link[rel~='icon']");
       if (!link) {
         link = document.createElement("link");
@@ -26,7 +31,7 @@ export function ThemeInjector({ theme }: { theme: AgencyTheme | null }) {
       }
       link.href = theme.favicon;
     }
-  }, [theme]);
+  }, [theme, setAgencyTheme]);
 
   return null;
 }
