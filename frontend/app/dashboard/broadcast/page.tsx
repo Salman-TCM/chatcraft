@@ -105,7 +105,7 @@ export default function BroadcastPage() {
         : `/api/v1/broadcasts?channel=${activeChannel}&limit=100`;
       const [campRes, botRes] = await Promise.all([
         apiClient.get(url),
-        apiClient.get("/api/v1/chatbots?limit=50"),
+        apiClient.get("/api/chatbots?limit=50"),
       ]);
       setCampaigns(campRes.data.data ?? []);
       setChatbots(botRes.data.data ?? []);

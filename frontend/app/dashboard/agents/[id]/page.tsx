@@ -92,7 +92,7 @@ export default function AgentBuilderPage() {
   useEffect(() => {
     Promise.all([
       apiClient.get(`/api/v1/agents/${id}`),
-      apiClient.get("/api/v1/chatbots"),
+      apiClient.get("/api/chatbots"),
     ]).then(([agentRes, botsRes]) => {
       const a: Agent = agentRes.data.data;
       setAgent(a);
@@ -105,7 +105,7 @@ export default function AgentBuilderPage() {
       setMemoryEnabled(a.memory_enabled);
       setMaxSteps(a.max_steps);
       setChatbots(botsRes.data.data ?? []);
-    }).finally(() => setLoading(false));
+    }).catch(() => router.push("/dashboard/agents")).finally(() => setLoading(false));
   }, [id]);
 
   useEffect(() => {
