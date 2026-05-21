@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Check, Download, Loader2, Trash2, Key, ExternalLink, Plug } from "lucide-react";
+import { Check, Download, Loader2, Trash2, Key, ExternalLink, Plug, Mail } from "lucide-react";
 import { signOut } from "next-auth/react";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
@@ -230,6 +230,21 @@ export default function SettingsPage() {
             </p>
           </div>
           <Link href="/dashboard/settings/integrations">
+            <Button size="sm" variant="outline">
+              Manage <ExternalLink className="h-3.5 w-3.5 ml-1.5" />
+            </Button>
+          </Link>
+        </Card>
+        <Card className="flex items-center justify-between p-4">
+          <div>
+            <p className="text-sm font-medium flex items-center gap-2">
+              <Mail className="h-4 w-4" /> Communication — SMTP &amp; SMS
+            </p>
+            <p className="text-xs text-muted-foreground mt-0.5">
+              Configure your SMTP email server and Twilio SMS credentials.
+            </p>
+          </div>
+          <Link href="/dashboard/settings/communications">
             <Button size="sm" variant="outline">
               Manage <ExternalLink className="h-3.5 w-3.5 ml-1.5" />
             </Button>
