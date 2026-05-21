@@ -533,3 +533,43 @@ async def google_wallet_link(serial: str, db: DBSession) -> dict:
         raise HTTPException(status_code=503, detail=str(exc))
 
     return {"success": True, "data": {"link": link}}
+
+
+@router.get("/api/wallet/cards/{serial}/public", response_model=dict)
+async def public_card_info(serial: str, db: DBSession) -> dict:
+    """Return card info for the public pass page — no auth required."""
+    card = await _get_card_by_serial(serial, db)
+    if card.status == "revoked":
+        raise HTTPException(status_code=410, detail="Card has been revoked")
+    program = await db.get(WalletProgram, card.program_id)
+    if not program:
+        raise HTTPException(status_code=404, detail="Program not found")
+
+    from app.core.config import settings
+    api_base = settings.api_base_url or ""
+
+    google_url = ""
+    if card.google_pass_object_id:
+        try:
+            from app.services.wallet.google_wallet import add_pass_save_link
+            google_url = add_pass_save_link(card.google_pass_object_id)
+        except Exception:
+            pass
+
+    return {
+        "success": True,
+        "data": {
+            "serial": card.serial,
+            "customer_name": card.customer_name,
+            "customer_email": card.customer_email,
+            "status": card.status,
+            "state": card.state,
+            "program": {
+                "name": program.name,
+                "type": program.type,
+                "description": program.description,
+            },
+            "pkpass_url": f"/api/wallet/cards/{card.serial}/pkpass",
+            "google_url": google_url,
+        },
+    }

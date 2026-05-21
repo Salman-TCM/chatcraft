@@ -20,6 +20,16 @@ Agency owner:
   POST   /api/v1/agency/send-test-email — test SMTP config
   GET    /api/v1/agency/subscriptions  — list client subscriptions
   POST   /api/v1/agency/subscriptions  — create client subscription
+  GET    /api/v1/agency/pricing        — list custom pricing tiers
+  PUT    /api/v1/agency/pricing        — upsert custom pricing tiers
+  GET    /api/v1/agency/team           — list team members
+  POST   /api/v1/agency/team           — invite team member
+  PATCH  /api/v1/agency/team/{id}      — update team member role/status
+  DELETE /api/v1/agency/team/{id}      — remove team member
+
+Public:
+  GET    /api/public/agency-by-domain  — resolve agency from hostname
+  POST   /api/public/license/validate  — validate reseller license token
 """
 import secrets
 import socket
@@ -33,7 +43,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.dependencies import CurrentUser, DBSession, RequireAdmin
 from app.core.config import settings
 from app.models.white_label import (
-    Agency, ImpersonationAuditLog, ResellerSubscription, Tenant,
+    Agency, AgencyPricingTier, AgencyTeamMember, ImpersonationAuditLog, ResellerSubscription, Tenant,
 )
 from app.models.user import User, UserRole
 
@@ -45,7 +55,24 @@ router = APIRouter(tags=["white_label"])
 @router.get("/api/public/agency-by-domain", response_model=dict)
 async def agency_by_domain(host: str, db: DBSession) -> dict:
     """Resolve agency from hostname (custom domain or {slug}.platform.com)."""
+    import json as _json
     from sqlalchemy import or_
+
+    # Redis cache: agency:domain:{host} → JSON payload, TTL 5 min
+    _redis = None
+    cache_key = f"agency:domain:{host}"
+    try:
+        from app.core.dependencies import get_redis
+        from app.core.config import settings as _settings
+        import redis.asyncio as _aioredis
+        _redis = _aioredis.from_url(_settings.redis_url, decode_responses=True)
+        cached = await _redis.get(cache_key)
+        if cached is not None:
+            await _redis.aclose()
+            return _json.loads(cached)
+    except Exception:
+        _redis = None
+
     result = await db.execute(
         select(Agency).where(
             or_(
@@ -56,17 +83,28 @@ async def agency_by_domain(host: str, db: DBSession) -> dict:
     )
     a = result.scalar_one_or_none()
     if not a:
-        return {"success": False, "data": None}
-    return {
-        "success": True,
-        "data": {
-            "id": str(a.id),
-            "name": a.slug,
-            "primary_colour": a.primary_colour,
-            "logo_url": a.logo_url,
-            "favicon_url": a.favicon_url,
-        },
-    }
+        response = {"success": False, "data": None}
+    else:
+        response = {
+            "success": True,
+            "data": {
+                "id": str(a.id),
+                "name": a.slug,
+                "primary_colour": a.primary_colour,
+                "logo_url": a.logo_url,
+                "favicon_url": a.favicon_url,
+            },
+        }
+
+    # Cache the result for 5 minutes
+    if _redis is not None:
+        try:
+            await _redis.setex(cache_key, 300, _json.dumps(response))
+            await _redis.aclose()
+        except Exception:
+            pass
+
+    return response
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -358,6 +396,189 @@ async def list_reseller_subscriptions(user: CurrentUser, db: DBSession) -> dict:
             for s in subs
         ],
     }
+
+
+# ── Agency team management ────────────────────────────────────────────────────
+
+def _team_member_dict(m: AgencyTeamMember) -> dict:
+    return {
+        "id": str(m.id),
+        "agency_id": str(m.agency_id),
+        "member_email": m.member_email,
+        "role": m.role,
+        "status": m.status,
+        "invited_by": str(m.invited_by) if m.invited_by else None,
+        "created_at": m.created_at.isoformat(),
+    }
+
+
+@router.get("/api/v1/agency/team", response_model=dict)
+async def list_agency_team(user: CurrentUser, db: DBSession) -> dict:
+    a = await _owner_agency(user.id, db)
+    result = await db.execute(
+        select(AgencyTeamMember)
+        .where(AgencyTeamMember.agency_id == a.id)
+        .order_by(AgencyTeamMember.created_at.desc())
+    )
+    members = result.scalars().all()
+    return {"success": True, "data": [_team_member_dict(m) for m in members]}
+
+
+@router.post("/api/v1/agency/team", response_model=dict, status_code=201)
+async def invite_agency_team_member(body: dict, user: CurrentUser, db: DBSession) -> dict:
+    a = await _owner_agency(user.id, db)
+    member_email = (body.get("member_email") or "").strip().lower()
+    if not member_email:
+        raise HTTPException(status_code=422, detail="member_email required")
+    role = (body.get("role") or "agent").strip()
+    if role not in ("agent", "manager"):
+        raise HTTPException(status_code=422, detail="role must be 'agent' or 'manager'")
+
+    existing = await db.execute(
+        select(AgencyTeamMember).where(
+            AgencyTeamMember.agency_id == a.id,
+            AgencyTeamMember.member_email == member_email,
+        )
+    )
+    if existing.scalar_one_or_none():
+        raise HTTPException(status_code=409, detail="Member already invited")
+
+    m = AgencyTeamMember(
+        agency_id=a.id,
+        member_email=member_email,
+        role=role,
+        status="pending",
+        invited_by=user.id,
+    )
+    db.add(m)
+    await db.commit()
+    await db.refresh(m)
+    return {"success": True, "data": _team_member_dict(m)}
+
+
+@router.patch("/api/v1/agency/team/{member_id}", response_model=dict)
+async def update_agency_team_member(
+    member_id: uuid.UUID, body: dict, user: CurrentUser, db: DBSession
+) -> dict:
+    a = await _owner_agency(user.id, db)
+    m = await db.get(AgencyTeamMember, member_id)
+    if not m or m.agency_id != a.id:
+        raise HTTPException(status_code=404, detail="Team member not found")
+    if "role" in body and body["role"] in ("agent", "manager"):
+        m.role = body["role"]
+    if "status" in body and body["status"] in ("active", "pending", "disabled"):
+        m.status = body["status"]
+    await db.commit()
+    await db.refresh(m)
+    return {"success": True, "data": _team_member_dict(m)}
+
+
+@router.delete("/api/v1/agency/team/{member_id}", response_model=dict)
+async def remove_agency_team_member(
+    member_id: uuid.UUID, user: CurrentUser, db: DBSession
+) -> dict:
+    a = await _owner_agency(user.id, db)
+    m = await db.get(AgencyTeamMember, member_id)
+    if not m or m.agency_id != a.id:
+        raise HTTPException(status_code=404, detail="Team member not found")
+    await db.delete(m)
+    await db.commit()
+    return {"success": True, "data": None}
+
+
+# ── Public: License token validation ─────────────────────────────────────────
+
+@router.post("/api/public/license/validate", response_model=dict)
+async def validate_license(body: dict, db: DBSession) -> dict:
+    """Validate a reseller license token (called by widget embed on load)."""
+    token = (body.get("token") or "").strip()
+    if not token:
+        raise HTTPException(status_code=422, detail="token required")
+
+    result = await db.execute(
+        select(ResellerSubscription).where(ResellerSubscription.license_token == token)
+    )
+    sub = result.scalar_one_or_none()
+    if not sub:
+        return {"success": False, "data": {"valid": False, "reason": "not_found"}}
+    if sub.status != "active":
+        return {"success": False, "data": {"valid": False, "reason": "inactive"}}
+
+    agency = await db.get(Agency, sub.agency_id)
+    return {
+        "success": True,
+        "data": {
+            "valid": True,
+            "plan": sub.plan,
+            "agency_id": str(sub.agency_id),
+            "agency_name": agency.slug if agency else None,
+        },
+    }
+
+
+# ── Agency custom pricing tiers ───────────────────────────────────────────────
+
+def _tier_dict(t: AgencyPricingTier) -> dict:
+    return {
+        "id": str(t.id),
+        "plan_key": t.plan_key,
+        "display_name": t.display_name,
+        "price_monthly": t.price_monthly,
+        "price_yearly": t.price_yearly,
+        "features": t.features,
+        "is_active": t.is_active,
+        "created_at": t.created_at.isoformat(),
+        "updated_at": t.updated_at.isoformat(),
+    }
+
+
+@router.get("/api/v1/agency/pricing", response_model=dict)
+async def get_agency_pricing(user: CurrentUser, db: DBSession) -> dict:
+    a = await _owner_agency(user.id, db)
+    result = await db.execute(
+        select(AgencyPricingTier)
+        .where(AgencyPricingTier.agency_id == a.id)
+        .order_by(AgencyPricingTier.price_monthly)
+    )
+    tiers = result.scalars().all()
+    return {"success": True, "data": [_tier_dict(t) for t in tiers]}
+
+
+@router.put("/api/v1/agency/pricing", response_model=dict)
+async def upsert_agency_pricing(body: dict, user: CurrentUser, db: DBSession) -> dict:
+    """Replace the full set of pricing tiers for the agency."""
+    a = await _owner_agency(user.id, db)
+    tiers_data: list[dict] = body.get("tiers") or []
+
+    # Delete existing tiers
+    existing = await db.execute(
+        select(AgencyPricingTier).where(AgencyPricingTier.agency_id == a.id)
+    )
+    for t in existing.scalars().all():
+        await db.delete(t)
+
+    new_tiers = []
+    for td in tiers_data:
+        plan_key = (td.get("plan_key") or "").strip()
+        display_name = (td.get("display_name") or "").strip()
+        if not plan_key or not display_name:
+            continue
+        t = AgencyPricingTier(
+            agency_id=a.id,
+            plan_key=plan_key,
+            display_name=display_name,
+            price_monthly=int(td.get("price_monthly") or 0),
+            price_yearly=int(td.get("price_yearly") or 0),
+            features=td.get("features"),
+            is_active=bool(td.get("is_active", True)),
+        )
+        db.add(t)
+        new_tiers.append(t)
+
+    await db.commit()
+    for t in new_tiers:
+        await db.refresh(t)
+    return {"success": True, "data": [_tier_dict(t) for t in new_tiers]}
 
 
 @router.post("/api/v1/agency/subscriptions", response_model=dict, status_code=201)
