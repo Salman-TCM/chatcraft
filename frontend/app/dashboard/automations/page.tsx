@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import {
   Zap, Plus, Loader2, Pencil, Trash2, ToggleLeft, ToggleRight, X, Check,
+  ChevronDown, ChevronRight, History,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -21,6 +22,15 @@ interface Automation {
   enabled: boolean;
   execution_count: number;
   last_executed_at: string | null;
+}
+
+interface AutomationRun {
+  id: string;
+  trigger_type: string;
+  action_type: string;
+  status: "success" | "failed";
+  error: string | null;
+  executed_at: string;
 }
 
 const TRIGGERS: { value: string; label: string }[] = [
@@ -78,6 +88,9 @@ export default function AutomationsPage() {
   const [loading, setLoading] = useState(true);
   const [modal, setModal] = useState<Partial<Automation> | null>(null);
   const [saving, setSaving] = useState(false);
+  const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [runs, setRuns] = useState<Record<string, AutomationRun[]>>({});
+  const [runsLoading, setRunsLoading] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -89,6 +102,20 @@ export default function AutomationsPage() {
   }, []);
 
   useEffect(() => { load(); }, [load]);
+
+  async function toggleHistory(id: string) {
+    if (expandedId === id) { setExpandedId(null); return; }
+    setExpandedId(id);
+    if (!runs[id]) {
+      setRunsLoading(id);
+      try {
+        const { data } = await apiClient.get(`/api/v1/automations/${id}/runs`);
+        setRuns((prev) => ({ ...prev, [id]: data.data }));
+      } finally {
+        setRunsLoading(null);
+      }
+    }
+  }
 
   function openCreate() { setModal({ ...EMPTY }); }
   function openEdit(a: Automation) { setModal({ ...a }); }
@@ -156,37 +183,90 @@ export default function AutomationsPage() {
 
       <div className="space-y-3">
         {automations.map(a => (
-          <Card key={a.id} className="flex items-center gap-4 p-4">
-            <div className="flex-1 min-w-0">
-              <div className="flex flex-wrap items-center gap-2">
-                <span className="font-medium text-sm truncate">{a.name}</span>
-                <span className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${TRIGGER_COLORS[a.trigger_type] ?? "bg-muted text-muted-foreground"}`}>
-                  {labelOf(TRIGGERS, a.trigger_type)}
-                </span>
-                <span className="text-muted-foreground text-xs">→</span>
-                <span className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${ACTION_COLORS[a.action_type] ?? "bg-muted text-muted-foreground"}`}>
-                  {labelOf(ACTIONS, a.action_type)}
-                </span>
+          <Card key={a.id} className="overflow-hidden">
+            <div className="flex items-center gap-4 p-4">
+              <div className="flex-1 min-w-0">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="font-medium text-sm truncate">{a.name}</span>
+                  <span className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${TRIGGER_COLORS[a.trigger_type] ?? "bg-muted text-muted-foreground"}`}>
+                    {labelOf(TRIGGERS, a.trigger_type)}
+                  </span>
+                  <span className="text-muted-foreground text-xs">→</span>
+                  <span className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${ACTION_COLORS[a.action_type] ?? "bg-muted text-muted-foreground"}`}>
+                    {labelOf(ACTIONS, a.action_type)}
+                  </span>
+                </div>
+                {a.description && <p className="text-xs text-muted-foreground mt-0.5 truncate">{a.description}</p>}
+                <p className="text-[10px] text-muted-foreground mt-1">
+                  Fired {a.execution_count} time{a.execution_count !== 1 ? "s" : ""}
+                  {a.last_executed_at && ` · Last: ${new Date(a.last_executed_at).toLocaleDateString()}`}
+                </p>
               </div>
-              {a.description && <p className="text-xs text-muted-foreground mt-0.5 truncate">{a.description}</p>}
-              <p className="text-[10px] text-muted-foreground mt-1">
-                Fired {a.execution_count} time{a.execution_count !== 1 ? "s" : ""}
-                {a.last_executed_at && ` · Last: ${new Date(a.last_executed_at).toLocaleDateString()}`}
-              </p>
+              <div className="flex items-center gap-1 shrink-0">
+                <Button
+                  size="icon" variant="ghost" className="h-7 w-7"
+                  title="Execution history"
+                  onClick={() => toggleHistory(a.id)}
+                >
+                  {expandedId === a.id
+                    ? <ChevronDown className="h-3.5 w-3.5" />
+                    : <History className="h-3.5 w-3.5" />}
+                </Button>
+                <button onClick={() => toggle(a.id)} title={a.enabled ? "Disable" : "Enable"}>
+                  {a.enabled
+                    ? <ToggleRight className="h-5 w-5 text-primary" />
+                    : <ToggleLeft className="h-5 w-5 text-muted-foreground" />}
+                </button>
+                <Button size="icon" variant="ghost" className="h-7 w-7" onClick={() => openEdit(a)}>
+                  <Pencil className="h-3.5 w-3.5" />
+                </Button>
+                <Button size="icon" variant="ghost" className="h-7 w-7 text-destructive hover:text-destructive" onClick={() => remove(a.id, a.name)}>
+                  <Trash2 className="h-3.5 w-3.5" />
+                </Button>
+              </div>
             </div>
-            <div className="flex items-center gap-1 shrink-0">
-              <button onClick={() => toggle(a.id)} title={a.enabled ? "Disable" : "Enable"}>
-                {a.enabled
-                  ? <ToggleRight className="h-5 w-5 text-primary" />
-                  : <ToggleLeft className="h-5 w-5 text-muted-foreground" />}
-              </button>
-              <Button size="icon" variant="ghost" className="h-7 w-7" onClick={() => openEdit(a)}>
-                <Pencil className="h-3.5 w-3.5" />
-              </Button>
-              <Button size="icon" variant="ghost" className="h-7 w-7 text-destructive hover:text-destructive" onClick={() => remove(a.id, a.name)}>
-                <Trash2 className="h-3.5 w-3.5" />
-              </Button>
-            </div>
+
+            {/* Execution history */}
+            {expandedId === a.id && (
+              <div className="border-t bg-muted/30 px-4 py-3">
+                {runsLoading === a.id ? (
+                  <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" /> Loading history…
+                  </div>
+                ) : !runs[a.id]?.length ? (
+                  <p className="text-xs text-muted-foreground">No executions recorded yet.</p>
+                ) : (
+                  <table className="w-full text-xs">
+                    <thead>
+                      <tr className="text-[10px] text-muted-foreground uppercase tracking-wide">
+                        <th className="text-left pb-2 font-medium w-40">Time</th>
+                        <th className="text-left pb-2 font-medium">Action</th>
+                        <th className="text-left pb-2 font-medium w-20">Status</th>
+                        <th className="text-left pb-2 font-medium">Error</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y">
+                      {runs[a.id].map(r => (
+                        <tr key={r.id}>
+                          <td className="py-1.5 text-muted-foreground tabular-nums">
+                            {new Date(r.executed_at).toLocaleString()}
+                          </td>
+                          <td className="py-1.5">{labelOf(ACTIONS, r.action_type)}</td>
+                          <td className="py-1.5">
+                            <span className={`rounded-full px-1.5 py-0.5 text-[10px] font-medium ${
+                              r.status === "success" ? "bg-green-100 text-green-700" : "bg-red-100 text-red-700"
+                            }`}>
+                              {r.status}
+                            </span>
+                          </td>
+                          <td className="py-1.5 text-muted-foreground truncate max-w-xs">{r.error ?? "—"}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                )}
+              </div>
+            )}
           </Card>
         ))}
       </div>
