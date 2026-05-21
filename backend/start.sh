@@ -5,4 +5,16 @@ echo "[entrypoint] Running database migrations..."
 alembic upgrade head
 echo "[entrypoint] Migrations complete."
 
+# Seed demo data on first start when SEED_ON_START=true (staging only)
+if [ "${SEED_ON_START:-false}" = "true" ]; then
+  SEED_FLAG="/tmp/.seed_done"
+  if [ ! -f "$SEED_FLAG" ]; then
+    echo "[entrypoint] Seeding demo data..."
+    python scripts/seed_data.py && touch "$SEED_FLAG"
+    echo "[entrypoint] Seed complete."
+  else
+    echo "[entrypoint] Seed already ran — skipping."
+  fi
+fi
+
 exec "$@"
