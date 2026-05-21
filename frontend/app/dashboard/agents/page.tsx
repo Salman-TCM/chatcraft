@@ -45,10 +45,12 @@ export default function AgentsPage() {
   const [agents, setAgents] = useState<Agent[]>([]);
   const [loading, setLoading] = useState(true);
   const [creating, setCreating] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     apiClient.get("/api/v1/agents")
       .then(({ data }) => setAgents(data.data ?? []))
+      .catch(() => setError("Failed to load agents. Please refresh."))
       .finally(() => setLoading(false));
   }, []);
 
@@ -62,20 +64,30 @@ export default function AgentsPage() {
         max_steps: 10,
       });
       router.push(`/dashboard/agents/${data.data.id}`);
+    } catch {
+      setError("Failed to create agent. Please try again.");
     } finally {
       setCreating(false);
     }
   }
 
   async function toggleActive(agent: Agent) {
-    await apiClient.put(`/api/v1/agents/${agent.id}`, { is_active: !agent.is_active });
-    setAgents(prev => prev.map(a => a.id === agent.id ? { ...a, is_active: !a.is_active } : a));
+    try {
+      await apiClient.put(`/api/v1/agents/${agent.id}`, { is_active: !agent.is_active });
+      setAgents(prev => prev.map(a => a.id === agent.id ? { ...a, is_active: !a.is_active } : a));
+    } catch {
+      setError("Failed to update agent.");
+    }
   }
 
   async function deleteAgent(id: string) {
     if (!confirm("Delete this agent? This cannot be undone.")) return;
-    await apiClient.delete(`/api/v1/agents/${id}`);
-    setAgents(prev => prev.filter(a => a.id !== id));
+    try {
+      await apiClient.delete(`/api/v1/agents/${id}`);
+      setAgents(prev => prev.filter(a => a.id !== id));
+    } catch {
+      setError("Failed to delete agent.");
+    }
   }
 
   const activeTools = (agent: Agent) =>
@@ -91,6 +103,11 @@ export default function AgentsPage() {
 
   return (
     <div className="mx-auto max-w-4xl space-y-6 p-6">
+      {error && (
+        <div className="rounded-md bg-destructive/10 px-4 py-3 text-sm text-destructive">
+          {error}
+        </div>
+      )}
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
