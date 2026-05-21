@@ -58,13 +58,33 @@ _GUEST_CAP = settings.free_tier_message_cap
 
 # ── Public config ──────────────────────────────────────────────────────────────
 
+_WIDGET_CFG_TTL = 60  # seconds
+
+
 @router.get("/{chatbot_id}/config", response_model=dict)
 async def get_widget_config(
     chatbot_id: uuid.UUID,
     db: DBSession,
+    redis: RedisClient,
     http_response: "FastAPIResponse",
 ) -> dict:
     """Return public branding + widget config for widget.js to consume."""
+    cache_key = f"widget:config:{chatbot_id}"
+
+    # Try Redis cache first
+    if redis is not None:
+        try:
+            cached = await redis.get(cache_key)
+            if cached:
+                import json as _json
+                http_response.headers["Cache-Control"] = (
+                    f"public, max-age={_WIDGET_CFG_TTL}, s-maxage={_WIDGET_CFG_TTL}, stale-while-revalidate=30"
+                )
+                http_response.headers["X-Cache"] = "HIT"
+                return _json.loads(cached)
+        except Exception:
+            pass
+
     bot = await db.get(ChatbotConfig, chatbot_id)
     if not bot or not bot.published:
         raise HTTPException(
@@ -95,6 +115,8 @@ async def get_widget_config(
         voice_similarity_boost=bot.voice_similarity_boost,
         position=wc.position,
         show_branding=wc.show_branding,
+        reply_delay_seconds=bot.reply_delay_seconds,
+        persistent_menu=wc.persistent_menu,
     )
 
     data = cfg.model_dump()
@@ -113,9 +135,22 @@ async def get_widget_config(
     except Exception:
         pass
 
+    response_payload = {"success": True, "data": data}
+
+    # Cache in Redis
+    if redis is not None:
+        try:
+            import json as _json
+            await redis.setex(cache_key, _WIDGET_CFG_TTL, _json.dumps(response_payload, default=str))
+        except Exception:
+            pass
+
     # CDN-cacheable for 60 s; stale-while-revalidate allows serving while refreshing
-    http_response.headers["Cache-Control"] = "public, max-age=60, s-maxage=60, stale-while-revalidate=30"
-    return {"success": True, "data": data}
+    http_response.headers["Cache-Control"] = (
+        f"public, max-age={_WIDGET_CFG_TTL}, s-maxage={_WIDGET_CFG_TTL}, stale-while-revalidate=30"
+    )
+    http_response.headers["X-Cache"] = "MISS"
+    return response_payload
 
 
 # ── Widget chat ────────────────────────────────────────────────────────────────
@@ -273,6 +308,9 @@ async def widget_chat(
                         conversation_id=str(conv_id),
                         message_id=str(msg_id),
                     )
+                    background_tasks.add_task(
+                        _send_widget_push, redis, conv_id, bot.name, "".join(full)
+                    )
                     if is_first:
                         from app.api.chat import _generate_title
                         background_tasks.add_task(
@@ -295,6 +333,59 @@ async def widget_chat(
     )
 
 
+# ── Widget push notifications ─────────────────────────────────────────────────
+
+_WIDGET_PUSH_TTL = 60 * 60 * 24 * 30  # 30 days
+
+
+def _widget_push_key(conv_id) -> str:
+    return f"push:widget:conv:{conv_id}"
+
+
+@router.get("/{chatbot_id}/push/vapid-key", response_model=dict)
+async def widget_vapid_key(chatbot_id: uuid.UUID, db: DBSession) -> dict:
+    """Return public VAPID key — called by the widget before subscribing."""
+    bot = await db.get(ChatbotConfig, chatbot_id)
+    if not bot or not bot.published:
+        raise HTTPException(status_code=404, detail="Chatbot not found")
+    public_key = getattr(settings, "vapid_public_key", None)
+    if not public_key:
+        raise HTTPException(status_code=503, detail="Push notifications not configured")
+    return {"success": True, "data": {"public_key": public_key}}
+
+
+class _PushSubscribeBody(_BaseModel):
+    conversation_id: uuid.UUID
+    endpoint: str
+    keys: dict
+
+
+@router.post("/{chatbot_id}/push/subscribe", response_model=dict)
+async def widget_push_subscribe(
+    chatbot_id: uuid.UUID,
+    body: _PushSubscribeBody,
+    redis: RedisClient,
+    x_widget_token: str | None = Header(default=None),
+) -> dict:
+    """Store a push subscription for a widget conversation."""
+    if not x_widget_token:
+        raise HTTPException(status_code=401, detail="Missing widget token")
+    wc_result = await redis.get(f"wc:token:{x_widget_token}")
+    if not wc_result:
+        from app.db.session import AsyncSessionLocal
+        async with AsyncSessionLocal() as session:
+            r = await session.execute(
+                select(WidgetConfig).where(WidgetConfig.embed_token == x_widget_token)
+            )
+            wc = r.scalar_one_or_none()
+            if not wc or wc.chatbot_id != chatbot_id:
+                raise HTTPException(status_code=401, detail="Invalid widget token")
+
+    sub = {"endpoint": body.endpoint, "keys": body.keys}
+    await redis.set(_widget_push_key(body.conversation_id), json.dumps(sub), ex=_WIDGET_PUSH_TTL)
+    return {"success": True, "data": {"subscribed": True}}
+
+
 # ── Owner: manage widget config ───────────────────────────────────────────────
 
 @router.get("/manage/{chatbot_id}", response_model=dict)
@@ -310,6 +401,7 @@ async def update_manage(
     body: WidgetConfigUpdate,
     user: CurrentUser,
     db: DBSession,
+    redis: RedisClient,
 ) -> dict:
     bot = await _owned_bot(chatbot_id, user.id, db)
     wc = await _get_or_create_widget_config(bot, db)
@@ -317,6 +409,12 @@ async def update_manage(
         setattr(wc, field, value)
     await db.commit()
     await db.refresh(wc)
+    # Bust widget config cache
+    if redis is not None:
+        try:
+            await redis.delete(f"widget:config:{chatbot_id}")
+        except Exception:
+            pass
     return {"success": True, "data": WidgetConfigResponse.model_validate(wc)}
 
 
@@ -477,3 +575,27 @@ async def _load_history(db: AsyncSession, conversation_id: uuid.UUID) -> list[Ch
 
 def _sse(**kwargs) -> str:
     return f"data: {json.dumps(kwargs)}\n\n"
+
+
+async def _send_widget_push(redis, conv_id: uuid.UUID, bot_name: str, reply: str) -> None:
+    """Fire-and-forget push to any subscriber for this widget conversation."""
+    try:
+        sub_raw = await redis.get(_widget_push_key(conv_id))
+        if not sub_raw:
+            return
+        sub = json.loads(sub_raw)
+        vapid_private = getattr(settings, "vapid_private_key", None)
+        vapid_email = getattr(settings, "vapid_email", "mailto:admin@chatcraft.ai")
+        if not vapid_private:
+            return
+        preview = reply[:80] + ("…" if len(reply) > 80 else "")
+        payload = json.dumps({"title": bot_name, "body": preview})
+        from pywebpush import webpush
+        webpush(
+            subscription_info=sub,
+            data=payload,
+            vapid_private_key=vapid_private,
+            vapid_claims={"sub": vapid_email},
+        )
+    except Exception:
+        pass
