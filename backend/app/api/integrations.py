@@ -33,7 +33,7 @@ from app.models.chatbot_config import ChatbotConfig
 
 router = APIRouter(prefix="/api/v1", tags=["integrations"])
 
-SUPPORTED_CHANNELS = {"telegram", "whatsapp", "facebook", "sms", "email", "discord", "instagram"}
+SUPPORTED_CHANNELS = {"telegram", "whatsapp", "facebook", "sms", "email", "discord", "instagram", "twitter", "tiktok"}
 
 # Fields that should be masked in responses (contain credentials)
 _SECRET_FIELDS = {"bot_token", "access_token", "page_access_token", "auth_token", "app_secret", "smtp_password"}
@@ -349,6 +349,68 @@ async def test_discord(chatbot_id: uuid.UUID, user: CurrentUser, db: DBSession) 
     except Exception as exc:
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc))
     return {"success": True, "data": {"bot_id": data.get("id"), "username": data.get("username"), "discriminator": data.get("discriminator")}}
+
+
+@router.post("/chatbots/{chatbot_id}/integrations/twitter/test", response_model=dict)
+async def test_twitter(chatbot_id: uuid.UUID, user: CurrentUser, db: DBSession) -> dict:
+    await _get_owned_bot(chatbot_id, user.id, db)
+    result = await db.execute(
+        select(ChannelIntegration).where(
+            ChannelIntegration.chatbot_id == chatbot_id,
+            ChannelIntegration.channel == "twitter",
+        )
+    )
+    integration = result.scalar_one_or_none()
+    if not integration:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not configured")
+
+    import httpx
+    bearer_token = integration.config.get("bearer_token", "")
+    if not bearer_token:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Bearer token not set")
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            r = await client.get(
+                "https://api.twitter.com/2/users/me",
+                headers={"Authorization": f"Bearer {bearer_token}"},
+                params={"user.fields": "id,name,username"},
+            )
+            r.raise_for_status()
+            data = r.json().get("data", {})
+    except Exception as exc:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc))
+    return {"success": True, "data": {"user_id": data.get("id"), "name": data.get("name"), "username": data.get("username")}}
+
+
+@router.post("/chatbots/{chatbot_id}/integrations/tiktok/test", response_model=dict)
+async def test_tiktok(chatbot_id: uuid.UUID, user: CurrentUser, db: DBSession) -> dict:
+    await _get_owned_bot(chatbot_id, user.id, db)
+    result = await db.execute(
+        select(ChannelIntegration).where(
+            ChannelIntegration.chatbot_id == chatbot_id,
+            ChannelIntegration.channel == "tiktok",
+        )
+    )
+    integration = result.scalar_one_or_none()
+    if not integration:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not configured")
+
+    import httpx
+    access_token = integration.config.get("access_token", "")
+    if not access_token:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Access token not set")
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            r = await client.get(
+                "https://open.tiktokapis.com/v2/user/info/",
+                headers={"Authorization": f"Bearer {access_token}"},
+                params={"fields": "open_id,display_name,avatar_url"},
+            )
+            r.raise_for_status()
+            data = r.json().get("data", {}).get("user", {})
+    except Exception as exc:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc))
+    return {"success": True, "data": {"open_id": data.get("open_id"), "display_name": data.get("display_name")}}
 
 
 # ── Telegram Bot Commands ──────────────────────────────────────────────────────
