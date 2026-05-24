@@ -54,7 +54,6 @@ export default function AdminUserDetailPage() {
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [deleting, setDeleting] = useState(false);
 
-  const [impersonateToken, setImpersonateToken] = useState<string | null>(null);
   const [impersonating, setImpersonating] = useState(false);
 
   async function load() {
@@ -103,7 +102,13 @@ export default function AdminUserDetailPage() {
     setImpersonating(true);
     try {
       const res = await apiClient.post(`/api/admin/users/${id}/impersonate`);
-      setImpersonateToken(res.data.data.access_token);
+      const token = res.data.data.access_token;
+      localStorage.setItem("impersonation_session", JSON.stringify({
+        token,
+        userName: user?.name ?? user?.email ?? id,
+        expiresAt: Date.now() + 5 * 60 * 1000,
+      }));
+      window.open("/dashboard", "_blank");
     } finally {
       setImpersonating(false);
     }
@@ -146,17 +151,6 @@ export default function AdminUserDetailPage() {
         </div>
       </div>
 
-      {/* Impersonation token */}
-      {impersonateToken && (
-        <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 dark:bg-amber-950/20">
-          <p className="text-xs font-semibold text-amber-800 mb-2">Impersonation Token (5 min expiry)</p>
-          <p className="font-mono text-xs break-all text-amber-700">{impersonateToken}</p>
-          <p className="mt-2 text-xs text-amber-700">Copy this token and paste it as the Bearer token in API calls or use it with <code>Authorization: Bearer &lt;token&gt;</code></p>
-          <Button size="sm" variant="outline" className="mt-2" onClick={() => { navigator.clipboard.writeText(impersonateToken); }}>
-            Copy Token
-          </Button>
-        </div>
-      )}
 
       <div className="grid gap-6 lg:grid-cols-3">
         <div className="space-y-5 lg:col-span-2">

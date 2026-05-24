@@ -5,6 +5,7 @@ import { ShieldAlert, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
 interface ImpersonationInfo {
+  token?: string;
   userName?: string;
   expiresAt?: number;
 }
