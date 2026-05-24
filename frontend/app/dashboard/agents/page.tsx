@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import {
   Bot, Plus, Trash2, Settings2, Loader2,
   Globe, Code2, Chrome, Sheet, Mail, Link2,
-  Smartphone, ShieldCheck, Zap, Circle,
+  Smartphone, ShieldCheck, Zap, Circle, Eye,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -20,6 +20,8 @@ interface Agent {
   is_published: boolean;
   is_active: boolean;
   max_steps: number;
+  share_enabled: boolean;
+  share_token: string | null;
   created_at: string;
 }
 
@@ -222,15 +224,32 @@ export default function AgentsPage() {
               )}
 
               {/* Footer */}
-              <div className="pt-1 border-t">
+              <div className="pt-1 border-t flex gap-2">
                 <Button
                   size="sm"
                   variant="outline"
-                  className="h-7 text-xs w-full"
+                  className="h-7 text-xs flex-1"
                   onClick={(e) => { e.stopPropagation(); router.push(`/dashboard/agents/${agent.id}`); }}
                 >
                   <Settings2 className="h-3 w-3" />
                   Configure
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="h-7 text-xs flex-1"
+                  title={agent.share_token ? "Open public preview" : "Enable sharing in Configure → Share tab"}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    if (agent.share_token) {
+                      window.open(`/agent/${agent.share_token}`, "_blank");
+                    } else {
+                      router.push(`/dashboard/agents/${agent.id}?tab=share`);
+                    }
+                  }}
+                >
+                  <Eye className="h-3 w-3" />
+                  Preview
                 </Button>
               </div>
             </Card>

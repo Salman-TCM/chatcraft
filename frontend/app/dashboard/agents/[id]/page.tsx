@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { useParams, useRouter } from "next/navigation";
+import { useParams, useRouter, useSearchParams } from "next/navigation";
 import {
   AlertCircle, ArrowLeft, Bot, Check, ChevronDown, ChevronRight,
   ChevronUp, Code2, Copy, ExternalLink, Globe, Loader2, Mail,
@@ -199,6 +199,7 @@ function ModelSelect({
 export default function AgentBuilderPage() {
   const { id } = useParams<{ id: string }>();
   const router = useRouter();
+  const searchParams = useSearchParams();
 
   const [agent, setAgent] = useState<Agent | null>(null);
   const [chatbots, setChatbots] = useState<Chatbot[]>([]);
@@ -219,8 +220,10 @@ export default function AgentBuilderPage() {
   const [shareLoading, setShareLoading] = useState(false);
   const [shareCopied, setShareCopied] = useState(false);
 
-  // Tab
-  const [activeTab, setActiveTab] = useState<Tab>("identity");
+  // Tab — honour ?tab= query param for deep-linking (e.g. from Preview button)
+  const [activeTab, setActiveTab] = useState<Tab>(
+    (searchParams.get("tab") as Tab | null) ?? "identity"
+  );
 
   // Form state
   const [name, setName] = useState("");
