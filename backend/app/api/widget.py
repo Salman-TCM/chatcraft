@@ -94,6 +94,20 @@ async def get_widget_config(
 
     wc = await _get_or_create_widget_config(bot, db)
 
+    # Resolve embedded store slug if present
+    embedded_store_slug: str | None = None
+    if wc.embedded_store_id:
+        try:
+            from app.models.commerce import CommerceStore
+            store_result = await db.execute(
+                select(CommerceStore).where(CommerceStore.id == wc.embedded_store_id)
+            )
+            store = store_result.scalar_one_or_none()
+            if store:
+                embedded_store_slug = store.slug
+        except Exception:
+            pass
+
     cfg = WidgetPublicConfig(
         id=bot.id,
         name=bot.name,
@@ -117,6 +131,8 @@ async def get_widget_config(
         show_branding=wc.show_branding,
         reply_delay_seconds=bot.reply_delay_seconds,
         persistent_menu=wc.persistent_menu,
+        embedded_store_id=wc.embedded_store_id,
+        embedded_store_slug=embedded_store_slug,
     )
 
     data = cfg.model_dump()
@@ -151,6 +167,77 @@ async def get_widget_config(
     )
     http_response.headers["X-Cache"] = "MISS"
     return response_payload
+
+
+# ── Public store products ──────────────────────────────────────────────────────
+
+@router.get("/{chatbot_id}/store-products", response_model=dict)
+async def get_widget_store_products(
+    chatbot_id: uuid.UUID,
+    db: DBSession,
+    category: str | None = None,
+    limit: int = 50,
+) -> dict:
+    """Return products from the embedded store for a published chatbot widget."""
+    bot = await db.get(ChatbotConfig, chatbot_id)
+    if not bot or not bot.published:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Chatbot not found")
+
+    wc = await _get_or_create_widget_config(bot, db)
+    if not wc.embedded_store_id:
+        return {"success": True, "data": {"products": [], "store": None}}
+
+    try:
+        from app.models.commerce import CommerceStore, CommerceProduct
+        store_result = await db.execute(
+            select(CommerceStore).where(
+                CommerceStore.id == wc.embedded_store_id,
+                CommerceStore.is_active.is_(True),
+            )
+        )
+        store = store_result.scalar_one_or_none()
+        if not store:
+            return {"success": True, "data": {"products": [], "store": None}}
+
+        q = select(CommerceProduct).where(
+            CommerceProduct.store_id == store.id,
+            CommerceProduct.in_stock.is_(True),
+        )
+        if category:
+            q = q.where(CommerceProduct.category == category)
+        q = q.order_by(CommerceProduct.sort_order, CommerceProduct.created_at).limit(min(limit, 100))
+
+        products_result = await db.execute(q)
+        products = products_result.scalars().all()
+
+        return {
+            "success": True,
+            "data": {
+                "store": {
+                    "id": str(store.id),
+                    "name": store.name,
+                    "slug": store.slug,
+                    "currency": store.currency,
+                    "primary_color": store.primary_color,
+                },
+                "products": [
+                    {
+                        "id": str(p.id),
+                        "name": p.name,
+                        "description": p.description,
+                        "price": float(p.price),
+                        "compare_at_price": float(p.compare_at_price) if p.compare_at_price else None,
+                        "image_url": p.image_url,
+                        "category": p.category,
+                        "sku": p.sku,
+                        "in_stock": p.in_stock,
+                    }
+                    for p in products
+                ],
+            },
+        }
+    except Exception:
+        return {"success": True, "data": {"products": [], "store": None}}
 
 
 # ── Widget chat ────────────────────────────────────────────────────────────────

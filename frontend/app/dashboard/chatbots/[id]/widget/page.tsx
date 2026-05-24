@@ -44,6 +44,14 @@ interface WidgetConfig {
   show_branding: boolean;
   embed_token: string;
   persistent_menu: MenuItem[] | null;
+  embedded_store_id: string | null;
+}
+
+interface CommerceStore {
+  id: string;
+  name: string;
+  slug: string;
+  currency: string;
 }
 
 interface MenuItem {
@@ -144,6 +152,8 @@ export default function WidgetPage() {
   const [position, setPosition] = useState("bottom-right");
   const [showBranding, setShowBranding] = useState(true);
   const [menuItems, setMenuItems] = useState<MenuItem[]>([]);
+  const [embeddedStoreId, setEmbeddedStoreId] = useState<string | null>(null);
+  const [stores, setStores] = useState<CommerceStore[]>([]);
 
   useEffect(() => {
     loadData();
@@ -151,14 +161,16 @@ export default function WidgetPage() {
 
   async function loadData() {
     try {
-      const [botRes, widgetRes, licRes] = await Promise.all([
+      const [botRes, widgetRes, licRes, storesRes] = await Promise.all([
         apiClient.get(`/api/chatbots/${id}`),
         apiClient.get(`/api/widget/manage/${id}`),
         apiClient.get(`/api/widget/manage/${id}/licenses`),
+        apiClient.get(`/api/v1/stores`).catch(() => ({ data: { data: [] } })),
       ]);
       setChatbotName(botRes.data.data.name);
       applyConfig(widgetRes.data.data);
       setLicenses(licRes.data.data);
+      setStores(storesRes.data.data ?? []);
     } catch {
       router.replace("/dashboard/chatbots");
     } finally {
@@ -204,6 +216,7 @@ export default function WidgetPage() {
     setPosition(wc.position);
     setShowBranding(wc.show_branding);
     setMenuItems(wc.persistent_menu ?? []);
+    setEmbeddedStoreId(wc.embedded_store_id ?? null);
   }
 
   async function handleSave() {
@@ -214,6 +227,7 @@ export default function WidgetPage() {
         position,
         show_branding: showBranding,
         persistent_menu: menuItems.length > 0 ? menuItems : null,
+        embedded_store_id: embeddedStoreId || null,
       });
       applyConfig(data.data);
     } finally {
@@ -456,6 +470,47 @@ export default function WidgetPage() {
             )}
             {menuItems.length === 0 && (
               <p className="text-xs text-muted-foreground">No menu items. Add up to 5 quick-action buttons.</p>
+            )}
+          </div>
+        </Section>
+
+        <Separator />
+
+        {/* ── Embedded Store ───────────────────────────────────────────── */}
+        <Section
+          title="Embedded Store"
+          description="Show a Shop tab inside the chat widget so visitors can browse products without leaving the page."
+        >
+          <div className="space-y-3">
+            <div>
+              <Label className="text-xs text-muted-foreground mb-1.5 block">Store</Label>
+              {stores.length === 0 ? (
+                <p className="text-xs text-muted-foreground">
+                  No stores yet.{" "}
+                  <a href="/dashboard/commerce" className="underline text-primary">
+                    Create a store
+                  </a>{" "}
+                  to embed it here.
+                </p>
+              ) : (
+                <select
+                  value={embeddedStoreId ?? ""}
+                  onChange={(e) => setEmbeddedStoreId(e.target.value || null)}
+                  className="w-full h-9 rounded-md border bg-background px-3 text-sm focus:outline-none focus:ring-1 focus:ring-ring"
+                >
+                  <option value="">— None (no shop tab) —</option>
+                  {stores.map((s) => (
+                    <option key={s.id} value={s.id}>
+                      {s.name} ({s.currency})
+                    </option>
+                  ))}
+                </select>
+              )}
+            </div>
+            {embeddedStoreId && (
+              <p className="text-xs text-muted-foreground bg-muted rounded-md px-3 py-2">
+                A <strong>Shop</strong> tab will appear in the widget. Visitors can browse in-stock products and be directed to your store checkout.
+              </p>
             )}
           </div>
         </Section>
