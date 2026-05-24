@@ -23,7 +23,7 @@ from app.core.dependencies import CurrentUser, DBSession
 from app.models.agent import Agent
 from app.models.chatbot_config import ChatbotConfig
 from app.schemas.agent import AgentCreateRequest, AgentResponse, AgentUpdateRequest
-from app.services.rag import RAGService
+from app.services.kb.rag import RAGService
 
 router = APIRouter(prefix="/api/v1/agents", tags=["agents"])
 
