@@ -207,6 +207,7 @@ async def _run_agent(
 
     step = 0
     max_steps = agent.max_steps or 10
+    ctx = {"agent_id": str(agent.id)}
 
     while step < max_steps:
         step += 1
@@ -240,7 +241,7 @@ async def _run_agent(
         tool_results: list[dict] = []
         for tu in tool_uses:
             yield _sse({"type": "tool_call", "tool": tu.name, "input": tu.input})
-            result_text = await _execute_tool(tu.name, tu.input, mcp_map)
+            result_text = await _execute_tool(tu.name, tu.input, mcp_map, ctx)
             yield _sse({"type": "tool_result", "tool": tu.name, "result": result_text[:500]})
             tool_results.append({
                 "type": "tool_result",
@@ -394,12 +395,61 @@ def _build_builtin_tools(tools_config: dict) -> list[dict]:
             },
         })
 
+    if tools_config.get("verification"):
+        defs.append({
+            "name": "send_email_verification",
+            "description": (
+                "Generate a 6-digit OTP and send it to an email address. "
+                "Use this to verify a user's email before taking a sensitive action. "
+                "The code expires in 10 minutes."
+            ),
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "email": {"type": "string", "description": "Email address to send the verification code to"},
+                    "purpose": {"type": "string", "description": "Short description of what is being verified (e.g. 'account access', 'password reset')"},
+                },
+                "required": ["email"],
+            },
+        })
+        defs.append({
+            "name": "send_sms_verification",
+            "description": (
+                "Generate a 6-digit OTP and send it as an SMS to a phone number. "
+                "Use this to verify a user's phone before taking a sensitive action. "
+                "The code expires in 10 minutes."
+            ),
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "phone": {"type": "string", "description": "Recipient phone number in E.164 format (e.g. +14155552671)"},
+                    "purpose": {"type": "string", "description": "Short description of what is being verified"},
+                },
+                "required": ["phone"],
+            },
+        })
+        defs.append({
+            "name": "verify_code",
+            "description": (
+                "Check whether the code entered by the user matches the one that was sent. "
+                "Call this after the user provides the code they received by email or SMS."
+            ),
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "identifier": {"type": "string", "description": "The email address or phone number the code was sent to"},
+                    "code": {"type": "string", "description": "The 6-digit code entered by the user"},
+                },
+                "required": ["identifier", "code"],
+            },
+        })
+
     return defs
 
 
 # ─── Tool execution ───────────────────────────────────────────────────────────
 
-async def _execute_tool(name: str, inputs: dict, mcp_map: dict) -> str:
+async def _execute_tool(name: str, inputs: dict, mcp_map: dict, ctx: dict | None = None) -> str:
     try:
         # MCP tool
         if name in mcp_map:
@@ -419,6 +469,12 @@ async def _execute_tool(name: str, inputs: dict, mcp_map: dict) -> str:
             return await _tool_send_email(inputs)
         elif name == "send_sms":
             return await _tool_send_sms(inputs)
+        elif name == "send_email_verification":
+            return await _tool_send_email_verification(inputs, ctx or {})
+        elif name == "send_sms_verification":
+            return await _tool_send_sms_verification(inputs, ctx or {})
+        elif name == "verify_code":
+            return await _tool_verify_code(inputs, ctx or {})
         return f"Unknown tool: {name}"
     except Exception as exc:
         return f"Tool error: {exc}"
@@ -622,6 +678,83 @@ async def _tool_send_email(inputs: dict) -> str:
             return f"Failed to send email: {e}"
 
     return "Email not configured — set AWS SES or SMTP credentials in settings."
+
+
+async def _tool_send_email_verification(inputs: dict, ctx: dict) -> str:
+    import random
+    email = inputs.get("email", "").strip()
+    purpose = inputs.get("purpose", "verification")
+    if not email:
+        return "Error: email address is required."
+
+    code = f"{random.randint(0, 999999):06d}"
+    redis_key = f"agent_otp:{ctx.get('agent_id', 'x')}:{email}"
+
+    try:
+        from app.db.redis import get_async_redis
+        r = get_async_redis()
+        await r.setex(redis_key, 600, code)  # 10-minute TTL
+    except Exception as e:
+        return f"Error storing verification code: {e}"
+
+    subject = f"Your verification code: {code}"
+    body = (
+        f"Your {purpose} code is: {code}\n\n"
+        f"This code expires in 10 minutes. Do not share it with anyone."
+    )
+    result = await _tool_send_email({"to": email, "subject": subject, "body": body})
+    if "sent" in result.lower():
+        return f"Verification code sent to {email}. Ask the user to enter the 6-digit code."
+    return result
+
+
+async def _tool_send_sms_verification(inputs: dict, ctx: dict) -> str:
+    import random
+    phone = inputs.get("phone", "").strip()
+    purpose = inputs.get("purpose", "verification")
+    if not phone:
+        return "Error: phone number is required."
+
+    code = f"{random.randint(0, 999999):06d}"
+    redis_key = f"agent_otp:{ctx.get('agent_id', 'x')}:{phone}"
+
+    try:
+        from app.db.redis import get_async_redis
+        r = get_async_redis()
+        await r.setex(redis_key, 600, code)  # 10-minute TTL
+    except Exception as e:
+        return f"Error storing verification code: {e}"
+
+    message = f"Your {purpose} code is: {code}. Expires in 10 minutes."
+    result = await _tool_send_sms({"to": phone, "message": message})
+    if "sent" in result.lower():
+        return f"Verification code sent to {phone}. Ask the user to enter the 6-digit code."
+    return result
+
+
+async def _tool_verify_code(inputs: dict, ctx: dict) -> str:
+    identifier = inputs.get("identifier", "").strip()
+    code = inputs.get("code", "").strip()
+    if not identifier or not code:
+        return "Error: both identifier and code are required."
+
+    redis_key = f"agent_otp:{ctx.get('agent_id', 'x')}:{identifier}"
+
+    try:
+        from app.db.redis import get_async_redis
+        r = get_async_redis()
+        stored = await r.get(redis_key)
+    except Exception as e:
+        return f"Error checking verification code: {e}"
+
+    if stored is None:
+        return "INVALID: No verification code found for this identifier. The code may have expired (10-minute limit). Send a new code."
+
+    if stored == code:
+        await r.delete(redis_key)  # Single-use — delete after successful verify
+        return f"VERIFIED: The code is correct. {identifier} has been successfully verified."
+
+    return "INVALID: The code does not match. Ask the user to check the code and try again, or send a new code."
 
 
 async def _tool_send_sms(inputs: dict) -> str:

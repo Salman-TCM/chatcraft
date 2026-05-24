@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import {
   Bot, Plus, Trash2, Settings2, Loader2,
   Globe, Code2, Chrome, Sheet, Mail, Link2,
-  Zap, Circle,
+  Smartphone, ShieldCheck, Zap, Circle,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -24,12 +24,14 @@ interface Agent {
 }
 
 const TOOL_META: Record<string, { icon: React.ElementType; label: string; color: string }> = {
-  web_search: { icon: Globe,  label: "Web Search",  color: "text-blue-500" },
-  browser:    { icon: Chrome, label: "Browser",     color: "text-orange-500" },
-  code:       { icon: Code2,  label: "Run Code",    color: "text-purple-500" },
-  http:       { icon: Link2,  label: "HTTP",        color: "text-green-500" },
-  sheets:     { icon: Sheet,  label: "Sheets",      color: "text-emerald-500" },
-  email:      { icon: Mail,   label: "Email",       color: "text-rose-500" },
+  web_search:   { icon: Globe,        label: "Web Search",    color: "text-blue-500" },
+  browser:      { icon: Chrome,       label: "Browser",       color: "text-orange-500" },
+  code:         { icon: Code2,        label: "Run Code",      color: "text-purple-500" },
+  http:         { icon: Link2,        label: "HTTP",          color: "text-green-500" },
+  sheets:       { icon: Sheet,        label: "Sheets",        color: "text-emerald-500" },
+  email:        { icon: Mail,         label: "Email",         color: "text-rose-500" },
+  sms:          { icon: Smartphone,   label: "SMS",           color: "text-violet-500" },
+  verification: { icon: ShieldCheck,  label: "Verification",  color: "text-amber-500" },
 };
 
 function modelShortName(model: string) {

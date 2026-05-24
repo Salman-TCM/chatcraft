@@ -5,7 +5,7 @@ import { useParams, useRouter } from "next/navigation";
 import {
   AlertCircle, ArrowLeft, Bot, Check, ChevronDown, ChevronRight,
   ChevronUp, Code2, Copy, ExternalLink, Globe, Loader2, Mail,
-  Link2, MessageSquare, RefreshCw, Send, Server,
+  Link2, MessageSquare, RefreshCw, Send, Server, ShieldCheck,
   Chrome, Sheet, Smartphone, Trash2, Zap, ToggleLeft, ToggleRight,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -128,6 +128,15 @@ const TOOLS = [
     color: "text-violet-600",
     bg: "bg-violet-50 border-violet-200",
     activeBg: "bg-violet-600",
+  },
+  {
+    key: "verification",
+    label: "Verification Codes",
+    icon: ShieldCheck,
+    description: "Send OTP codes by email or SMS and verify them (10-min expiry)",
+    color: "text-amber-600",
+    bg: "bg-amber-50 border-amber-200",
+    activeBg: "bg-amber-600",
   },
 ];
 
