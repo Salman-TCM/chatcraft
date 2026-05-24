@@ -9,17 +9,26 @@ Config (stored in ChannelIntegration.config):
   from_name      Display name for From header
   from_email     Sending address (defaults to smtp_user)
   inbox_email    The address inbound emails are forwarded to (used as Reply-To)
+
+Attachments format (passed to send/send_with_attachments):
+  list of (filename: str, data: bytes, mime_type: str)
 """
 from __future__ import annotations
 
 import asyncio
 import smtplib
-from email.headerregistry import Address
+from email.mime.application import MIMEApplication
+from email.mime.base import MIMEBase
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
+from email import encoders
 from typing import Any
 
 from loguru import logger
+
+# Max attachment limits
+MAX_ATTACHMENTS = 5
+MAX_TOTAL_BYTES = 25 * 1024 * 1024  # 25 MB
 
 
 class EmailSender:
@@ -33,13 +42,21 @@ class EmailSender:
             return f"{from_name} <{from_email}>"
         return from_email
 
-    def _send_sync(self, to: str, subject: str, body: str, reply_to: str | None = None) -> None:
+    def _send_sync(
+        self,
+        to: str,
+        subject: str,
+        body: str,
+        reply_to: str | None = None,
+        attachments: list[tuple[str, bytes, str]] | None = None,
+    ) -> None:
         host = self.cfg.get("smtp_host", "")
         port = int(self.cfg.get("smtp_port", 587))
         user = self.cfg.get("smtp_user", "")
         password = self.cfg.get("smtp_password", "")
 
-        msg = MIMEMultipart("alternative")
+        # Use mixed if attachments, else alternative
+        msg = MIMEMultipart("mixed" if attachments else "alternative")
         msg["Subject"] = subject
         msg["From"] = self._from_addr()
         msg["To"] = to
@@ -48,21 +65,39 @@ class EmailSender:
         elif self.cfg.get("inbox_email"):
             msg["Reply-To"] = self.cfg["inbox_email"]
 
-        # Send as plain text + HTML
-        msg.attach(MIMEText(body, "plain"))
+        # Body part (text + HTML)
+        alt = MIMEMultipart("alternative")
+        alt.attach(MIMEText(body, "plain"))
         html_body = body.replace("\n", "<br>")
-        msg.attach(MIMEText(f"<div style='font-family:sans-serif;line-height:1.6'>{html_body}</div>", "html"))
+        alt.attach(MIMEText(f"<div style='font-family:sans-serif;line-height:1.6'>{html_body}</div>", "html"))
+        msg.attach(alt)
+
+        # Attachments
+        for filename, data, mime_type in (attachments or []):
+            main_type, sub_type = (mime_type.split("/", 1) if "/" in mime_type else ("application", "octet-stream"))
+            part = MIMEBase(main_type, sub_type)
+            part.set_payload(data)
+            encoders.encode_base64(part)
+            part.add_header("Content-Disposition", "attachment", filename=filename)
+            msg.attach(part)
 
         with smtplib.SMTP(host, port) as server:
             server.starttls()
             server.login(user, password)
             server.sendmail(self._from_addr(), [to], msg.as_string())
 
-    async def send(self, to: str, subject: str, body: str, reply_to: str | None = None) -> None:
+    async def send(
+        self,
+        to: str,
+        subject: str,
+        body: str,
+        reply_to: str | None = None,
+        attachments: list[tuple[str, bytes, str]] | None = None,
+    ) -> None:
         """Send an email asynchronously (runs SMTP in thread pool)."""
         try:
             await asyncio.get_event_loop().run_in_executor(
-                None, lambda: self._send_sync(to, subject, body, reply_to)
+                None, lambda: self._send_sync(to, subject, body, reply_to, attachments)
             )
         except Exception as exc:
             logger.error(f"Email send failed to {to}: {exc}")
