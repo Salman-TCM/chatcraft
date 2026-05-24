@@ -14,6 +14,7 @@ import {
   Radio,
   AlertCircle,
   LayoutGrid,
+  Wand2,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -102,6 +103,13 @@ export default function ChatbotSettingsPage() {
   const [saving, setSaving] = useState(false);
   const [savedOk, setSavedOk] = useState(false);
 
+  // AI template generator
+  const [genOpen, setGenOpen] = useState(false);
+  const [genDesc, setGenDesc] = useState("");
+  const [genType, setGenType] = useState<"carousel" | "card" | "buttons" | "quick_replies">("carousel");
+  const [genLoading, setGenLoading] = useState(false);
+  const [genResult, setGenResult] = useState<string | null>(null);
+
   const [providerMeta, setProviderMeta] = useState<Record<string, ProviderMeta>>({});
   const [configuredProviders, setConfiguredProviders] = useState<Set<string>>(new Set());
 
@@ -136,6 +144,31 @@ export default function ChatbotSettingsPage() {
 
   function set<K extends keyof BotSettings>(k: K, v: BotSettings[K]) {
     setSettings((prev) => ({ ...prev, [k]: v }));
+  }
+
+  async function handleGenerate() {
+    if (!genDesc.trim()) return;
+    setGenLoading(true);
+    setGenResult(null);
+    try {
+      const { data } = await apiClient.post(`/api/chatbots/${id}/generate-rich-template`, {
+        description: genDesc,
+        template_type: genType,
+      });
+      setGenResult(data.data.rich_block);
+    } catch {
+      setGenResult("[Error generating template]");
+    }
+    setGenLoading(false);
+  }
+
+  function insertGenResult() {
+    if (!genResult) return;
+    const sep = settings.system_prompt.endsWith("\n") || !settings.system_prompt ? "" : "\n\n";
+    set("system_prompt", settings.system_prompt + sep + "When relevant, show: " + genResult);
+    setGenOpen(false);
+    setGenResult(null);
+    setGenDesc("");
   }
 
   async function handleSave(overrides?: Partial<BotSettings>) {
@@ -379,6 +412,61 @@ export default function ChatbotSettingsPage() {
               </button>
             ))}
           </div>
+          {/* AI generator */}
+          <Button
+            variant="outline"
+            size="sm"
+            className="w-full gap-1.5 text-xs mt-1"
+            onClick={() => setGenOpen((v) => !v)}
+          >
+            <Wand2 className="h-3.5 w-3.5" /> AI Template Generator
+          </Button>
+          {genOpen && (
+            <div className="rounded-lg border bg-muted/30 p-3 space-y-3">
+              <p className="text-xs font-semibold">Generate Rich Content Template</p>
+              <div className="space-y-1">
+                <Label className="text-xs">Template type</Label>
+                <select
+                  value={genType}
+                  onChange={(e) => setGenType(e.target.value as typeof genType)}
+                  className="w-full h-8 rounded-md border bg-background px-2 text-xs"
+                >
+                  <option value="carousel">Carousel (swipeable cards)</option>
+                  <option value="card">Single card with image + buttons</option>
+                  <option value="buttons">Button list</option>
+                  <option value="quick_replies">Quick reply chips</option>
+                </select>
+              </div>
+              <div className="space-y-1">
+                <Label className="text-xs">Description</Label>
+                <textarea
+                  value={genDesc}
+                  onChange={(e) => setGenDesc(e.target.value)}
+                  placeholder="e.g. 3 pricing plans (Starter, Pro, Enterprise) with a Sign Up button for each"
+                  className="w-full rounded-md border bg-background px-3 py-2 text-xs min-h-[60px] resize-y focus:outline-none focus:ring-1 focus:ring-ring"
+                />
+              </div>
+              <Button
+                size="sm"
+                className="w-full h-8 text-xs gap-1.5"
+                disabled={genLoading || !genDesc.trim()}
+                onClick={handleGenerate}
+              >
+                {genLoading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Wand2 className="h-3.5 w-3.5" />}
+                {genLoading ? "Generating…" : "Generate"}
+              </Button>
+              {genResult && (
+                <div className="space-y-2">
+                  <pre className="rounded-md border bg-muted p-2 text-[10px] font-mono overflow-x-auto whitespace-pre-wrap break-all max-h-40">
+                    {genResult}
+                  </pre>
+                  <Button size="sm" className="w-full h-8 text-xs" onClick={insertGenResult}>
+                    <Check className="h-3.5 w-3.5 mr-1" /> Insert into System Prompt
+                  </Button>
+                </div>
+              )}
+            </div>
+          )}
         </div>
       </Section>
 
@@ -403,6 +491,11 @@ export default function ChatbotSettingsPage() {
           </p>
         </div>
       </Section>
+
+      <Separator />
+
+      {/* Google Docs system prompt sync */}
+      <GoogleDocsSyncSection chatbotId={id as string} />
 
       <Separator />
 
@@ -480,6 +573,85 @@ function ModelSelect({
         </optgroup>
       )}
     </select>
+  );
+}
+
+function GoogleDocsSyncSection({ chatbotId }: { chatbotId: string }) {
+  const [docId, setDocId] = useState("");
+  const [linkedDocId, setLinkedDocId] = useState<string | null>(null);
+  const [syncedAt, setSyncedAt] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [syncing, setSyncing] = useState(false);
+
+  useEffect(() => {
+    apiClient.get(`/api/chatbots/${chatbotId}`).then(({ data }) => {
+      const b = data.data;
+      setLinkedDocId(b.docs_system_prompt_doc_id ?? null);
+      setSyncedAt(b.docs_system_prompt_synced_at ?? null);
+      if (b.docs_system_prompt_doc_id) setDocId(b.docs_system_prompt_doc_id);
+    }).catch(() => {});
+  }, [chatbotId]);
+
+  async function handleLink() {
+    setSaving(true);
+    try {
+      const { data } = await apiClient.put(`/api/chatbots/${chatbotId}/docs-system-prompt`, { doc_id: docId.trim() || null });
+      setLinkedDocId(data.data.doc_id);
+      setSyncedAt(data.data.synced_at);
+    } catch {}
+    setSaving(false);
+  }
+
+  async function handleSync() {
+    setSyncing(true);
+    try {
+      const { data } = await apiClient.post(`/api/chatbots/${chatbotId}/docs-system-prompt/sync`);
+      setSyncedAt(data.data.synced_at);
+    } catch {}
+    setSyncing(false);
+  }
+
+  return (
+    <Section title="Google Docs System Prompt">
+      <div className="space-y-3">
+        <Label className="text-xs text-muted-foreground block">
+          Link a Google Doc as the live system prompt. ChatCraft will sync it every 10 minutes and update the prompt automatically.
+          The service account must have <strong>Viewer</strong> access to the document.
+        </Label>
+        <div className="flex gap-2">
+          <Input
+            className="flex-1 h-9 text-xs font-mono"
+            placeholder="Google Doc ID (from URL: /document/d/DOCID/edit)"
+            value={docId}
+            onChange={(e) => setDocId(e.target.value)}
+          />
+          <Button size="sm" className="h-9 text-xs shrink-0" disabled={saving} onClick={handleLink}>
+            {saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : linkedDocId ? "Update" : "Link"}
+          </Button>
+          {linkedDocId && (
+            <Button size="sm" variant="outline" className="h-9 text-xs shrink-0" disabled={syncing} onClick={handleSync}>
+              {syncing ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : "Sync Now"}
+            </Button>
+          )}
+        </div>
+        {linkedDocId && (
+          <p className="text-xs text-muted-foreground">
+            Linked: <code className="rounded bg-muted px-1 text-[11px]">{linkedDocId}</code>
+            {syncedAt && <> · Last synced: {new Date(syncedAt).toLocaleString()}</>}
+          </p>
+        )}
+        {linkedDocId && (
+          <Button
+            size="sm"
+            variant="ghost"
+            className="h-7 text-xs text-destructive hover:text-destructive"
+            onClick={() => { setDocId(""); handleLink(); }}
+          >
+            Unlink document
+          </Button>
+        )}
+      </div>
+    </Section>
   );
 }
 
