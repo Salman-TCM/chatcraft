@@ -309,6 +309,8 @@ async def update_user(
     db: DBSession,
     caller: CurrentUser,
 ) -> dict:
+    from app.models.admin_log import AdminActionLog
+
     result = await db.execute(
         select(User).where(User.id == user_id).options(selectinload(User.subscription))
     )
@@ -324,14 +326,45 @@ async def update_user(
         )
 
     if "role" in body:
+        old_role = u.role.value
         u.role = UserRole(body["role"])
+        db.add(AdminActionLog(
+            admin_user_id=caller.id,
+            admin_email=caller.email,
+            action="role_change",
+            target_user_id=u.id,
+            target_email=u.email,
+            old_value=old_role,
+            new_value=body["role"],
+        ))
+
     if "email_verified" in body:
+        old_ev = str(u.email_verified)
         u.email_verified = bool(body["email_verified"])
+        db.add(AdminActionLog(
+            admin_user_id=caller.id,
+            admin_email=caller.email,
+            action="verify_email",
+            target_user_id=u.id,
+            target_email=u.email,
+            old_value=old_ev,
+            new_value=str(u.email_verified),
+        ))
 
     # Override subscription plan/status
     if ("plan" in body or "subscription_status" in body) and u.subscription:
         if "plan" in body:
+            old_plan = u.subscription.plan.value
             u.subscription.plan = SubscriptionPlan(body["plan"])
+            db.add(AdminActionLog(
+                admin_user_id=caller.id,
+                admin_email=caller.email,
+                action="plan_change",
+                target_user_id=u.id,
+                target_email=u.email,
+                old_value=old_plan,
+                new_value=body["plan"],
+            ))
         if "subscription_status" in body:
             u.subscription.status = SubscriptionState(body["subscription_status"])
 
@@ -346,6 +379,8 @@ async def delete_user(
     db: DBSession,
     caller: CurrentUser,
 ) -> dict:
+    from app.models.admin_log import AdminActionLog
+
     if str(user_id) == str(caller.id):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -355,6 +390,16 @@ async def delete_user(
     u = result.scalar_one_or_none()
     if not u:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+
+    db.add(AdminActionLog(
+        admin_user_id=caller.id,
+        admin_email=caller.email,
+        action="user_delete",
+        target_user_id=u.id,
+        target_email=u.email,
+        old_value=u.role.value,
+        new_value=None,
+    ))
     await db.delete(u)
     await db.commit()
     return {"success": True, "data": None}
@@ -367,6 +412,8 @@ async def impersonate_user(
     caller: CurrentUser,
 ) -> dict:
     """Issue a short-lived access token (15 min) for the target user."""
+    from app.models.admin_log import AdminActionLog
+
     result = await db.execute(select(User).where(User.id == user_id))
     u = result.scalar_one_or_none()
     if not u:
@@ -389,11 +436,60 @@ async def impersonate_user(
     }
     token = jwt.encode(payload, settings.secret_key, algorithm=settings.jwt_algorithm)
 
-    log = ImpersonationAuditLog(actor_user_id=caller.id, target_user_id=u.id)
-    db.add(log)
+    db.add(ImpersonationAuditLog(actor_user_id=caller.id, target_user_id=u.id))
+    db.add(AdminActionLog(
+        admin_user_id=caller.id,
+        admin_email=caller.email,
+        action="impersonate",
+        target_user_id=u.id,
+        target_email=u.email,
+        old_value=None,
+        new_value=None,
+    ))
     await db.commit()
 
     return {"success": True, "data": {"access_token": token, "expires_in": 900, "user": _user_dict(u)}}
+
+
+@router.get("/action-log", response_model=dict)
+async def list_action_log(
+    db: DBSession,
+    page: Annotated[int, Query(ge=1)] = 1,
+    limit: Annotated[int, Query(ge=1, le=200)] = 50,
+    action: str | None = Query(None),
+) -> dict:
+    """Audit log for all admin mutations (role changes, deletions, impersonation)."""
+    from app.models.admin_log import AdminActionLog
+
+    offset = (page - 1) * limit
+    stmt = select(AdminActionLog).order_by(AdminActionLog.created_at.desc())
+    count_stmt = select(func.count()).select_from(AdminActionLog)
+    if action:
+        stmt = stmt.where(AdminActionLog.action == action)
+        count_stmt = count_stmt.where(AdminActionLog.action == action)
+
+    result = await db.execute(stmt.offset(offset).limit(limit))
+    logs = result.scalars().all()
+    total = (await db.execute(count_stmt)).scalar_one()
+
+    return {
+        "success": True,
+        "data": [
+            {
+                "id": str(log.id),
+                "admin_email": log.admin_email,
+                "action": log.action,
+                "target_email": log.target_email,
+                "old_value": log.old_value,
+                "new_value": log.new_value,
+                "created_at": log.created_at.isoformat(),
+            }
+            for log in logs
+        ],
+        "total": total,
+        "page": page,
+        "limit": limit,
+    }
 
 
 @router.get("/impersonation-log", response_model=dict)
