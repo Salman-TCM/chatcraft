@@ -4,8 +4,9 @@ import { useEffect, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import {
   AlertCircle, ArrowLeft, Bot, Check, ChevronDown, ChevronRight,
-  ChevronUp, Code2, Globe, Loader2, Mail, Link2, Send,
-  Chrome, Sheet, Trash2, Zap, ToggleLeft, ToggleRight,
+  ChevronUp, Code2, Copy, ExternalLink, Globe, Loader2, Mail,
+  Link2, MessageSquare, RefreshCw, Send, Server,
+  Chrome, Sheet, Smartphone, Trash2, Zap, ToggleLeft, ToggleRight,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -38,6 +39,16 @@ interface Agent {
   max_steps: number;
   is_published: boolean;
   is_active: boolean;
+  share_enabled: boolean;
+  share_token: string | null;
+}
+
+interface MCPServer {
+  id: string;
+  name: string;
+  server_url: string;
+  is_active: boolean;
+  auth_type: string;
 }
 
 interface Chatbot {
@@ -104,21 +115,32 @@ const TOOLS = [
     key: "email",
     label: "Send Email",
     icon: Mail,
-    description: "Send emails via your configured integration",
+    description: "Send emails via AWS SES or SMTP integration",
     color: "text-rose-600",
     bg: "bg-rose-50 border-rose-200",
     activeBg: "bg-rose-600",
   },
+  {
+    key: "sms",
+    label: "Send SMS",
+    icon: Smartphone,
+    description: "Send SMS text messages via Twilio integration",
+    color: "text-violet-600",
+    bg: "bg-violet-50 border-violet-200",
+    activeBg: "bg-violet-600",
+  },
 ];
 
-type Tab = "identity" | "model" | "instructions" | "tools" | "advanced";
+type Tab = "identity" | "model" | "instructions" | "tools" | "mcp" | "advanced" | "share";
 
 const TABS: { id: Tab; label: string }[] = [
   { id: "identity",     label: "Identity" },
   { id: "model",        label: "Model" },
   { id: "instructions", label: "Instructions" },
   { id: "tools",        label: "Tools" },
+  { id: "mcp",          label: "MCP" },
   { id: "advanced",     label: "Advanced" },
+  { id: "share",        label: "Share" },
 ];
 
 // ── Model selector ────────────────────────────────────────────────────────────
@@ -178,6 +200,15 @@ export default function AgentBuilderPage() {
   const [providerMeta, setProviderMeta] = useState<Record<string, ProviderMeta>>({});
   const [configuredProviders, setConfiguredProviders] = useState<Set<string>>(new Set());
 
+  // MCP servers
+  const [mcpServers, setMcpServers] = useState<MCPServer[]>([]);
+
+  // Share
+  const [shareEnabled, setShareEnabled] = useState(false);
+  const [shareToken, setShareToken] = useState<string | null>(null);
+  const [shareLoading, setShareLoading] = useState(false);
+  const [shareCopied, setShareCopied] = useState(false);
+
   // Tab
   const [activeTab, setActiveTab] = useState<Tab>("identity");
 
@@ -206,7 +237,8 @@ export default function AgentBuilderPage() {
       apiClient.get("/api/chatbots"),
       apiClient.get("/api/settings/model-keys/providers"),
       apiClient.get("/api/settings/model-keys"),
-    ]).then(([agentRes, botsRes, metaRes, statusRes]) => {
+      apiClient.get("/api/v1/mcp-servers").catch(() => ({ data: { data: [] } })),
+    ]).then(([agentRes, botsRes, metaRes, statusRes, mcpRes]) => {
       const a: Agent = agentRes.data.data;
       setAgent(a);
       setName(a.name);
@@ -218,6 +250,8 @@ export default function AgentBuilderPage() {
       setMemoryEnabled(a.memory_enabled);
       setMaxSteps(a.max_steps);
       setIsActive(a.is_active);
+      setShareEnabled(a.share_enabled ?? false);
+      setShareToken(a.share_token ?? null);
       setChatbots(botsRes.data.data ?? []);
       setProviderMeta(metaRes.data.data ?? {});
       const configured = new Set<string>(
@@ -226,6 +260,7 @@ export default function AgentBuilderPage() {
           .map((s) => s.provider)
       );
       setConfiguredProviders(configured);
+      setMcpServers(mcpRes.data.data ?? []);
     }).catch(() => router.push("/dashboard/agents")).finally(() => setLoading(false));
   }, [id]);
 
@@ -259,6 +294,47 @@ export default function AgentBuilderPage() {
   }
 
   const enabledToolCount = Object.values(tools).filter(Boolean).length;
+
+  async function enableShare() {
+    setShareLoading(true);
+    try {
+      const { data } = await apiClient.post(`/api/v1/agents/${id}/share/enable`);
+      setShareEnabled(true);
+      setShareToken(data.data.share_token);
+    } finally {
+      setShareLoading(false);
+    }
+  }
+
+  async function disableShare() {
+    setShareLoading(true);
+    try {
+      await apiClient.post(`/api/v1/agents/${id}/share/disable`);
+      setShareEnabled(false);
+    } finally {
+      setShareLoading(false);
+    }
+  }
+
+  async function regenerateToken() {
+    if (!confirm("Regenerate share link? The current link will stop working immediately.")) return;
+    setShareLoading(true);
+    try {
+      const { data } = await apiClient.post(`/api/v1/agents/${id}/share/regenerate`);
+      setShareToken(data.data.share_token);
+      setShareEnabled(true);
+    } finally {
+      setShareLoading(false);
+    }
+  }
+
+  function copyShareLink() {
+    if (!shareToken) return;
+    const url = `${window.location.origin}/agent/${shareToken}`;
+    navigator.clipboard.writeText(url);
+    setShareCopied(true);
+    setTimeout(() => setShareCopied(false), 2000);
+  }
 
   async function sendChatMessage() {
     const text = chatInput.trim();
@@ -585,6 +661,69 @@ Always prefer primary sources over aggregator sites.`}
             </div>
           )}
 
+          {/* ─ MCP tab ─ */}
+          {activeTab === "mcp" && (
+            <div className="space-y-4">
+              <p className="text-[11px] text-muted-foreground">
+                All your active MCP servers are automatically available to this agent. Tools are
+                discovered at runtime and namespaced as <code className="font-mono bg-muted px-1 rounded">mcp__server__tool</code>.
+              </p>
+
+              {mcpServers.length === 0 ? (
+                <div className="rounded-lg border border-dashed p-5 text-center">
+                  <Server className="h-8 w-8 text-muted-foreground/30 mx-auto mb-2" />
+                  <p className="text-xs font-medium text-muted-foreground">No MCP servers configured</p>
+                  <p className="text-[11px] text-muted-foreground mt-1 mb-3">
+                    Connect MCP servers in Settings to extend this agent with external tools.
+                  </p>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="h-7 text-xs"
+                    onClick={() => window.open("/dashboard/settings/mcp", "_blank")}
+                  >
+                    <ExternalLink className="h-3 w-3" />
+                    Manage MCP Servers
+                  </Button>
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  {mcpServers.map(s => (
+                    <div
+                      key={s.id}
+                      className={`flex items-center gap-3 rounded-lg border p-3 ${s.is_active ? "bg-background" : "bg-muted/30 opacity-60"}`}
+                    >
+                      <div className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg ${s.is_active ? "bg-indigo-100 text-indigo-600" : "bg-muted text-muted-foreground"}`}>
+                        <Server className="h-4 w-4" />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-xs font-semibold truncate">{s.name}</p>
+                        <p className="text-[11px] text-muted-foreground truncate">{s.server_url}</p>
+                      </div>
+                      <span className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-medium ${s.is_active ? "bg-green-100 text-green-700" : "bg-muted text-muted-foreground"}`}>
+                        {s.is_active ? "Active" : "Off"}
+                      </span>
+                    </div>
+                  ))}
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    className="h-7 text-xs w-full text-muted-foreground"
+                    onClick={() => window.open("/dashboard/settings/mcp", "_blank")}
+                  >
+                    <ExternalLink className="h-3 w-3" />
+                    Manage MCP Servers
+                  </Button>
+                </div>
+              )}
+
+              <div className="rounded-md bg-muted/30 border px-3 py-2.5 text-[11px] text-muted-foreground space-y-1">
+                <p className="font-medium text-foreground">How MCP tools work</p>
+                <p>When you start a chat, the agent calls <code className="font-mono bg-muted px-0.5 rounded">tools/list</code> on each active server to discover available tools. Each tool is prefixed with the server name so the model knows which server to call.</p>
+              </div>
+            </div>
+          )}
+
           {/* ─ Advanced tab ─ */}
           {activeTab === "advanced" && (
             <div className="space-y-5">
@@ -641,6 +780,88 @@ Always prefer primary sources over aggregator sites.`}
                     {isActive && <Check className="h-2.5 w-2.5 text-white" />}
                   </div>
                 </div>
+              </div>
+            </div>
+          )}
+
+          {/* ─ Share tab ─ */}
+          {activeTab === "share" && (
+            <div className="space-y-4">
+              <p className="text-[11px] text-muted-foreground">
+                Share a public link so anyone can chat with this agent — no login required.
+                The link uses a secret token; regenerating it invalidates the old URL.
+              </p>
+
+              {/* Toggle */}
+              <div
+                className={`flex items-center justify-between rounded-lg border p-3 cursor-pointer transition-colors ${shareEnabled ? "border-indigo-300 bg-indigo-50" : "hover:bg-muted/40"}`}
+                onClick={shareLoading ? undefined : (shareEnabled ? disableShare : enableShare)}
+              >
+                <div>
+                  <p className="text-xs font-medium">Public sharing</p>
+                  <p className="text-[11px] text-muted-foreground">
+                    {shareEnabled ? "Anyone with the link can chat with this agent" : "Agent is private — only you can use it"}
+                  </p>
+                </div>
+                <div className={`h-4 w-4 rounded-full border-2 shrink-0 flex items-center justify-center transition-colors ${shareEnabled ? "bg-indigo-600 border-indigo-600" : "border-muted-foreground/30"}`}>
+                  {shareLoading ? <Loader2 className="h-2.5 w-2.5 animate-spin text-white" /> : shareEnabled && <Check className="h-2.5 w-2.5 text-white" />}
+                </div>
+              </div>
+
+              {/* Share URL */}
+              {shareEnabled && shareToken && (
+                <div className="space-y-2">
+                  <Label className="text-xs">Share link</Label>
+                  <div className="flex gap-2">
+                    <Input
+                      readOnly
+                      value={`${typeof window !== "undefined" ? window.location.origin : ""}/agent/${shareToken}`}
+                      className="h-8 text-xs font-mono bg-muted/30"
+                    />
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="h-8 shrink-0"
+                      onClick={copyShareLink}
+                    >
+                      {shareCopied ? <Check className="h-3.5 w-3.5 text-green-500" /> : <Copy className="h-3.5 w-3.5" />}
+                    </Button>
+                  </div>
+
+                  <div className="flex gap-2">
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="h-7 text-xs flex-1"
+                      onClick={() => window.open(`/agent/${shareToken}`, "_blank")}
+                    >
+                      <ExternalLink className="h-3 w-3" />
+                      Open preview
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      className="h-7 text-xs text-muted-foreground"
+                      onClick={regenerateToken}
+                      disabled={shareLoading}
+                    >
+                      <RefreshCw className="h-3 w-3" />
+                      Regenerate
+                    </Button>
+                  </div>
+                </div>
+              )}
+
+              {!shareEnabled && (
+                <div className="rounded-md bg-muted/30 border px-3 py-2.5 text-[11px] text-muted-foreground">
+                  Enable sharing above to get a public link. You can disable it at any time to
+                  immediately revoke access.
+                </div>
+              )}
+
+              <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2.5 text-[11px] text-amber-700 space-y-1">
+                <p className="font-medium">Security note</p>
+                <p>Public agents run with your API keys and tool integrations. Anyone with the link can send messages and trigger tools (web search, HTTP calls, etc.). Do not share links publicly if your agent has access to sensitive data.</p>
               </div>
             </div>
           )}
