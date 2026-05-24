@@ -4,10 +4,13 @@ Agent Builder API — create, configure, and run autonomous AI agents.
 Each agent has:
   - Custom instructions (system prompt)
   - Optional chatbot attachment (inherits KB + base system prompt)
-  - Tool toggles (web_search, browser, code, http, sheets, email)
+  - Tool toggles (web_search, browser, code, http, sheets, email, sms)
+  - MCP server tools (dynamically discovered from user's configured MCP servers)
   - Agentic loop with configurable max_steps
+  - Optional public share link
 """
 import json
+import secrets
 import uuid
 from typing import Any, AsyncIterator
 
@@ -22,10 +25,12 @@ from app.core.config import settings
 from app.core.dependencies import CurrentUser, DBSession
 from app.models.agent import Agent
 from app.models.chatbot_config import ChatbotConfig
+from app.models.mcp import MCPServerConfig
 from app.schemas.agent import AgentCreateRequest, AgentResponse, AgentUpdateRequest
 from app.services.kb.rag import RAGService
 
 router = APIRouter(prefix="/api/v1/agents", tags=["agents"])
+public_router = APIRouter(prefix="/api/public/agents", tags=["agents-public"])
 
 
 # ─── CRUD ─────────────────────────────────────────────────────────────────────
@@ -91,6 +96,75 @@ async def delete_agent(agent_id: uuid.UUID, user: CurrentUser, db: DBSession):
     return {"success": True}
 
 
+# ─── Share management ──────────────────────────────────────────────────────────
+
+@router.post("/{agent_id}/share/enable")
+async def enable_share(agent_id: uuid.UUID, user: CurrentUser, db: DBSession):
+    """Enable public sharing and generate a share token."""
+    agent = await _get_owned_agent(agent_id, user.id, db)
+    if not agent.share_token:
+        agent.share_token = secrets.token_urlsafe(32)
+    agent.share_enabled = True
+    await db.commit()
+    await db.refresh(agent)
+    return {"success": True, "data": {"share_token": agent.share_token, "share_enabled": True}}
+
+
+@router.post("/{agent_id}/share/disable")
+async def disable_share(agent_id: uuid.UUID, user: CurrentUser, db: DBSession):
+    """Disable public sharing (token is preserved for re-enabling)."""
+    agent = await _get_owned_agent(agent_id, user.id, db)
+    agent.share_enabled = False
+    await db.commit()
+    return {"success": True, "data": {"share_enabled": False}}
+
+
+@router.post("/{agent_id}/share/regenerate")
+async def regenerate_share_token(agent_id: uuid.UUID, user: CurrentUser, db: DBSession):
+    """Regenerate the share token, invalidating any existing shared links."""
+    agent = await _get_owned_agent(agent_id, user.id, db)
+    agent.share_token = secrets.token_urlsafe(32)
+    agent.share_enabled = True
+    await db.commit()
+    await db.refresh(agent)
+    return {"success": True, "data": {"share_token": agent.share_token, "share_enabled": True}}
+
+
+# ─── Public endpoints (no auth) ────────────────────────────────────────────────
+
+@public_router.get("/{share_token}")
+async def get_public_agent(share_token: str, db: DBSession):
+    """Return public-facing agent info for the share page."""
+    agent = await _get_shared_agent(share_token, db)
+    return {
+        "success": True,
+        "data": {
+            "id": str(agent.id),
+            "name": agent.name,
+            "description": agent.description,
+            "model": agent.model,
+        },
+    }
+
+
+class PublicChatRequest(BaseModel):
+    message: str
+    conversation_history: list[dict] = []
+
+
+@public_router.post("/{share_token}/chat")
+async def public_agent_chat(share_token: str, body: PublicChatRequest, db: DBSession):
+    """Stream a public agent response. No authentication required."""
+    agent = await _get_shared_agent(share_token, db)
+    system_prompt = await _build_system_prompt(agent, db)
+    tools, mcp_map = await _build_tools_with_mcp(agent, agent.user_id, db)
+    return StreamingResponse(
+        _run_agent(agent, system_prompt, tools, mcp_map, body.message, body.conversation_history),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
 # ─── Chat / Run ───────────────────────────────────────────────────────────────
 
 class AgentChatRequest(BaseModel):
@@ -107,15 +181,10 @@ async def agent_chat(
 ):
     """Stream an agent response with tool use, showing thinking steps as SSE events."""
     agent = await _get_owned_agent(agent_id, user.id, db)
-
-    # Build system prompt
     system_prompt = await _build_system_prompt(agent, db)
-
-    # Build tool list
-    tools = _build_tools(agent.tools or {})
-
+    tools, mcp_map = await _build_tools_with_mcp(agent, user.id, db)
     return StreamingResponse(
-        _run_agent(agent, system_prompt, tools, body.message, body.conversation_history),
+        _run_agent(agent, system_prompt, tools, mcp_map, body.message, body.conversation_history),
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
@@ -127,6 +196,7 @@ async def _run_agent(
     agent: Agent,
     system_prompt: str,
     tools: list[dict],
+    mcp_map: dict[str, Any],
     user_message: str,
     history: list[dict],
 ) -> AsyncIterator[str]:
@@ -152,7 +222,6 @@ async def _run_agent(
 
         response = await client.messages.create(**kwargs)
 
-        # Collect text content and tool uses from response
         text_parts: list[str] = []
         tool_uses: list[Any] = []
 
@@ -162,20 +231,16 @@ async def _run_agent(
             elif block.type == "tool_use":
                 tool_uses.append(block)
 
-        # Stream any text the model produced
         if text_parts:
-            combined = "".join(text_parts)
-            yield _sse({"type": "text", "content": combined})
+            yield _sse({"type": "text", "content": "".join(text_parts)})
 
-        # If no tool calls, we're done
         if not tool_uses or response.stop_reason == "end_turn":
             break
 
-        # Execute each tool call
         tool_results: list[dict] = []
         for tu in tool_uses:
             yield _sse({"type": "tool_call", "tool": tu.name, "input": tu.input})
-            result_text = await _execute_tool(tu.name, tu.input)
+            result_text = await _execute_tool(tu.name, tu.input, mcp_map)
             yield _sse({"type": "tool_result", "tool": tu.name, "result": result_text[:500]})
             tool_results.append({
                 "type": "tool_result",
@@ -183,7 +248,6 @@ async def _run_agent(
                 "content": result_text,
             })
 
-        # Append assistant message + tool results for next loop
         messages.append({"role": "assistant", "content": response.content})
         messages.append({"role": "user", "content": tool_results})
 
@@ -193,9 +257,47 @@ async def _run_agent(
     yield _sse({"type": "done"})
 
 
-# ─── Tool definitions ─────────────────────────────────────────────────────────
+# ─── Tool building (built-in + MCP) ──────────────────────────────────────────
 
-def _build_tools(tools_config: dict) -> list[dict]:
+async def _build_tools_with_mcp(
+    agent: Agent, user_id: uuid.UUID, db: DBSession
+) -> tuple[list[dict], dict[str, Any]]:
+    """
+    Returns (tools_list_for_anthropic, mcp_server_map).
+    mcp_server_map: {tool_name -> MCPServerConfig} for routing tool calls back to MCP servers.
+    """
+    tools = _build_builtin_tools(agent.tools or {})
+    mcp_map: dict[str, Any] = {}
+
+    # Discover MCP tools from user's active servers
+    try:
+        result = await db.execute(
+            select(MCPServerConfig).where(
+                MCPServerConfig.user_id == user_id,
+                MCPServerConfig.is_active == True,  # noqa: E712
+            )
+        )
+        servers = result.scalars().all()
+        for server in servers:
+            try:
+                discovered = await _discover_mcp_tools(server)
+                for tool in discovered:
+                    tool_name = f"mcp__{server.name.replace(' ', '_')}__{tool['name']}"
+                    tools.append({
+                        "name": tool_name,
+                        "description": f"[MCP: {server.name}] {tool.get('description', '')}",
+                        "input_schema": tool.get("inputSchema", {"type": "object", "properties": {}}),
+                    })
+                    mcp_map[tool_name] = {"server": server, "original_name": tool["name"]}
+            except Exception:
+                pass  # Skip unreachable MCP servers silently
+    except Exception:
+        pass
+
+    return tools, mcp_map
+
+
+def _build_builtin_tools(tools_config: dict) -> list[dict]:
     defs = []
 
     if tools_config.get("web_search"):
@@ -204,10 +306,30 @@ def _build_tools(tools_config: dict) -> list[dict]:
             "description": "Search the web for current information. Use for facts, news, prices, or anything that may have changed recently.",
             "input_schema": {
                 "type": "object",
-                "properties": {
-                    "query": {"type": "string", "description": "Search query"},
-                },
+                "properties": {"query": {"type": "string", "description": "Search query"}},
                 "required": ["query"],
+            },
+        })
+
+    if tools_config.get("browser"):
+        defs.append({
+            "name": "browse_url",
+            "description": "Fetch and extract readable text content from a URL.",
+            "input_schema": {
+                "type": "object",
+                "properties": {"url": {"type": "string", "description": "URL to visit"}},
+                "required": ["url"],
+            },
+        })
+
+    if tools_config.get("code"):
+        defs.append({
+            "name": "run_code",
+            "description": "Execute a Python code snippet. Returns stdout. Use for calculations, data processing, or formatting.",
+            "input_schema": {
+                "type": "object",
+                "properties": {"code": {"type": "string", "description": "Python code to execute"}},
+                "required": ["code"],
             },
         })
 
@@ -227,41 +349,15 @@ def _build_tools(tools_config: dict) -> list[dict]:
             },
         })
 
-    if tools_config.get("code"):
-        defs.append({
-            "name": "run_code",
-            "description": "Execute a Python code snippet. Returns stdout output. Use for calculations, data processing, or formatting.",
-            "input_schema": {
-                "type": "object",
-                "properties": {
-                    "code": {"type": "string", "description": "Python code to execute"},
-                },
-                "required": ["code"],
-            },
-        })
-
-    if tools_config.get("browser"):
-        defs.append({
-            "name": "browse_url",
-            "description": "Fetch and extract readable text content from a URL. Use to read web pages, articles, or documentation.",
-            "input_schema": {
-                "type": "object",
-                "properties": {
-                    "url": {"type": "string", "description": "URL to visit"},
-                },
-                "required": ["url"],
-            },
-        })
-
     if tools_config.get("sheets"):
         defs.append({
             "name": "google_sheets",
-            "description": "Read or write data in a Google Sheet. Requires a service account configured in settings.",
+            "description": "Read or write data in a Google Sheet.",
             "input_schema": {
                 "type": "object",
                 "properties": {
                     "spreadsheet_id": {"type": "string", "description": "Google Sheet ID from its URL"},
-                    "operation": {"type": "string", "enum": ["read_range", "append_row", "update_range"], "description": "Operation to perform"},
+                    "operation": {"type": "string", "enum": ["read_range", "append_row", "update_range"]},
                     "range": {"type": "string", "description": "A1 notation range (e.g. Sheet1!A1:D10)"},
                     "values": {"type": "array", "description": "Rows to write for append_row or update_range"},
                 },
@@ -269,11 +365,46 @@ def _build_tools(tools_config: dict) -> list[dict]:
             },
         })
 
+    if tools_config.get("email"):
+        defs.append({
+            "name": "send_email",
+            "description": "Send an email to a recipient. Use when the user asks to send, draft, or forward an email.",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "to": {"type": "string", "description": "Recipient email address"},
+                    "subject": {"type": "string", "description": "Email subject line"},
+                    "body": {"type": "string", "description": "Email body (plain text or simple HTML)"},
+                },
+                "required": ["to", "subject", "body"],
+            },
+        })
+
+    if tools_config.get("sms"):
+        defs.append({
+            "name": "send_sms",
+            "description": "Send an SMS text message to a phone number via Twilio.",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "to": {"type": "string", "description": "Recipient phone number in E.164 format (e.g. +14155552671)"},
+                    "message": {"type": "string", "description": "SMS message text (max 160 chars for single segment)"},
+                },
+                "required": ["to", "message"],
+            },
+        })
+
     return defs
 
 
-async def _execute_tool(name: str, inputs: dict) -> str:
+# ─── Tool execution ───────────────────────────────────────────────────────────
+
+async def _execute_tool(name: str, inputs: dict, mcp_map: dict) -> str:
     try:
+        # MCP tool
+        if name in mcp_map:
+            return await _tool_mcp(mcp_map[name]["server"], mcp_map[name]["original_name"], inputs)
+        # Built-in tools
         if name == "web_search":
             return await _tool_web_search(inputs.get("query", ""))
         elif name == "http_request":
@@ -284,13 +415,54 @@ async def _execute_tool(name: str, inputs: dict) -> str:
             return await _tool_browse(inputs.get("url", ""))
         elif name == "google_sheets":
             return await _tool_sheets(inputs)
+        elif name == "send_email":
+            return await _tool_send_email(inputs)
+        elif name == "send_sms":
+            return await _tool_send_sms(inputs)
         return f"Unknown tool: {name}"
     except Exception as exc:
         return f"Tool error: {exc}"
 
 
+# ─── MCP tool execution ───────────────────────────────────────────────────────
+
+async def _discover_mcp_tools(server: MCPServerConfig) -> list[dict]:
+    result = await _mcp_rpc(server, "tools/list", {})
+    return result.get("tools", [])
+
+
+async def _tool_mcp(server: MCPServerConfig, tool_name: str, arguments: dict) -> str:
+    result = await _mcp_rpc(server, "tools/call", {"name": tool_name, "arguments": arguments})
+    content = result.get("content", [])
+    if isinstance(content, list):
+        parts = [c.get("text", "") for c in content if isinstance(c, dict) and c.get("type") == "text"]
+        return "\n".join(parts)[:4000] or json.dumps(result)[:4000]
+    return str(result)[:4000]
+
+
+def _mcp_auth_headers(server: MCPServerConfig) -> dict:
+    headers: dict = {"Content-Type": "application/json"}
+    cfg = server.auth_config or {}
+    if server.auth_type == "bearer":
+        headers["Authorization"] = f"Bearer {cfg.get('token', '')}"
+    elif server.auth_type == "header":
+        headers[cfg.get("header_name", "X-API-Key")] = cfg.get("header_value", "")
+    return headers
+
+
+async def _mcp_rpc(server: MCPServerConfig, method: str, params: dict) -> dict:
+    payload = {"jsonrpc": "2.0", "id": 1, "method": method, "params": params}
+    async with httpx.AsyncClient(timeout=30) as client:
+        resp = await client.post(server.server_url, headers=_mcp_auth_headers(server), json=payload)
+    data = resp.json()
+    if "error" in data:
+        raise RuntimeError(data["error"].get("message", "MCP error"))
+    return data.get("result", {})
+
+
+# ─── Built-in tool implementations ───────────────────────────────────────────
+
 async def _tool_web_search(query: str) -> str:
-    # Use Brave Search or fall back to DuckDuckGo instant answer
     if settings.brave_search_api_key:
         async with httpx.AsyncClient() as client:
             resp = await client.get(
@@ -304,7 +476,6 @@ async def _tool_web_search(query: str) -> str:
             results = data.get("web", {}).get("results", [])
             lines = [f"{r['title']}: {r['description']} ({r['url']})" for r in results[:5]]
             return "\n".join(lines) or "No results."
-    # Fallback: DuckDuckGo
     async with httpx.AsyncClient() as client:
         resp = await client.get(
             "https://api.duckduckgo.com/",
@@ -336,7 +507,6 @@ async def _tool_http(inputs: dict) -> str:
 def _tool_run_code(code: str) -> str:
     import io
     import sys
-    # Only allow safe builtins — no file system or network
     allowed_builtins = {
         "print": print, "len": len, "range": range, "enumerate": enumerate,
         "zip": zip, "map": map, "filter": filter, "sorted": sorted,
@@ -400,6 +570,79 @@ async def _tool_sheets(inputs: dict) -> str:
     return "Unknown operation."
 
 
+async def _tool_send_email(inputs: dict) -> str:
+    to = inputs.get("to", "")
+    subject = inputs.get("subject", "(no subject)")
+    body = inputs.get("body", "")
+    if not to:
+        return "Error: recipient email address is required."
+
+    # Try AWS SES first
+    if getattr(settings, "aws_access_key_id", None) and getattr(settings, "aws_secret_access_key", None):
+        try:
+            import boto3
+            ses = boto3.client(
+                "ses",
+                region_name=getattr(settings, "aws_region", "us-east-1"),
+                aws_access_key_id=settings.aws_access_key_id,
+                aws_secret_access_key=settings.aws_secret_access_key,
+            )
+            ses.send_email(
+                Source=getattr(settings, "email_from", "noreply@chatcraft.ai"),
+                Destination={"ToAddresses": [to]},
+                Message={
+                    "Subject": {"Data": subject},
+                    "Body": {"Text": {"Data": body}, "Html": {"Data": f"<html><body><p>{body}</p></body></html>"}},
+                },
+            )
+            return f"Email sent to {to}."
+        except Exception as e:
+            pass  # Fall through to SMTP
+
+    # Try SMTP (platform config)
+    smtp_host = getattr(settings, "smtp_host", None)
+    if smtp_host:
+        try:
+            import smtplib
+            from email.mime.text import MIMEText
+            msg = MIMEText(body, "plain")
+            msg["Subject"] = subject
+            msg["From"] = getattr(settings, "email_from", "noreply@chatcraft.ai")
+            msg["To"] = to
+            port = int(getattr(settings, "smtp_port", 587))
+            with smtplib.SMTP(smtp_host, port) as srv:
+                if port != 25:
+                    srv.starttls()
+                smtp_user = getattr(settings, "smtp_user", None)
+                if smtp_user:
+                    srv.login(smtp_user, getattr(settings, "smtp_password", ""))
+                srv.sendmail(msg["From"], [to], msg.as_string())
+            return f"Email sent to {to}."
+        except Exception as e:
+            return f"Failed to send email: {e}"
+
+    return "Email not configured — set AWS SES or SMTP credentials in settings."
+
+
+async def _tool_send_sms(inputs: dict) -> str:
+    to = inputs.get("to", "")
+    message = inputs.get("message", "")
+    if not to or not message:
+        return "Error: 'to' phone number and 'message' are required."
+    if not getattr(settings, "twilio_account_sid", None) or not getattr(settings, "twilio_auth_token", None):
+        return "SMS not configured — set Twilio credentials in settings."
+    try:
+        from twilio.rest import Client
+        client = Client(settings.twilio_account_sid, settings.twilio_auth_token)
+        from_number = getattr(settings, "twilio_phone_number", None)
+        if not from_number:
+            return "SMS not configured — set TWILIO_PHONE_NUMBER in settings."
+        client.messages.create(body=message, from_=from_number, to=to)
+        return f"SMS sent to {to}."
+    except Exception as e:
+        return f"Failed to send SMS: {e}"
+
+
 # ─── System prompt builder ────────────────────────────────────────────────────
 
 async def _build_system_prompt(agent: Agent, db: DBSession) -> str:
@@ -435,6 +678,16 @@ async def _get_owned_agent(agent_id: uuid.UUID, user_id: uuid.UUID, db: DBSessio
     agent = result.scalar_one_or_none()
     if not agent:
         raise HTTPException(status_code=404, detail="Agent not found")
+    return agent
+
+
+async def _get_shared_agent(share_token: str, db: DBSession) -> Agent:
+    result = await db.execute(
+        select(Agent).where(Agent.share_token == share_token, Agent.share_enabled == True)  # noqa: E712
+    )
+    agent = result.scalar_one_or_none()
+    if not agent:
+        raise HTTPException(status_code=404, detail="Agent not found or sharing is disabled")
     return agent
 
 
