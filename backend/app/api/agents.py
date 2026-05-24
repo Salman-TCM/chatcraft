@@ -159,7 +159,7 @@ async def public_agent_chat(share_token: str, body: PublicChatRequest, db: DBSes
     agent = await _get_shared_agent(share_token, db)
     system_prompt = await _build_system_prompt(agent, db)
     tools, mcp_map = await _build_tools_with_mcp(agent, agent.user_id, db)
-    api_key = await _resolve_anthropic_key(agent.user_id, db)
+    _, api_key = await _resolve_api_key(agent.user_id, agent.model or "claude-sonnet-4-6", db)
     return StreamingResponse(
         _run_agent(agent, system_prompt, tools, mcp_map, body.message, body.conversation_history, api_key=api_key),
         media_type="text/event-stream",
@@ -185,7 +185,7 @@ async def agent_chat(
     agent = await _get_owned_agent(agent_id, user.id, db)
     system_prompt = await _build_system_prompt(agent, db)
     tools, mcp_map = await _build_tools_with_mcp(agent, user.id, db)
-    api_key = await _resolve_anthropic_key(user.id, db)
+    _, api_key = await _resolve_api_key(user.id, agent.model or "claude-sonnet-4-6", db)
     return StreamingResponse(
         _run_agent(agent, system_prompt, tools, mcp_map, body.message, body.conversation_history, api_key=api_key),
         media_type="text/event-stream",
@@ -195,10 +195,31 @@ async def agent_chat(
 
 # ─── Agent execution loop ─────────────────────────────────────────────────────
 
+_GEMINI_MODELS = {
+    "gemini-1.5-pro", "gemini-1.5-flash",
+    "gemini-2.0-flash", "gemini-2.0-flash-001", "gemini-2.0-flash-lite", "gemini-2.0-flash-lite-001",
+    "gemini-2.5-pro", "gemini-2.5-flash", "gemini-2.5-flash-lite",
+}
+
+
+def _model_provider(model: str) -> str:
+    return "google" if model in _GEMINI_MODELS or model.startswith("gemini") else "anthropic"
+
+
+async def _resolve_api_key(user_id: uuid.UUID, model: str, db) -> tuple[str, str | None]:
+    """Return (provider, api_key) for the given model, reading per-user keys first."""
+    provider = _model_provider(model)
+    user_key = await _get_user_key(user_id, provider, db)
+    if user_key:
+        return provider, user_key
+    fallback = settings.anthropic_api_key if provider == "anthropic" else getattr(settings, "google_ai_api_key", None)
+    return provider, fallback or None
+
+
+# kept for callers that pre-resolve (public_agent_chat, agent_chat)
 async def _resolve_anthropic_key(user_id: uuid.UUID, db) -> str | None:
-    """Return user's Anthropic API key, falling back to the platform key."""
-    user_key = await _get_user_key(user_id, "anthropic", db)
-    return user_key or settings.anthropic_api_key or None
+    _, key = await _resolve_api_key(user_id, "claude-sonnet-4-6", db)
+    return key
 
 
 async def _run_agent(
@@ -211,11 +232,31 @@ async def _run_agent(
     *,
     api_key: str | None = None,
 ) -> AsyncIterator[str]:
-    if not api_key:
-        yield f"data: {json.dumps({'type': 'error', 'content': 'No Anthropic API key configured. Add one in Settings → Model Keys.'})}\n\n"
-        return
-    client = anthropic.AsyncAnthropic(api_key=api_key)
+    model = agent.model or "claude-sonnet-4-6"
+    provider = _model_provider(model)
 
+    if not api_key:
+        yield _sse({"type": "error", "content": f"No {provider.title()} API key configured. Add one in Settings → Model Keys."})
+        return
+
+    if provider == "google":
+        async for chunk in _run_agent_gemini(agent, system_prompt, tools, mcp_map, user_message, history, api_key):
+            yield chunk
+    else:
+        async for chunk in _run_agent_anthropic(agent, system_prompt, tools, mcp_map, user_message, history, api_key):
+            yield chunk
+
+
+async def _run_agent_anthropic(
+    agent: Agent,
+    system_prompt: str,
+    tools: list[dict],
+    mcp_map: dict[str, Any],
+    user_message: str,
+    history: list[dict],
+    api_key: str,
+) -> AsyncIterator[str]:
+    client = anthropic.AsyncAnthropic(api_key=api_key)
     messages: list[dict] = list(history)
     messages.append({"role": "user", "content": user_message})
 
@@ -223,51 +264,156 @@ async def _run_agent(
     max_steps = agent.max_steps or 10
     ctx = {"agent_id": str(agent.id)}
 
-    while step < max_steps:
-        step += 1
+    try:
+        while step < max_steps:
+            step += 1
+            kwargs: dict[str, Any] = {
+                "model": agent.model or "claude-sonnet-4-6",
+                "max_tokens": 4096,
+                "system": system_prompt,
+                "messages": messages,
+            }
+            if tools:
+                kwargs["tools"] = tools
 
-        kwargs: dict[str, Any] = {
-            "model": agent.model or "claude-sonnet-4-6",
-            "max_tokens": 4096,
-            "system": system_prompt,
-            "messages": messages,
-        }
-        if tools:
-            kwargs["tools"] = tools
+            response = await client.messages.create(**kwargs)
 
-        response = await client.messages.create(**kwargs)
+            text_parts: list[str] = []
+            tool_uses: list[Any] = []
+            for block in response.content:
+                if block.type == "text":
+                    text_parts.append(block.text)
+                elif block.type == "tool_use":
+                    tool_uses.append(block)
 
-        text_parts: list[str] = []
-        tool_uses: list[Any] = []
+            if text_parts:
+                yield _sse({"type": "text", "content": "".join(text_parts)})
 
-        for block in response.content:
-            if block.type == "text":
-                text_parts.append(block.text)
-            elif block.type == "tool_use":
-                tool_uses.append(block)
+            if not tool_uses or response.stop_reason == "end_turn":
+                break
 
-        if text_parts:
-            yield _sse({"type": "text", "content": "".join(text_parts)})
+            tool_results: list[dict] = []
+            for tu in tool_uses:
+                yield _sse({"type": "tool_call", "tool": tu.name, "input": tu.input})
+                result_text = await _execute_tool(tu.name, tu.input, mcp_map, ctx)
+                yield _sse({"type": "tool_result", "tool": tu.name, "result": result_text[:500]})
+                tool_results.append({"type": "tool_result", "tool_use_id": tu.id, "content": result_text})
 
-        if not tool_uses or response.stop_reason == "end_turn":
-            break
+            messages.append({"role": "assistant", "content": response.content})
+            messages.append({"role": "user", "content": tool_results})
 
-        tool_results: list[dict] = []
-        for tu in tool_uses:
-            yield _sse({"type": "tool_call", "tool": tu.name, "input": tu.input})
-            result_text = await _execute_tool(tu.name, tu.input, mcp_map, ctx)
-            yield _sse({"type": "tool_result", "tool": tu.name, "result": result_text[:500]})
-            tool_results.append({
-                "type": "tool_result",
-                "tool_use_id": tu.id,
-                "content": result_text,
-            })
+            if response.stop_reason != "tool_use":
+                break
+    except Exception as exc:
+        msg = str(exc)
+        # Trim verbose API error bodies to the first line for the UI
+        short = msg.split("\n")[0].strip()
+        yield _sse({"type": "error", "content": short or msg})
+        return
 
-        messages.append({"role": "assistant", "content": response.content})
-        messages.append({"role": "user", "content": tool_results})
+    yield _sse({"type": "done"})
 
-        if response.stop_reason != "tool_use":
-            break
+
+def _tools_to_gemini(tools: list[dict]) -> list:
+    """Convert Anthropic-format tool definitions to google.generativeai Tool objects."""
+    import google.generativeai as genai  # local import to avoid startup cost
+    if not tools:
+        return []
+    declarations = []
+    for t in tools:
+        schema = t.get("input_schema", {})
+        declarations.append(genai.protos.FunctionDeclaration(
+            name=t["name"],
+            description=t.get("description", ""),
+            parameters=genai.protos.Schema(
+                type=genai.protos.Type.OBJECT,
+                properties={
+                    k: genai.protos.Schema(
+                        type=genai.protos.Type[v.get("type", "string").upper()],
+                        description=v.get("description", ""),
+                    )
+                    for k, v in schema.get("properties", {}).items()
+                },
+                required=schema.get("required", []),
+            ),
+        ))
+    return [genai.protos.Tool(function_declarations=declarations)]
+
+
+async def _run_agent_gemini(
+    agent: Agent,
+    system_prompt: str,
+    tools: list[dict],
+    mcp_map: dict[str, Any],
+    user_message: str,
+    history: list[dict],
+    api_key: str,
+) -> AsyncIterator[str]:
+    import asyncio
+    import google.generativeai as genai
+
+    genai.configure(api_key=api_key)
+    gemini_tools = _tools_to_gemini(tools)
+    model_kwargs: dict[str, Any] = {"model_name": agent.model or "gemini-2.0-flash"}
+    if system_prompt:
+        model_kwargs["system_instruction"] = system_prompt
+    if gemini_tools:
+        model_kwargs["tools"] = gemini_tools
+
+    model = genai.GenerativeModel(**model_kwargs)
+
+    # Build history in Gemini format
+    gemini_history: list[dict] = []
+    for m in history:
+        role = "user" if m.get("role") == "user" else "model"
+        gemini_history.append({"role": role, "parts": [m.get("content", "")]})
+
+    chat = model.start_chat(history=gemini_history)
+    step = 0
+    max_steps = agent.max_steps or 10
+    ctx = {"agent_id": str(agent.id)}
+    current_message: Any = user_message
+
+    try:
+        while step < max_steps:
+            step += 1
+            response = await asyncio.get_event_loop().run_in_executor(
+                None, lambda msg=current_message: chat.send_message(msg)
+            )
+
+            text_parts: list[str] = []
+            function_calls: list[Any] = []
+            for part in response.parts:
+                if hasattr(part, "text") and part.text:
+                    text_parts.append(part.text)
+                if hasattr(part, "function_call") and part.function_call.name:
+                    function_calls.append(part.function_call)
+
+            if text_parts:
+                yield _sse({"type": "text", "content": "".join(text_parts)})
+
+            if not function_calls:
+                break
+
+            fn_responses: list[Any] = []
+            for fc in function_calls:
+                args = dict(fc.args)
+                yield _sse({"type": "tool_call", "tool": fc.name, "input": args})
+                result_text = await _execute_tool(fc.name, args, mcp_map, ctx)
+                yield _sse({"type": "tool_result", "tool": fc.name, "result": result_text[:500]})
+                fn_responses.append(genai.protos.Part(
+                    function_response=genai.protos.FunctionResponse(
+                        name=fc.name,
+                        response={"result": result_text},
+                    )
+                ))
+
+            current_message = fn_responses
+    except Exception as exc:
+        msg = str(exc)
+        short = msg.split("\n")[0].strip()
+        yield _sse({"type": "error", "content": short or msg})
+        return
 
     yield _sse({"type": "done"})
 
