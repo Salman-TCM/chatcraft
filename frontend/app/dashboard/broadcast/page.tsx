@@ -1,10 +1,10 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   Radio, Plus, Loader2, Pencil, Trash2, Send, X, BarChart2,
   Mail, MessageSquare, Phone, Bell, Eye, FlaskConical,
-  Clock, Users, Tag, CheckCircle2,
+  Clock, Users, Tag, CheckCircle2, Type, Image, MousePointerClick, Minus, AlignLeft, ChevronUp, ChevronDown,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -377,12 +377,8 @@ export default function BroadcastPage() {
               </div>
               {fChannel === "email" && (
                 <div className="space-y-1">
-                  <Label>HTML Content <span className="text-muted-foreground font-normal">(optional, overrides plain text)</span></Label>
-                  <textarea
-                    className="w-full h-24 p-2 text-xs font-mono rounded-md border bg-background resize-none"
-                    value={fHtml} onChange={(e) => setFHtml(e.target.value)}
-                    placeholder="<h1>Hello {{first_name}}</h1>..."
-                  />
+                  <Label>Email Template <span className="text-muted-foreground font-normal">(drag-and-drop builder)</span></Label>
+                  <EmailTemplateBuilder value={fHtml} onChange={setFHtml} />
                 </div>
               )}
               <div className="space-y-1">
@@ -503,6 +499,243 @@ export default function BroadcastPage() {
               )}
             </div>
           </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Email Template Builder ─────────────────────────────────────────────────────
+
+type BlockType = "header" | "text" | "image" | "button" | "divider" | "footer";
+interface EmailBlock { id: string; type: BlockType; content: string; props?: Record<string, string> }
+
+const BLOCK_PALETTE: { type: BlockType; icon: React.ReactNode; label: string }[] = [
+  { type: "header", icon: <Type className="h-3.5 w-3.5" />, label: "Header" },
+  { type: "text", icon: <AlignLeft className="h-3.5 w-3.5" />, label: "Text" },
+  { type: "image", icon: <Image className="h-3.5 w-3.5" />, label: "Image" },
+  { type: "button", icon: <MousePointerClick className="h-3.5 w-3.5" />, label: "Button" },
+  { type: "divider", icon: <Minus className="h-3.5 w-3.5" />, label: "Divider" },
+  { type: "footer", icon: <AlignLeft className="h-3.5 w-3.5" />, label: "Footer" },
+];
+
+function blockToHtml(b: EmailBlock): string {
+  switch (b.type) {
+    case "header":
+      return `<h1 style="font-family:sans-serif;font-size:28px;font-weight:700;color:#111;margin:0 0 16px">${b.content}</h1>`;
+    case "text":
+      return `<p style="font-family:sans-serif;font-size:15px;color:#444;line-height:1.7;margin:0 0 16px">${b.content}</p>`;
+    case "image":
+      return `<img src="${b.content}" alt="" style="max-width:100%;border-radius:8px;margin:0 0 16px;display:block" />`;
+    case "button":
+      return `<a href="${b.props?.href ?? "#"}" style="display:inline-block;background:#6366f1;color:#fff;font-family:sans-serif;font-size:14px;font-weight:600;padding:12px 24px;border-radius:6px;text-decoration:none;margin:0 0 16px">${b.content}</a>`;
+    case "divider":
+      return `<hr style="border:none;border-top:1px solid #e5e7eb;margin:16px 0" />`;
+    case "footer":
+      return `<p style="font-family:sans-serif;font-size:12px;color:#9ca3af;text-align:center;margin:16px 0 0">${b.content}</p>`;
+    default:
+      return b.content;
+  }
+}
+
+function blocksToHtml(blocks: EmailBlock[]): string {
+  const inner = blocks.map(blockToHtml).join("\n");
+  return `<div style="max-width:600px;margin:0 auto;padding:32px 24px;background:#ffffff;font-family:sans-serif">${inner}</div>`;
+}
+
+function generateBlockId() { return Math.random().toString(36).slice(2, 8); }
+
+function EmailTemplateBuilder({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+  const [blocks, setBlocks] = useState<EmailBlock[]>([]);
+  const [tab, setTab] = useState<"visual" | "html" | "preview">("visual");
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [dragOver, setDragOver] = useState(false);
+  const dragBlockType = useRef<BlockType | null>(null);
+
+  // Sync from external value (when editing existing campaign) — only on mount
+  useEffect(() => {
+    if (value && blocks.length === 0) {
+      // Can't reliably parse arbitrary HTML back to blocks — just show in HTML mode
+      if (value.trim()) setTab("html");
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  function addBlock(type: BlockType) {
+    const defaults: Record<BlockType, { content: string; props?: Record<string, string> }> = {
+      header: { content: "Your Email Headline" },
+      text: { content: "Write your message here. Use {{first_name}} for personalization." },
+      image: { content: "https://placehold.co/600x300/e5e7eb/6b7280?text=Image" },
+      button: { content: "Click Here", props: { href: "https://example.com" } },
+      divider: { content: "" },
+      footer: { content: "© 2025 Your Company · Unsubscribe" },
+    };
+    const d = defaults[type];
+    const block: EmailBlock = { id: generateBlockId(), type, content: d.content, props: d.props };
+    setBlocks((prev) => {
+      const next = [...prev, block];
+      onChange(blocksToHtml(next));
+      return next;
+    });
+    setEditingId(block.id);
+  }
+
+  function updateBlock(id: string, content: string, props?: Record<string, string>) {
+    setBlocks((prev) => {
+      const next = prev.map((b) => b.id === id ? { ...b, content, props: props ?? b.props } : b);
+      onChange(blocksToHtml(next));
+      return next;
+    });
+  }
+
+  function removeBlock(id: string) {
+    setBlocks((prev) => {
+      const next = prev.filter((b) => b.id !== id);
+      onChange(blocksToHtml(next));
+      return next;
+    });
+    if (editingId === id) setEditingId(null);
+  }
+
+  function moveBlock(id: string, dir: -1 | 1) {
+    setBlocks((prev) => {
+      const idx = prev.findIndex((b) => b.id === id);
+      if (idx < 0) return prev;
+      const next = [...prev];
+      const swap = idx + dir;
+      if (swap < 0 || swap >= next.length) return prev;
+      [next[idx], next[swap]] = [next[swap], next[idx]];
+      onChange(blocksToHtml(next));
+      return next;
+    });
+  }
+
+  const editingBlock = blocks.find((b) => b.id === editingId);
+
+  return (
+    <div className="border rounded-lg overflow-hidden">
+      {/* Tabs */}
+      <div className="flex border-b bg-muted/30">
+        {(["visual", "html", "preview"] as const).map((t) => (
+          <button
+            key={t}
+            onClick={() => setTab(t)}
+            className={`px-4 py-2 text-xs font-medium capitalize transition-colors ${tab === t ? "bg-background border-b-2 border-primary" : "text-muted-foreground hover:text-foreground"}`}
+          >
+            {t === "visual" ? "Visual Builder" : t === "html" ? "Raw HTML" : "Preview"}
+          </button>
+        ))}
+      </div>
+
+      {tab === "visual" && (
+        <div className="flex" style={{ minHeight: 320 }}>
+          {/* Block palette */}
+          <div className="w-28 border-r bg-muted/20 p-2 flex flex-col gap-1 shrink-0">
+            <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide mb-1">Blocks</p>
+            {BLOCK_PALETTE.map((b) => (
+              <button
+                key={b.type}
+                draggable
+                onDragStart={() => { dragBlockType.current = b.type; }}
+                onClick={() => addBlock(b.type)}
+                className="flex items-center gap-1.5 text-xs px-2 py-1.5 rounded hover:bg-background border border-transparent hover:border-border transition-colors cursor-grab text-left"
+              >
+                {b.icon} {b.label}
+              </button>
+            ))}
+          </div>
+
+          {/* Canvas */}
+          <div
+            className={`flex-1 p-3 overflow-y-auto ${dragOver ? "bg-primary/5" : ""}`}
+            onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
+            onDragLeave={() => setDragOver(false)}
+            onDrop={(e) => {
+              e.preventDefault();
+              setDragOver(false);
+              if (dragBlockType.current) { addBlock(dragBlockType.current); dragBlockType.current = null; }
+            }}
+          >
+            {blocks.length === 0 ? (
+              <div className="h-full flex items-center justify-center text-xs text-muted-foreground border-2 border-dashed rounded-lg p-6 text-center">
+                Click or drag blocks from the left panel to build your email
+              </div>
+            ) : (
+              <div className="space-y-1">
+                {blocks.map((b, i) => (
+                  <div
+                    key={b.id}
+                    className={`group relative border rounded p-2 cursor-pointer transition-colors ${editingId === b.id ? "border-primary bg-primary/5" : "border-border hover:border-muted-foreground/40"}`}
+                    onClick={() => setEditingId(b.id === editingId ? null : b.id)}
+                  >
+                    <div className="flex items-center justify-between mb-1">
+                      <span className="text-[10px] text-muted-foreground capitalize font-medium">{b.type}</span>
+                      <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+                        <button onClick={(e) => { e.stopPropagation(); moveBlock(b.id, -1); }} disabled={i === 0} className="p-0.5 hover:text-foreground text-muted-foreground disabled:opacity-30"><ChevronUp className="h-3 w-3" /></button>
+                        <button onClick={(e) => { e.stopPropagation(); moveBlock(b.id, 1); }} disabled={i === blocks.length - 1} className="p-0.5 hover:text-foreground text-muted-foreground disabled:opacity-30"><ChevronDown className="h-3 w-3" /></button>
+                        <button onClick={(e) => { e.stopPropagation(); removeBlock(b.id); }} className="p-0.5 hover:text-destructive text-muted-foreground"><X className="h-3 w-3" /></button>
+                      </div>
+                    </div>
+                    {b.type === "divider" ? (
+                      <hr className="border-gray-200" />
+                    ) : b.type === "image" ? (
+                      <img src={b.content} alt="" className="max-h-16 rounded object-cover" />
+                    ) : (
+                      <p className="text-xs text-foreground truncate">{b.content}</p>
+                    )}
+                    {editingId === b.id && (
+                      <div className="mt-2 space-y-1" onClick={(e) => e.stopPropagation()}>
+                        {b.type !== "divider" && (
+                          <textarea
+                            className="w-full p-1.5 text-xs border rounded resize-none bg-background"
+                            rows={b.type === "text" ? 4 : 2}
+                            value={b.content}
+                            onChange={(e) => updateBlock(b.id, e.target.value, b.props)}
+                            placeholder={b.type === "image" ? "Image URL" : b.type === "button" ? "Button label" : "Content"}
+                            autoFocus
+                          />
+                        )}
+                        {b.type === "button" && (
+                          <input
+                            className="w-full p-1.5 text-xs border rounded bg-background"
+                            value={b.props?.href ?? ""}
+                            onChange={(e) => updateBlock(b.id, b.content, { ...b.props, href: e.target.value })}
+                            placeholder="Button URL (https://...)"
+                          />
+                        )}
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {tab === "html" && (
+        <textarea
+          className="w-full p-3 text-xs font-mono bg-background resize-none"
+          style={{ minHeight: 320 }}
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          placeholder="<h1>Hello {{first_name}}</h1>..."
+        />
+      )}
+
+      {tab === "preview" && (
+        <div className="overflow-y-auto" style={{ minHeight: 320 }}>
+          {value ? (
+            <iframe
+              srcDoc={`<!DOCTYPE html><html><body style="margin:0;background:#f3f4f6">${value}</body></html>`}
+              className="w-full border-0"
+              style={{ minHeight: 320 }}
+              sandbox="allow-same-origin"
+              title="Email preview"
+            />
+          ) : (
+            <div className="flex items-center justify-center h-48 text-xs text-muted-foreground">No content yet. Build your email in the Visual Builder or Raw HTML tab.</div>
+          )}
         </div>
       )}
     </div>

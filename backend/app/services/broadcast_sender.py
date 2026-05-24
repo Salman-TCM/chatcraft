@@ -305,6 +305,110 @@ async def _send_push(campaign: Any, db: AsyncSession) -> tuple[int, int]:
         return 0, 0
 
 
+async def _send_messenger(campaign: Any, db: AsyncSession) -> tuple[int, int]:
+    """Facebook Messenger broadcast — sends to all active Messenger conversations."""
+    try:
+        import httpx
+        from app.models.conversation import Conversation
+        from app.models.channel_integration import ChannelIntegration
+
+        convs_result = await db.execute(
+            select(Conversation).where(
+                Conversation.user_id == campaign.user_id,
+                Conversation.channel == "facebook",
+                Conversation.status != "closed",
+            )
+        )
+        convs = convs_result.scalars().all()
+
+        integ_result = await db.execute(
+            select(ChannelIntegration).where(
+                ChannelIntegration.user_id == campaign.user_id,
+                ChannelIntegration.channel == "facebook",
+                ChannelIntegration.is_active.is_(True),
+            ).limit(1)
+        )
+        integ = integ_result.scalar_one_or_none()
+        if not integ:
+            return 0, 0
+
+        token = integ.config.get("page_access_token", "")
+        sent = failed = 0
+        async with httpx.AsyncClient(timeout=15) as client:
+            for conv in convs:
+                if not conv.guest_id:
+                    continue
+                ctx = {
+                    "name": f"{conv.contact.first_name or ''} {conv.contact.last_name or ''}".strip() if conv.contact else "Friend",
+                    "first_name": (conv.contact.first_name or "") if conv.contact else "",
+                    "email": (conv.contact.email or "") if conv.contact else "",
+                    "phone": (conv.contact.phone or "") if conv.contact else "",
+                }
+                body = _render(campaign.message_template, ctx)
+                try:
+                    r = await client.post(
+                        "https://graph.facebook.com/v19.0/me/messages",
+                        params={"access_token": token},
+                        json={"recipient": {"id": conv.guest_id}, "message": {"text": body}},
+                    )
+                    if r.status_code == 200:
+                        sent += 1
+                    else:
+                        failed += 1
+                except Exception:
+                    failed += 1
+        return sent, failed
+    except Exception:
+        return 0, 0
+
+
+async def _send_phone(campaign: Any, recipients: list[dict]) -> tuple[int, int]:
+    """Phone broadcast — initiate outbound Twilio calls to all contacts with a phone number."""
+    try:
+        from twilio.rest import Client
+        from app.core.config import settings
+
+        if not settings.twilio_account_sid or not settings.twilio_phone_number:
+            return 0, 0
+
+        client = Client(settings.twilio_account_sid, settings.twilio_auth_token)
+        webhook_url = getattr(settings, "api_base_url", "")
+        chatbot_id = str(getattr(campaign, "chatbot_id", ""))
+        twiml_url = f"{webhook_url}/webhooks/voice/{chatbot_id}" if chatbot_id and webhook_url else None
+
+        # Use TwiML message if no chatbot, else route through chatbot voice flow
+        message_text = campaign.message_template or "Hello, this is a broadcast message."
+        twiml_body = (
+            f'<?xml version="1.0" encoding="UTF-8"?>'
+            f"<Response><Say>{message_text[:500]}</Say><Hangup/></Response>"
+        )
+
+        sent = failed = 0
+        for r in recipients:
+            if not r.get("phone"):
+                continue
+            try:
+                if twiml_url:
+                    client.calls.create(
+                        to=r["phone"],
+                        from_=settings.twilio_phone_number,
+                        url=twiml_url,
+                        status_callback=f"{webhook_url}/webhooks/voice/{chatbot_id}/status",
+                    )
+                else:
+                    client.calls.create(
+                        to=r["phone"],
+                        from_=settings.twilio_phone_number,
+                        twiml=twiml_body,
+                    )
+                sent += 1
+            except Exception:
+                failed += 1
+        return sent, failed
+    except Exception:
+        return 0, 0
+
+
 async def deliver(campaign: Any, db: AsyncSession) -> tuple[int, int]:
     """Route delivery to appropriate channel sender. Returns (sent, failed)."""
     channel = campaign.channel
@@ -320,5 +424,9 @@ async def deliver(campaign: Any, db: AsyncSession) -> tuple[int, int]:
         return await _send_whatsapp(campaign, recipients)
     elif channel == "push":
         return await _send_push(campaign, db)
+    elif channel == "messenger":
+        return await _send_messenger(campaign, db)
+    elif channel == "phone":
+        return await _send_phone(campaign, recipients)
     else:
         return 0, 0
