@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useParams } from "next/navigation";
-import { Bot, Check, ChevronDown, ChevronUp, Loader2, Send, Zap } from "lucide-react";
+import { AlertCircle, Bot, Check, ChevronDown, ChevronUp, Loader2, Send, Zap } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 
@@ -14,7 +14,7 @@ interface AgentInfo {
 }
 
 interface ChatMessage {
-  role: "user" | "assistant" | "tool_call" | "tool_result";
+  role: "user" | "assistant" | "tool_call" | "tool_result" | "error";
   content: string;
   tool?: string;
   step?: number;
@@ -65,6 +65,9 @@ export default function PublicAgentPage() {
       .filter(m => m.role === "user" || m.role === "assistant")
       .map(m => ({ role: m.role as "user" | "assistant", content: m.content }));
 
+    const pushError = (msg: string) =>
+      setMessages(prev => [...prev, { role: "error", content: msg }]);
+
     try {
       const resp = await fetch(`${apiBase}/api/public/agents/${token}/chat`, {
         method: "POST",
@@ -72,48 +75,65 @@ export default function PublicAgentPage() {
         body: JSON.stringify({ message: text, conversation_history: history }),
       });
 
+      if (!resp.ok) {
+        const errData = await resp.json().catch(() => ({}));
+        const detail = errData?.detail;
+        pushError(typeof detail === "string" ? detail : detail?.error ?? `Request failed (${resp.status})`);
+        return;
+      }
+
       const reader = resp.body?.getReader();
-      if (!reader) return;
+      if (!reader) { pushError("No response stream received."); return; }
+
       const decoder = new TextDecoder();
+      let buffer = "";
       let currentText = "";
       let currentStep = 0;
+
+      const handleEvent = (evt: any) => {
+        if (evt.type === "text") {
+          currentText += evt.content;
+          setMessages(prev => {
+            const last = prev[prev.length - 1];
+            if (last?.role === "assistant") {
+              return [...prev.slice(0, -1), { ...last, content: currentText }];
+            }
+            return [...prev, { role: "assistant", content: currentText }];
+          });
+        } else if (evt.type === "tool_call") {
+          currentStep++;
+          setStepCount(currentStep);
+          setMessages(prev => [
+            ...prev,
+            { role: "tool_call", content: JSON.stringify(evt.input, null, 2), tool: evt.tool, step: currentStep },
+          ]);
+        } else if (evt.type === "tool_result") {
+          setMessages(prev => [
+            ...prev,
+            { role: "tool_result", content: evt.result, tool: evt.tool, step: currentStep },
+          ]);
+          currentText = "";
+        } else if (evt.type === "error") {
+          pushError(evt.content);
+        }
+      };
 
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
-        const chunk = decoder.decode(value);
-        for (const line of chunk.split("\n")) {
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split("\n");
+        buffer = lines.pop() ?? "";
+        for (const line of lines) {
           if (!line.startsWith("data: ")) continue;
-          try {
-            const evt = JSON.parse(line.slice(6));
-            if (evt.type === "text") {
-              currentText += evt.content;
-              setMessages(prev => {
-                const last = prev[prev.length - 1];
-                if (last?.role === "assistant") {
-                  return [...prev.slice(0, -1), { ...last, content: currentText }];
-                }
-                return [...prev, { role: "assistant", content: currentText }];
-              });
-            } else if (evt.type === "tool_call") {
-              currentStep++;
-              setStepCount(currentStep);
-              setMessages(prev => [
-                ...prev,
-                { role: "tool_call", content: JSON.stringify(evt.input, null, 2), tool: evt.tool, step: currentStep },
-              ]);
-            } else if (evt.type === "tool_result") {
-              setMessages(prev => [
-                ...prev,
-                { role: "tool_result", content: evt.result, tool: evt.tool, step: currentStep },
-              ]);
-              currentText = "";
-            }
-          } catch { /* ignore */ }
+          try { handleEvent(JSON.parse(line.slice(6))); } catch { /* malformed */ }
         }
       }
+      if (buffer.startsWith("data: ")) {
+        try { handleEvent(JSON.parse(buffer.slice(6))); } catch { /* ignore */ }
+      }
     } catch (e: any) {
-      setMessages(prev => [...prev, { role: "assistant", content: `Error: ${e.message}` }]);
+      pushError(e.message || "Network error — please check your connection and try again.");
     } finally {
       setRunning(false);
       setStepCount(0);
@@ -191,6 +211,20 @@ export default function PublicAgentPage() {
 
         {messages.map((msg, i) => {
           if ((msg.role === "tool_call" || msg.role === "tool_result") && !showTools) return null;
+
+          if (msg.role === "error") {
+            return (
+              <div key={i} className="flex justify-start">
+                <div className="rounded-2xl bg-red-50 border border-red-200 px-4 py-2.5 text-sm max-w-[85%] rounded-bl-sm">
+                  <p className="font-medium text-red-700 flex items-center gap-1.5 mb-0.5">
+                    <AlertCircle className="h-3.5 w-3.5 shrink-0" />
+                    Error
+                  </p>
+                  <p className="text-xs text-red-600 whitespace-pre-wrap">{msg.content}</p>
+                </div>
+              </div>
+            );
+          }
 
           if (msg.role === "tool_call") {
             return (
