@@ -8,7 +8,7 @@ import {
   GitBranch, Zap, List, Activity,
   ClipboardList, LayoutTemplate, ShoppingBag, Wallet,
   Mic, Monitor, Plug, Tag, BarChart2, Settings,
-  ChevronDown, LogOut, Menu, X, AlertCircle,
+  ChevronDown, LogOut, Menu, X, AlertCircle, ShieldAlert,
 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { signOut } from "next-auth/react";
@@ -309,6 +309,21 @@ function SidebarContent({
             />
           ))}
         </div>
+
+        <div className="border-t border-border/50 mx-2" />
+
+        {/* Admin panel shortcut — only for admins */}
+        {user?.role === "admin" && (
+          <div className="px-2 pt-1.5 pb-1">
+            <Link
+              href="/admin"
+              className="flex items-center gap-2.5 rounded-lg px-3 py-2 text-xs font-medium text-rose-600 hover:bg-rose-50 transition-colors w-full"
+            >
+              <ShieldAlert className="h-3.5 w-3.5 shrink-0" />
+              Admin Panel
+            </Link>
+          </div>
+        )}
 
         <div className="border-t border-border/50 mx-2" />
 
