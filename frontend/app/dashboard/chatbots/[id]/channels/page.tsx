@@ -138,6 +138,38 @@ const CHANNELS: ChannelDef[] = [
     webhookNote: "Set your Discord bot's Interactions Endpoint URL to the webhook URL below.",
     setupUrl: "https://discord.com/developers/applications",
   },
+  {
+    key: "twitter",
+    label: "X (Twitter)",
+    icon: "🐦",
+    color: "bg-slate-50 border-slate-200",
+    description: "Auto-reply to @mentions using AI. Requires a Twitter Developer App with Account Activity API access.",
+    fields: [
+      { key: "bearer_token", label: "Bearer Token", placeholder: "AAAAAAAAAA...", secret: true },
+      { key: "api_key", label: "API Key (Consumer Key)", placeholder: "xvz1evFS4wEEPTGEFPHBog" },
+      { key: "api_secret", label: "API Secret (Consumer Secret)", placeholder: "L8qq9PZyRg6ieKGEKhZolGC0...", secret: true },
+      { key: "access_token", label: "Access Token", placeholder: "756201191646691328-..." },
+      { key: "access_secret", label: "Access Token Secret", placeholder: "jandy...", secret: true },
+      { key: "twitter_user_id", label: "Your Twitter User ID", placeholder: "756201191646691328" },
+    ],
+    webhookNote: "Register the webhook URL below in your Twitter Developer Portal under Account Activity API.",
+    setupUrl: "https://developer.twitter.com/en/docs/twitter-api/enterprise/account-activity-api",
+  },
+  {
+    key: "tiktok",
+    label: "TikTok DM",
+    icon: "🎵",
+    color: "bg-pink-50 border-pink-200",
+    description: "Receive and reply to TikTok Direct Messages via TikTok Business API.",
+    fields: [
+      { key: "access_token", label: "Access Token", placeholder: "act.xxxxxxxxx...", secret: true },
+      { key: "client_key", label: "Client Key (App ID)", placeholder: "aw1234567890" },
+      { key: "client_secret", label: "Client Secret", placeholder: "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx", secret: true },
+      { key: "open_id", label: "Your TikTok Open ID", placeholder: "_000abc1234..." },
+    ],
+    webhookNote: "Configure the webhook URL below in your TikTok Developer app settings under 'Event Subscriptions'.",
+    setupUrl: "https://developers.tiktok.com/products/direct-messages",
+  },
 ];
 
 // ── Main component ────────────────────────────────────────────────────────────
@@ -222,6 +254,10 @@ export default function ChannelsPage() {
         ? `${info.page_name} (${info.page_id})`
         : channel === "discord"
         ? `@${info.username}#${info.discriminator} (${info.bot_id})`
+        : channel === "twitter"
+        ? `@${info.username} (${info.user_id})`
+        : channel === "tiktok"
+        ? `${info.display_name} (${info.open_id})`
         : `${info.friendly_name} · ${info.status}`;
       setTestResult(prev => ({ ...prev, [channel]: { ok: true, msg } }));
     } catch (e: any) {
