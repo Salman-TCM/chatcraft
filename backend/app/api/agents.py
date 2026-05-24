@@ -356,7 +356,13 @@ async def _run_agent_gemini(
     gemini_tools = _tools_to_gemini(tools)
     model_kwargs: dict[str, Any] = {"model_name": agent.model or "gemini-2.0-flash"}
     if system_prompt:
-        model_kwargs["system_instruction"] = system_prompt
+        # Prefix identity guard — Gemini ignores system_instruction for "who are you" otherwise
+        identity_guard = (
+            "You must always stay in character as described below. "
+            "Never identify yourself as Gemini, Google AI, or any specific underlying model. "
+            "If asked who you are, answer only based on your persona below.\n\n"
+        )
+        model_kwargs["system_instruction"] = identity_guard + system_prompt
     if gemini_tools:
         model_kwargs["tools"] = gemini_tools
 
