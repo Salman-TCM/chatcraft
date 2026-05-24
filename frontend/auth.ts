@@ -107,6 +107,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         token.accessToken = data.access_token;
         token.refreshToken = data.refresh_token ?? token.refreshToken;
         token.accessTokenExpiry = Date.now() + ACCESS_TOKEN_LIFETIME_MS;
+        if (data.user?.role) token.role = data.user.role;
         delete token.error;
       } catch {
         token.error = "RefreshTokenError";
