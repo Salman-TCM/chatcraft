@@ -27,6 +27,25 @@ from app.models.user import User
 
 router = APIRouter(prefix="/api/v1", tags=["inbox"])
 
+# ── Role constants ─────────────────────────────────────────────────────────────
+#
+# Permission matrix for team member roles:
+#
+#  Action                  | owner | manager | agent
+#  ------------------------|-------|---------|------
+#  List ALL conversations  |  ✅   |   ✅    |  ❌ (assigned only)
+#  View conversation       |  ✅   |   ✅    |  ✅ (assigned only)
+#  Send message            |  ✅   |   ✅    |  ✅
+#  Add internal note       |  ✅   |   ✅    |  ✅
+#  Human takeover          |  ✅   |   ✅    |  ✅
+#  Close conversation      |  ✅   |   ✅    |  ❌
+#  Reopen conversation     |  ✅   |   ✅    |  ❌
+#  Assign conversation     |  ✅   |   ✅    |  ❌
+#  Round-robin assign      |  ✅   |   ✅    |  ❌
+
+_MANAGER_ONLY_ACTIONS = {"close", "reopen", "assign", "roundrobin"}
+
+
 # ── Helpers ────────────────────────────────────────────────────────────────────
 
 CHANNEL_ICONS: dict[str, str] = {
@@ -36,12 +55,48 @@ CHANNEL_ICONS: dict[str, str] = {
 }
 
 
+async def _resolve_caller(user_id: uuid.UUID, db) -> tuple[uuid.UUID, str | None]:
+    """
+    Resolve effective owner and team role for the calling user.
+
+    Returns (owner_user_id, team_role):
+      - owner_user_id: the workspace owner whose data is being accessed
+      - team_role: None if the caller IS the owner, "agent" or "manager" if they're a team member
+    """
+    result = await db.execute(
+        select(TeamMember).where(
+            TeamMember.member_user_id == user_id,
+            TeamMember.status == "active",
+        )
+    )
+    membership = result.scalar_one_or_none()
+    if membership:
+        return membership.owner_user_id, membership.role
+    return user_id, None
+
+
+def _require_manager(team_role: str | None, action: str) -> None:
+    """Raise 403 if a team agent tries a manager-only action."""
+    if team_role == "agent":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=f"Action '{action}' requires manager role or above.",
+        )
+
+
 async def _get_owned_conv(conv_id: uuid.UUID, user_id: uuid.UUID, db) -> Conversation:
-    """Return conversation if caller owns the chatbot it belongs to."""
+    """
+    Return conversation if the caller can access it.
+    - Workspace owners: any conversation belonging to their chatbots.
+    - Team managers: same as owner within their owner's workspace.
+    - Team agents: only conversations assigned to them.
+    """
+    owner_id, team_role = await _resolve_caller(user_id, db)
+
     result = await db.execute(
         select(Conversation)
         .join(ChatbotConfig, Conversation.chatbot_id == ChatbotConfig.id)
-        .where(Conversation.id == conv_id, ChatbotConfig.user_id == user_id)
+        .where(Conversation.id == conv_id, ChatbotConfig.user_id == owner_id)
         .options(
             selectinload(Conversation.messages),
             selectinload(Conversation.contact),
@@ -52,6 +107,12 @@ async def _get_owned_conv(conv_id: uuid.UUID, user_id: uuid.UUID, db) -> Convers
     conv = result.scalar_one_or_none()
     if not conv:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Conversation not found")
+
+    # Agents can only access conversations explicitly assigned to them
+    if team_role == "agent":
+        if not conv.assignment or str(conv.assignment.assigned_to_user_id) != str(user_id):
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Conversation not found")
+
     return conv
 
 
@@ -115,12 +176,12 @@ async def list_conversations(
     chatbot_id: uuid.UUID | None = None,
 ) -> dict:
     offset = (page - 1) * limit
+    owner_id, team_role = await _resolve_caller(user.id, db)
 
-    # Base: only conversations whose chatbot is owned by this user
     stmt = (
         select(Conversation)
         .join(ChatbotConfig, Conversation.chatbot_id == ChatbotConfig.id)
-        .where(ChatbotConfig.user_id == user.id)
+        .where(ChatbotConfig.user_id == owner_id)
         .options(
             selectinload(Conversation.messages),
             selectinload(Conversation.contact),
@@ -139,21 +200,30 @@ async def list_conversations(
         stmt = stmt.where(Conversation.channel == channel)
     if chatbot_id:
         stmt = stmt.where(Conversation.chatbot_id == chatbot_id)
+    # Agents only see conversations assigned to them
+    if team_role == "agent":
+        stmt = stmt.join(
+            InboxAssignment, Conversation.id == InboxAssignment.conversation_id
+        ).where(InboxAssignment.assigned_to_user_id == user.id)
 
     result = await db.execute(stmt)
     convs = result.scalars().all()
 
-    # Total count
+    # Total count (mirrors above filters)
     count_stmt = (
         select(func.count())
         .select_from(Conversation)
         .join(ChatbotConfig, Conversation.chatbot_id == ChatbotConfig.id)
-        .where(ChatbotConfig.user_id == user.id)
+        .where(ChatbotConfig.user_id == owner_id)
     )
     if status_filter:
         count_stmt = count_stmt.where(Conversation.status == status_filter)
     if channel:
         count_stmt = count_stmt.where(Conversation.channel == channel)
+    if team_role == "agent":
+        count_stmt = count_stmt.join(
+            InboxAssignment, Conversation.id == InboxAssignment.conversation_id
+        ).where(InboxAssignment.assigned_to_user_id == user.id)
     total = (await db.execute(count_stmt)).scalar_one()
 
     return {
@@ -175,12 +245,13 @@ async def search_conversations(
 ) -> dict:
     offset = (page - 1) * limit
 
+    owner_id, _ = await _resolve_caller(user.id, db)
     stmt = (
         select(Conversation)
         .join(ChatbotConfig, Conversation.chatbot_id == ChatbotConfig.id)
         .outerjoin(Contact, Conversation.contact_id == Contact.id)
         .where(
-            ChatbotConfig.user_id == user.id,
+            ChatbotConfig.user_id == owner_id,
             or_(
                 Contact.email.ilike(f"%{q}%"),
                 Contact.phone.ilike(f"%{q}%"),
@@ -226,6 +297,8 @@ async def get_conversation(conv_id: uuid.UUID, user: CurrentUser, db: DBSession)
 
 @router.post("/conversations/{conv_id}/close", response_model=dict)
 async def close_conversation(conv_id: uuid.UUID, user: CurrentUser, db: DBSession) -> dict:
+    _, team_role = await _resolve_caller(user.id, db)
+    _require_manager(team_role, "close")
     conv = await _get_owned_conv(conv_id, user.id, db)
     conv.status = "closed"
     await db.commit()
@@ -236,6 +309,8 @@ async def close_conversation(conv_id: uuid.UUID, user: CurrentUser, db: DBSessio
 async def reopen_conversation(
     conv_id: uuid.UUID, user: CurrentUser, db: DBSession, body: dict = {}
 ) -> dict:
+    _, team_role = await _resolve_caller(user.id, db)
+    _require_manager(team_role, "reopen")
     conv = await _get_owned_conv(conv_id, user.id, db)
     conv.status = "active"
     if body.get("release_takeover") and conv.status == "human_takeover":
@@ -396,6 +471,9 @@ async def add_note(
 async def assign_conversation(
     conv_id: uuid.UUID, body: dict, user: CurrentUser, db: DBSession
 ) -> dict:
+    _, team_role = await _resolve_caller(user.id, db)
+    _require_manager(team_role, "assign")
+
     assignee_id_str: str | None = body.get("user_id")
     if not assignee_id_str:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="user_id required")
@@ -499,12 +577,14 @@ async def remove_team_member(member_id: uuid.UUID, user: CurrentUser, db: DBSess
 @router.post("/conversations/{conv_id}/assign-roundrobin", response_model=dict)
 async def assign_roundrobin(conv_id: uuid.UUID, user: CurrentUser, db: DBSession) -> dict:
     """Assign conversation to the next available team member in round-robin order."""
+    owner_id, team_role = await _resolve_caller(user.id, db)
+    _require_manager(team_role, "roundrobin")
     conv = await _get_owned_conv(conv_id, user.id, db)
 
-    # Get active team members
+    # Get active team members (scoped to the workspace owner)
     members_result = await db.execute(
         select(TeamMember)
-        .where(TeamMember.owner_user_id == user.id, TeamMember.status == "active", TeamMember.member_user_id.isnot(None))
+        .where(TeamMember.owner_user_id == owner_id, TeamMember.status == "active", TeamMember.member_user_id.isnot(None))
         .order_by(TeamMember.created_at)
     )
     members = members_result.scalars().all()
