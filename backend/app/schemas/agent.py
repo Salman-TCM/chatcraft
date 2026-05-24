@@ -11,6 +11,7 @@ class AgentToolsConfig(BaseModel):
     http: bool = False
     sheets: bool = False
     email: bool = False
+    sms: bool = False
 
 
 class AgentCreateRequest(BaseModel):
@@ -51,5 +52,7 @@ class AgentResponse(BaseModel):
     max_steps: int
     is_published: bool
     is_active: bool
+    share_enabled: bool = False
+    share_token: str | None = None
     created_at: datetime
     updated_at: datetime
