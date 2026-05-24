@@ -12,6 +12,7 @@ class AgentToolsConfig(BaseModel):
     sheets: bool = False
     email: bool = False
     sms: bool = False
+    verification: bool = False
 
 
 class AgentCreateRequest(BaseModel):
