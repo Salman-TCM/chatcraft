@@ -28,6 +28,7 @@ from app.models.chatbot_config import ChatbotConfig
 from app.models.mcp import MCPServerConfig
 from app.schemas.agent import AgentCreateRequest, AgentResponse, AgentUpdateRequest
 from app.services.kb.rag import RAGService
+from app.services.llm.key_store import get_key as _get_user_key
 
 router = APIRouter(prefix="/api/v1/agents", tags=["agents"])
 public_router = APIRouter(prefix="/api/public/agents", tags=["agents-public"])
@@ -158,8 +159,9 @@ async def public_agent_chat(share_token: str, body: PublicChatRequest, db: DBSes
     agent = await _get_shared_agent(share_token, db)
     system_prompt = await _build_system_prompt(agent, db)
     tools, mcp_map = await _build_tools_with_mcp(agent, agent.user_id, db)
+    api_key = await _resolve_anthropic_key(agent.user_id, db)
     return StreamingResponse(
-        _run_agent(agent, system_prompt, tools, mcp_map, body.message, body.conversation_history),
+        _run_agent(agent, system_prompt, tools, mcp_map, body.message, body.conversation_history, api_key=api_key),
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
@@ -183,14 +185,21 @@ async def agent_chat(
     agent = await _get_owned_agent(agent_id, user.id, db)
     system_prompt = await _build_system_prompt(agent, db)
     tools, mcp_map = await _build_tools_with_mcp(agent, user.id, db)
+    api_key = await _resolve_anthropic_key(user.id, db)
     return StreamingResponse(
-        _run_agent(agent, system_prompt, tools, mcp_map, body.message, body.conversation_history),
+        _run_agent(agent, system_prompt, tools, mcp_map, body.message, body.conversation_history, api_key=api_key),
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
 
 
 # ─── Agent execution loop ─────────────────────────────────────────────────────
+
+async def _resolve_anthropic_key(user_id: uuid.UUID, db) -> str | None:
+    """Return user's Anthropic API key, falling back to the platform key."""
+    user_key = await _get_user_key(user_id, "anthropic", db)
+    return user_key or settings.anthropic_api_key or None
+
 
 async def _run_agent(
     agent: Agent,
@@ -199,8 +208,13 @@ async def _run_agent(
     mcp_map: dict[str, Any],
     user_message: str,
     history: list[dict],
+    *,
+    api_key: str | None = None,
 ) -> AsyncIterator[str]:
-    client = anthropic.AsyncAnthropic(api_key=settings.anthropic_api_key)
+    if not api_key:
+        yield f"data: {json.dumps({'type': 'error', 'content': 'No Anthropic API key configured. Add one in Settings → Model Keys.'})}\n\n"
+        return
+    client = anthropic.AsyncAnthropic(api_key=api_key)
 
     messages: list[dict] = list(history)
     messages.append({"role": "user", "content": user_message})
