@@ -32,6 +32,10 @@ import {
   Check,
   Bot,
   Volume2,
+  Shield,
+  ChevronDown,
+  ChevronUp,
+  Settings2,
 } from "lucide-react";
 import { apiClient } from "@/lib/api";
 
@@ -49,6 +53,27 @@ interface Agent {
   voice_id?: string;
   created_at?: number;
 }
+
+interface AgentDetail {
+  agent_id: string;
+  name: string;
+  system_prompt: string;
+  first_message: string;
+  language: string;
+  voice_id?: string;
+  auth_enabled: boolean;
+  allowed_origins: string[];
+  client_events: string[];
+}
+
+const AVAILABLE_CLIENT_EVENTS = [
+  { id: "user_transcript", label: "User transcript", description: "Receive each user utterance as text" },
+  { id: "agent_response", label: "Agent response", description: "Receive each agent text response" },
+  { id: "audio", label: "Audio chunks", description: "Receive raw audio from the agent" },
+  { id: "interruption", label: "Interruption", description: "Notified when user interrupts agent" },
+  { id: "ping", label: "Ping / latency", description: "Periodic ping events for latency measurement" },
+  { id: "internal_tentative_agent_response", label: "Tentative response (debug)", description: "Partial responses before final output" },
+];
 
 export default function VoiceLabPage() {
   const [voices, setVoices] = useState<Voice[]>([]);
@@ -72,6 +97,10 @@ export default function VoiceLabPage() {
     language: "en",
   });
   const [creatingAgent, setCreatingAgent] = useState(false);
+  const [expandedAgentId, setExpandedAgentId] = useState<string | null>(null);
+  const [agentDetails, setAgentDetails] = useState<Record<string, AgentDetail>>({});
+  const [loadingDetail, setLoadingDetail] = useState<string | null>(null);
+  const [savingDetail, setSavingDetail] = useState<string | null>(null);
 
   const [previewForm, setPreviewForm] = useState({ voice_id: "", text: "Hello, this is a preview of my voice." });
   const [previewing, setPreviewing] = useState(false);
@@ -152,6 +181,39 @@ export default function VoiceLabPage() {
     if (!confirm("Delete this agent?")) return;
     await apiClient.delete(`/api/v1/voice-lab/agents/${id}`);
     await loadData();
+  }
+
+  async function toggleAgentDetail(agentId: string) {
+    if (expandedAgentId === agentId) {
+      setExpandedAgentId(null);
+      return;
+    }
+    setExpandedAgentId(agentId);
+    if (agentDetails[agentId]) return;
+    setLoadingDetail(agentId);
+    try {
+      const { data } = await apiClient.get(`/api/v1/voice-lab/agents/${agentId}`);
+      setAgentDetails((prev) => ({ ...prev, [agentId]: data.data }));
+    } catch {}
+    setLoadingDetail(null);
+  }
+
+  function updateDetail(agentId: string, patch: Partial<AgentDetail>) {
+    setAgentDetails((prev) => ({ ...prev, [agentId]: { ...prev[agentId], ...patch } }));
+  }
+
+  async function saveAgentDetail(agentId: string) {
+    const detail = agentDetails[agentId];
+    if (!detail) return;
+    setSavingDetail(agentId);
+    try {
+      await apiClient.patch(`/api/v1/voice-lab/agents/${agentId}`, {
+        auth_enabled: detail.auth_enabled,
+        allowed_origins: detail.allowed_origins,
+        client_events: detail.client_events,
+      });
+    } catch {}
+    setSavingDetail(null);
   }
 
   function copyId(id: string) {
@@ -403,49 +465,146 @@ export default function VoiceLabPage() {
             </CardContent>
           </Card>
         ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {agents.map((agent) => (
-              <Card key={agent.id}>
-                <CardHeader className="pb-2">
-                  <div className="flex items-start justify-between">
-                    <CardTitle className="text-base">{agent.name}</CardTitle>
-                    <Button
-                      size="icon"
-                      variant="ghost"
-                      className="h-7 w-7 text-destructive"
-                      onClick={() => handleDeleteAgent(agent.id)}
-                    >
-                      <Trash2 className="h-3 w-3" />
-                    </Button>
-                  </div>
-                </CardHeader>
-                <CardContent className="space-y-2">
-                  <div>
-                    <p className="text-xs text-muted-foreground mb-1">Agent ID (copy for widget settings)</p>
-                    <div className="flex items-center gap-1 bg-muted rounded px-2 py-1">
-                      <code className="text-xs flex-1 truncate">{agent.id}</code>
-                      <Button
-                        size="icon"
-                        variant="ghost"
-                        className="h-5 w-5"
-                        onClick={() => copyId(agent.id)}
-                      >
-                        {copiedId === agent.id ? (
-                          <Check className="h-3 w-3 text-green-500" />
-                        ) : (
-                          <Copy className="h-3 w-3" />
-                        )}
-                      </Button>
+          <div className="space-y-4">
+            {agents.map((agent) => {
+              const detail = agentDetails[agent.id];
+              const isExpanded = expandedAgentId === agent.id;
+              return (
+                <Card key={agent.id}>
+                  <CardHeader className="pb-2">
+                    <div className="flex items-start justify-between">
+                      <CardTitle className="text-base">{agent.name}</CardTitle>
+                      <div className="flex gap-1">
+                        <Button
+                          size="icon"
+                          variant="ghost"
+                          className="h-7 w-7"
+                          title="Setup checklist"
+                          onClick={() => toggleAgentDetail(agent.id)}
+                        >
+                          <Settings2 className="h-3.5 w-3.5" />
+                        </Button>
+                        <Button
+                          size="icon"
+                          variant="ghost"
+                          className="h-7 w-7 text-destructive"
+                          onClick={() => handleDeleteAgent(agent.id)}
+                        >
+                          <Trash2 className="h-3 w-3" />
+                        </Button>
+                      </div>
                     </div>
-                  </div>
-                  {agent.voice_id && (
-                    <p className="text-xs text-muted-foreground">
-                      Voice: {voices.find((v) => v.id === agent.voice_id)?.name || agent.voice_id}
-                    </p>
-                  )}
-                </CardContent>
-              </Card>
-            ))}
+                  </CardHeader>
+                  <CardContent className="space-y-2">
+                    <div>
+                      <p className="text-xs text-muted-foreground mb-1">Agent ID (copy for widget settings)</p>
+                      <div className="flex items-center gap-1 bg-muted rounded px-2 py-1">
+                        <code className="text-xs flex-1 truncate">{agent.id}</code>
+                        <Button size="icon" variant="ghost" className="h-5 w-5" onClick={() => copyId(agent.id)}>
+                          {copiedId === agent.id ? <Check className="h-3 w-3 text-green-500" /> : <Copy className="h-3 w-3" />}
+                        </Button>
+                      </div>
+                    </div>
+                    {agent.voice_id && (
+                      <p className="text-xs text-muted-foreground">
+                        Voice: {voices.find((v) => v.id === agent.voice_id)?.name || agent.voice_id}
+                      </p>
+                    )}
+
+                    {/* Setup checklist */}
+                    {isExpanded && (
+                      <div className="mt-3 border-t pt-3 space-y-4">
+                        {loadingDetail === agent.id ? (
+                          <p className="text-xs text-muted-foreground">Loading configuration…</p>
+                        ) : detail ? (
+                          <>
+                            {/* Security overrides */}
+                            <div>
+                              <div className="flex items-center gap-1.5 mb-2">
+                                <Shield className="h-3.5 w-3.5 text-muted-foreground" />
+                                <p className="text-xs font-semibold">Security Overrides</p>
+                              </div>
+                              <div className="space-y-2">
+                                <label className="flex items-center justify-between">
+                                  <div>
+                                    <p className="text-xs font-medium">Require authentication</p>
+                                    <p className="text-[10px] text-muted-foreground">Force signed-URL auth — prevents unauthorized widget usage</p>
+                                  </div>
+                                  <button
+                                    role="switch"
+                                    aria-checked={detail.auth_enabled}
+                                    onClick={() => updateDetail(agent.id, { auth_enabled: !detail.auth_enabled })}
+                                    className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${detail.auth_enabled ? "bg-primary" : "bg-input"}`}
+                                  >
+                                    <span className={`inline-block h-3.5 w-3.5 rounded-full bg-white shadow transition-transform ${detail.auth_enabled ? "translate-x-4" : "translate-x-0.5"}`} />
+                                  </button>
+                                </label>
+                                <div>
+                                  <p className="text-xs font-medium mb-1">Allowed origins</p>
+                                  <input
+                                    value={detail.allowed_origins.join(", ")}
+                                    onChange={(e) =>
+                                      updateDetail(agent.id, {
+                                        allowed_origins: e.target.value.split(",").map((s) => s.trim()).filter(Boolean),
+                                      })
+                                    }
+                                    placeholder="example.com, app.example.com"
+                                    className="w-full h-8 rounded-md border bg-background px-2 text-xs font-mono focus:outline-none focus:ring-1 focus:ring-ring"
+                                  />
+                                  <p className="text-[10px] text-muted-foreground mt-1">Leave blank to allow all origins. Comma-separated hostnames.</p>
+                                </div>
+                              </div>
+                            </div>
+
+                            {/* Client events */}
+                            <div>
+                              <p className="text-xs font-semibold mb-2">Client Events</p>
+                              <p className="text-[10px] text-muted-foreground mb-2">
+                                Select which events the ElevenLabs widget sends to your page's JavaScript. Use these to build custom UI reactions.
+                              </p>
+                              <div className="space-y-1.5">
+                                {AVAILABLE_CLIENT_EVENTS.map((ev) => {
+                                  const active = detail.client_events.includes(ev.id);
+                                  return (
+                                    <label key={ev.id} className="flex items-start gap-2 cursor-pointer">
+                                      <input
+                                        type="checkbox"
+                                        checked={active}
+                                        onChange={() =>
+                                          updateDetail(agent.id, {
+                                            client_events: active
+                                              ? detail.client_events.filter((e) => e !== ev.id)
+                                              : [...detail.client_events, ev.id],
+                                          })
+                                        }
+                                        className="mt-0.5 h-3.5 w-3.5 rounded"
+                                      />
+                                      <div>
+                                        <p className="text-xs font-medium leading-none">{ev.label}</p>
+                                        <p className="text-[10px] text-muted-foreground">{ev.description}</p>
+                                      </div>
+                                    </label>
+                                  );
+                                })}
+                              </div>
+                            </div>
+
+                            <Button
+                              size="sm"
+                              className="w-full h-8 text-xs"
+                              disabled={savingDetail === agent.id}
+                              onClick={() => saveAgentDetail(agent.id)}
+                            >
+                              {savingDetail === agent.id ? "Saving…" : "Save Security & Events"}
+                            </Button>
+                          </>
+                        ) : null}
+                      </div>
+                    )}
+                  </CardContent>
+                </Card>
+              );
+            })}
           </div>
         )}
       </div>

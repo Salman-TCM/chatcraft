@@ -205,6 +205,99 @@ async def create_agent(body: AgentRequest, current_user: CurrentUser):
     }
 
 
+@router.get("/agents/{agent_id}")
+async def get_agent(agent_id: str, current_user: CurrentUser):
+    """Get full ElevenLabs agent config (security, client events, etc.)."""
+    async with httpx.AsyncClient() as client:
+        resp = await client.get(
+            f"{_EL_BASE}/convai/agents/{agent_id}",
+            headers=_el_headers(),
+        )
+    if resp.status_code != 200:
+        raise HTTPException(status_code=resp.status_code, detail=resp.text)
+    data = resp.json()
+    conv = data.get("conversation_config", {})
+    platform = data.get("platform_settings", {})
+    return {
+        "success": True,
+        "data": {
+            "agent_id": data.get("agent_id"),
+            "name": data.get("name"),
+            "system_prompt": conv.get("agent", {}).get("prompt", {}).get("prompt", ""),
+            "first_message": conv.get("agent", {}).get("first_message", ""),
+            "language": conv.get("agent", {}).get("language", "en"),
+            "voice_id": conv.get("tts", {}).get("voice_id"),
+            "auth_enabled": platform.get("auth", {}).get("enable_auth", False),
+            "allowed_origins": platform.get("auth", {}).get("allowlist", []),
+            "client_events": conv.get("client_events", []),
+        },
+    }
+
+
+class AgentUpdateRequest(BaseModel):
+    name: str | None = None
+    system_prompt: str | None = None
+    first_message: str | None = None
+    language: str | None = None
+    voice_id: str | None = None
+    auth_enabled: bool | None = None
+    allowed_origins: list[str] | None = None
+    client_events: list[str] | None = None
+
+
+@router.patch("/agents/{agent_id}")
+async def update_agent(agent_id: str, body: AgentUpdateRequest, current_user: CurrentUser):
+    """Update ElevenLabs agent security settings and client events."""
+    # Fetch current config first
+    async with httpx.AsyncClient() as client:
+        get_resp = await client.get(f"{_EL_BASE}/convai/agents/{agent_id}", headers=_el_headers())
+    if get_resp.status_code != 200:
+        raise HTTPException(status_code=get_resp.status_code, detail=get_resp.text)
+    current = get_resp.json()
+
+    conv = current.get("conversation_config", {})
+    platform = current.get("platform_settings", {})
+    agent_cfg = conv.get("agent", {})
+    prompt_cfg = agent_cfg.get("prompt", {})
+    tts_cfg = conv.get("tts", {})
+
+    if body.system_prompt is not None:
+        prompt_cfg["prompt"] = body.system_prompt
+    if body.first_message is not None:
+        agent_cfg["first_message"] = body.first_message
+    if body.language is not None:
+        agent_cfg["language"] = body.language
+    if body.voice_id is not None:
+        tts_cfg["voice_id"] = body.voice_id
+    if body.client_events is not None:
+        conv["client_events"] = body.client_events
+
+    agent_cfg["prompt"] = prompt_cfg
+    conv["agent"] = agent_cfg
+    conv["tts"] = tts_cfg
+
+    auth_cfg = platform.get("auth", {})
+    if body.auth_enabled is not None:
+        auth_cfg["enable_auth"] = body.auth_enabled
+    if body.allowed_origins is not None:
+        auth_cfg["allowlist"] = [o.strip() for o in body.allowed_origins if o.strip()]
+    platform["auth"] = auth_cfg
+
+    payload: dict = {"conversation_config": conv, "platform_settings": platform}
+    if body.name is not None:
+        payload["name"] = body.name
+
+    async with httpx.AsyncClient(timeout=30) as client:
+        resp = await client.patch(
+            f"{_EL_BASE}/convai/agents/{agent_id}",
+            headers=_el_headers(),
+            json=payload,
+        )
+    if resp.status_code not in (200, 204):
+        raise HTTPException(status_code=resp.status_code, detail=resp.text)
+    return {"success": True}
+
+
 @router.delete("/agents/{agent_id}")
 async def delete_agent(agent_id: str, current_user: CurrentUser):
     """Delete an ElevenLabs conversational agent."""
