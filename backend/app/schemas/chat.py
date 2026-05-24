@@ -87,6 +87,9 @@ class ChatbotResponse(BaseModel):
     # A2A
     a2a_auth_required: bool
     a2a_allowed_tokens: list[str] | None
+    # Google Docs system prompt
+    docs_system_prompt_doc_id: str | None = None
+    docs_system_prompt_synced_at: datetime | None = None
     created_at: datetime
     updated_at: datetime
 
