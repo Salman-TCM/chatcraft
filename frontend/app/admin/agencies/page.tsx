@@ -30,9 +30,14 @@ export default function AdminAgenciesPage() {
 
   const load = useCallback(async () => {
     setLoading(true);
-    const { data } = await apiClient.get("/api/v1/agencies");
-    setAgencies(data.data ?? []);
-    setLoading(false);
+    try {
+      const { data } = await apiClient.get("/api/v1/agencies");
+      setAgencies(data.data ?? []);
+    } catch {
+      setAgencies([]);
+    } finally {
+      setLoading(false);
+    }
   }, []);
 
   useEffect(() => { load(); }, [load]);
