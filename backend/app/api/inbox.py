@@ -10,7 +10,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import Annotated
 
-from fastapi import APIRouter, HTTPException, Query, status
+from fastapi import APIRouter, File, Form, HTTPException, Query, UploadFile, status
 from sqlalchemy import func, or_, select, text
 from sqlalchemy.orm import selectinload
 
@@ -291,6 +291,55 @@ async def send_message(
     # ── Outbound dispatch for email conversations ─────────────────────────────
     if conv.channel == "email" and conv.contact and conv.contact.email:
         await _dispatch_email_reply(conv, content, db)
+
+    return {"success": True, "data": _msg_dict(msg)}
+
+
+@router.post(
+    "/conversations/{conv_id}/send-with-attachments",
+    response_model=dict,
+    status_code=status.HTTP_201_CREATED,
+)
+async def send_email_with_attachments(
+    conv_id: uuid.UUID,
+    user: CurrentUser,
+    db: DBSession,
+    content: str = Form(...),
+    files: list[UploadFile] = File(default=[]),
+) -> dict:
+    """Send an email reply with optional file attachments (email channel only, max 5 files / 25 MB total)."""
+    from app.services.channels.email_sender import MAX_ATTACHMENTS, MAX_TOTAL_BYTES
+
+    if len(files) > MAX_ATTACHMENTS:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=f"Maximum {MAX_ATTACHMENTS} attachments allowed")
+
+    conv = await _get_owned_conv(conv_id, user.id, db)
+    if conv.channel != "email":
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Attachments only supported for email conversations")
+
+    # Read and validate attachments
+    attachments: list[tuple[str, bytes, str]] = []
+    total_size = 0
+    for f in files:
+        data = await f.read()
+        total_size += len(data)
+        if total_size > MAX_TOTAL_BYTES:
+            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Total attachment size exceeds 25 MB")
+        mime_type = f.content_type or "application/octet-stream"
+        attachments.append((f.filename or "attachment", data, mime_type))
+
+    msg = Message(
+        conversation_id=conv.id,
+        role=MessageRole.assistant,
+        content=content,
+    )
+    db.add(msg)
+    conv.last_message_at = datetime.now(timezone.utc)
+    await db.commit()
+    await db.refresh(msg)
+
+    if conv.contact and conv.contact.email:
+        await _dispatch_email_reply(conv, content, db, attachments=attachments or None)
 
     return {"success": True, "data": _msg_dict(msg)}
 
@@ -638,7 +687,12 @@ async def ai_compose_email(
 
 # ── Email outbound dispatch ────────────────────────────────────────────────────
 
-async def _dispatch_email_reply(conv: Conversation, content: str, db) -> None:
+async def _dispatch_email_reply(
+    conv: Conversation,
+    content: str,
+    db,
+    attachments: list[tuple[str, bytes, str]] | None = None,
+) -> None:
     """Send outbound email reply for email-channel conversations."""
     try:
         result = await db.execute(
@@ -657,7 +711,7 @@ async def _dispatch_email_reply(conv: Conversation, content: str, db) -> None:
         subject = conv.title or "Re: Your message"
         if not subject.lower().startswith("re:"):
             subject = f"Re: {subject}"
-        await sender.send(to=conv.contact.email, subject=subject, body=content)
+        await sender.send(to=conv.contact.email, subject=subject, body=content, attachments=attachments)
     except Exception as exc:
         from loguru import logger
         logger.error(f"Failed to send email reply for conv {conv.id}: {exc}")
