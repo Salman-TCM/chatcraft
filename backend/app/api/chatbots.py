@@ -133,6 +133,175 @@ async def delete_chatbot(
     return {"success": True, "data": None}
 
 
+# ── Rich content template generator ─────────────────────────────────────────
+
+from pydantic import BaseModel as _BaseModel
+
+
+class _RichGenRequest(_BaseModel):
+    description: str
+    template_type: str = "carousel"  # carousel | card | buttons | quick_replies
+
+
+@router.post("/{chatbot_id}/generate-rich-template", response_model=dict)
+async def generate_rich_template(
+    chatbot_id: uuid.UUID,
+    body: _RichGenRequest,
+    user: CurrentUser,
+    db: DBSession,
+) -> dict:
+    """Use AI to generate a <<<RICH>>> JSON template for carousel/card/button content."""
+    await _get_owned_bot(chatbot_id, user.id, db)
+
+    from app.services.llm import ChatMessage, LLMRouter
+    from app.services.llm.key_store import get_all_keys
+    from app.services.llm.router import get_model_provider
+
+    api_keys = await get_all_keys(user.id, db)
+
+    examples = {
+        "carousel": '''{"type":"carousel","items":[{"title":"Plan A","subtitle":"Basic features","image_url":"","buttons":[{"type":"url","label":"Sign up","value":"https://example.com"}]},{"title":"Plan B","subtitle":"Pro features","image_url":"","buttons":[{"type":"url","label":"Sign up","value":"https://example.com"}]}]}''',
+        "card": '''{"type":"card","title":"Product Name","subtitle":"Short description","image_url":"","buttons":[{"type":"url","label":"Learn more","value":"https://example.com"},{"type":"postback","label":"Add to cart","value":"add_to_cart"}]}''',
+        "buttons": '''{"type":"buttons","text":"What would you like to do?","buttons":[{"type":"postback","label":"Option A","value":"option_a"},{"type":"postback","label":"Option B","value":"option_b"}]}''',
+        "quick_replies": '''{"type":"quick_replies","text":"Choose an option:","replies":[{"label":"Yes","value":"yes"},{"label":"No","value":"no"},{"label":"Maybe","value":"maybe"}]}''',
+    }
+    example = examples.get(body.template_type, examples["carousel"])
+
+    prompt = f"""You are a JSON generator for a chatbot rich content system.
+
+Generate a valid JSON object for a "{body.template_type}" template based on this description:
+{body.description}
+
+The JSON must follow this structure example exactly:
+{example}
+
+Rules:
+- Return ONLY the raw JSON object, no markdown, no explanation
+- Use realistic placeholder text and URLs
+- For buttons: type must be "url", "phone", "postback", "email", or "flow"
+- Keep titles under 40 chars, subtitles under 80 chars
+- For carousel: 2-5 items
+- For quick_replies: 2-13 replies
+- For buttons: 1-3 buttons
+"""
+
+    model = "gpt-4o-mini"
+    provider = get_model_provider(model)
+    if not api_keys.get(provider):
+        # Fall back to any available model
+        for m, p in [("claude-haiku-4-5-20251001", "anthropic"), ("gemini-1.5-flash", "google")]:
+            if api_keys.get(p):
+                model = m
+                break
+        else:
+            raise HTTPException(status_code=402, detail="No AI API key configured")
+
+    llm = LLMRouter(model=model, api_keys=api_keys)
+    result = await llm.complete(
+        [ChatMessage(role="user", content=prompt)],
+        max_tokens=1024,
+    )
+    raw = result.content.strip()
+
+    # Strip markdown code fences if present
+    if raw.startswith("```"):
+        raw = "\n".join(raw.split("\n")[1:])
+    if raw.endswith("```"):
+        raw = "\n".join(raw.split("\n")[:-1])
+    raw = raw.strip()
+
+    # Validate JSON
+    import json as _json
+    try:
+        parsed = _json.loads(raw)
+    except Exception:
+        raise HTTPException(status_code=422, detail=f"AI returned invalid JSON: {raw[:200]}")
+
+    rich_block = f"<<<RICH>>>{_json.dumps(parsed)}<<<END>>>"
+    return {"success": True, "data": {"json": parsed, "rich_block": rich_block}}
+
+
+# ── Google Docs system prompt sync ──────────────────────────────────────────
+
+class _DocsSyncRequest(_BaseModel):
+    doc_id: str | None = None  # None to unlink
+
+
+@router.put("/{chatbot_id}/docs-system-prompt", response_model=dict)
+async def set_docs_system_prompt(
+    chatbot_id: uuid.UUID,
+    body: _DocsSyncRequest,
+    user: CurrentUser,
+    db: DBSession,
+) -> dict:
+    """Link (or unlink) a Google Doc as the chatbot's system prompt source."""
+    bot = await _get_owned_bot(chatbot_id, user.id, db)
+    bot.docs_system_prompt_doc_id = body.doc_id or None
+    bot.docs_system_prompt_synced_at = None
+    await db.commit()
+    await db.refresh(bot)
+    if body.doc_id:
+        # Trigger immediate sync
+        await _sync_doc_to_prompt(bot, db)
+    return {"success": True, "data": {
+        "doc_id": bot.docs_system_prompt_doc_id,
+        "synced_at": bot.docs_system_prompt_synced_at.isoformat() if bot.docs_system_prompt_synced_at else None,
+    }}
+
+
+@router.post("/{chatbot_id}/docs-system-prompt/sync", response_model=dict)
+async def sync_docs_system_prompt(
+    chatbot_id: uuid.UUID,
+    user: CurrentUser,
+    db: DBSession,
+) -> dict:
+    """Manually trigger a Google Doc → system prompt sync."""
+    bot = await _get_owned_bot(chatbot_id, user.id, db)
+    if not bot.docs_system_prompt_doc_id:
+        raise HTTPException(status_code=400, detail="No Google Doc linked for this chatbot")
+    content = await _sync_doc_to_prompt(bot, db)
+    return {"success": True, "data": {
+        "synced_at": bot.docs_system_prompt_synced_at.isoformat() if bot.docs_system_prompt_synced_at else None,
+        "chars": len(content),
+    }}
+
+
+async def _sync_doc_to_prompt(bot, db) -> str:
+    """Fetch Google Doc content and update the chatbot's system prompt."""
+    import json as _json
+    from datetime import datetime, timezone
+    try:
+        from google.oauth2.service_account import Credentials
+        from googleapiclient.discovery import build
+        from app.core.config import settings
+
+        creds_json = getattr(settings, "google_service_account_json", None)
+        if not creds_json:
+            return ""
+        creds = Credentials.from_service_account_info(
+            _json.loads(creds_json),
+            scopes=["https://www.googleapis.com/auth/documents.readonly"],
+        )
+        service = build("docs", "v1", credentials=creds, cache_discovery=False)
+        doc = service.documents().get(documentId=bot.docs_system_prompt_doc_id).execute()
+
+        # Extract plain text from doc content
+        content_parts = []
+        for el in doc.get("body", {}).get("content", []):
+            for para_el in el.get("paragraph", {}).get("elements", []):
+                text = para_el.get("textRun", {}).get("content", "")
+                content_parts.append(text)
+        content = "".join(content_parts).strip()
+
+        if content:
+            bot.system_prompt = content
+            bot.docs_system_prompt_synced_at = datetime.now(timezone.utc)
+            await db.commit()
+        return content
+    except Exception:
+        return ""
+
+
 # ── helpers ──────────────────────────────────────────────────────────────────
 
 async def _get_owned_bot(
