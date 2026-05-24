@@ -112,6 +112,20 @@ const CHANNELS: ChannelDef[] = [
     setupUrl: "https://console.twilio.com/",
   },
   {
+    key: "phone",
+    label: "Phone Calls (Twilio)",
+    icon: "☎️",
+    color: "bg-orange-50 border-orange-200",
+    description: "Handle inbound PSTN calls — AI answers, speaks, and routes to your team.",
+    fields: [
+      { key: "account_sid", label: "Account SID", placeholder: "ACxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx" },
+      { key: "auth_token", label: "Auth Token", placeholder: "your_auth_token", secret: true },
+      { key: "from_number", label: "Twilio Phone Number", placeholder: "+15551234567" },
+    ],
+    webhookNote: "Set your Twilio phone number's Voice webhook to the URL below (HTTP POST).",
+    setupUrl: "https://console.twilio.com/",
+  },
+  {
     key: "discord",
     label: "Discord",
     icon: "🎮",
@@ -234,7 +248,8 @@ export default function ChannelsPage() {
   }
 
   function copyWebhookUrl(channel: string) {
-    const url = `${baseWebhookUrl}/${channel}/${chatbotId}`;
+    const path = channel === "phone" ? "voice" : channel;
+    const url = `${baseWebhookUrl}/${path}/${chatbotId}`;
     navigator.clipboard.writeText(url);
   }
 
@@ -269,7 +284,8 @@ export default function ChannelsPage() {
         const form = forms[ch.key] ?? {};
         const isActive = activeToggles[ch.key] ?? true;
         const result = testResult[ch.key];
-        const webhookUrl = `${baseWebhookUrl}/${ch.key}/${chatbotId}`;
+        const webhookPath = ch.key === "phone" ? "voice" : ch.key;
+        const webhookUrl = `${baseWebhookUrl}/${webhookPath}/${chatbotId}`;
 
         return (
           <Card key={ch.key} className={`overflow-hidden border ${isConnected ? ch.color : ""}`}>

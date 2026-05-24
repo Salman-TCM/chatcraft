@@ -42,6 +42,7 @@ from app.api.white_label import router as white_label_router
 from app.api.push import router as push_router
 from app.api.model_keys import router as model_keys_router
 from app.api.agents import router as agents_router
+from app.api.voice_calls import router as voice_calls_router
 from app.core.security_headers import SecurityHeadersMiddleware
 from app.core.ip_abuse import IPAbuseMiddleware
 from app.core.config import settings
@@ -130,6 +131,7 @@ app.include_router(white_label_router)
 app.include_router(push_router)
 app.include_router(model_keys_router)
 app.include_router(agents_router)
+app.include_router(voice_calls_router)
 
 
 @app.get("/", tags=["health"])
