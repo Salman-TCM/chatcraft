@@ -12,9 +12,15 @@ const PROTECTED_PREFIXES = [
   "/team",
 ];
 
+const ADMIN_PREFIXES = ["/admin"];
+
 const AUTH_PAGES = ["/login", "/register", "/forgot-password"];
 
 const AGENCY_ROUTE_PREFIXES = ["/agency"];
+
+function isSafeCallbackUrl(url: string): boolean {
+  return url.startsWith("/") && !url.startsWith("//") && !url.startsWith("/\\");
+}
 
 async function resolveAgency(host: string): Promise<{ id: string; theme: string } | null> {
   try {
@@ -62,12 +68,18 @@ export default auth(async (req) => {
   }
 
   const isProtected = PROTECTED_PREFIXES.some((prefix) => path.startsWith(prefix));
+  const isAdminRoute = ADMIN_PREFIXES.some((prefix) => path.startsWith(prefix));
   const isAuthPage = AUTH_PAGES.some((p) => path.startsWith(p));
+  const userRole = (session?.user as any)?.role;
 
-  if (isProtected && !isAuthenticated) {
+  if ((isProtected || isAdminRoute) && !isAuthenticated) {
     const loginUrl = new URL("/login", nextUrl.origin);
     loginUrl.searchParams.set("callbackUrl", path);
     return NextResponse.redirect(loginUrl);
+  }
+
+  if (isAdminRoute && isAuthenticated && userRole !== "admin") {
+    return NextResponse.redirect(new URL("/dashboard", nextUrl.origin));
   }
 
   if (isAuthPage && isAuthenticated) {
