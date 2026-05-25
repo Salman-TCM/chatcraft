@@ -23,8 +23,10 @@ type FormData = z.infer<typeof schema>;
 export default function LoginPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const callbackUrl = searchParams.get("callbackUrl") ?? "/dashboard";
+  const rawCallback = searchParams.get("callbackUrl") ?? "/dashboard";
+  const callbackUrl = rawCallback.startsWith("/") && !rawCallback.startsWith("//") && !rawCallback.startsWith("/\\") ? rawCallback : "/dashboard";
   const passwordReset = searchParams.get("reset") === "1";
+  const isSuspended = searchParams.get("error") === "suspended";
   const [serverError, setServerError] = useState("");
   const [googleLoading, setGoogleLoading] = useState(false);
 
@@ -42,7 +44,12 @@ export default function LoginPage() {
       redirect: false,
     });
     if (result?.error) {
-      setServerError("Invalid email or password");
+      const code = (result as any).code ?? "";
+      if (code === "ACCOUNT_SUSPENDED" || result.error === "ACCOUNT_SUSPENDED") {
+        setServerError("Your account has been suspended. Please contact support.");
+      } else {
+        setServerError("Invalid email or password");
+      }
       return;
     }
     router.push(callbackUrl);
@@ -66,6 +73,11 @@ export default function LoginPage() {
           {passwordReset && (
             <p className="text-sm text-green-600 bg-green-50 border border-green-200 rounded-md px-3 py-2">
               Password updated — sign in with your new password.
+            </p>
+          )}
+          {isSuspended && (
+            <p className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-md px-3 py-2">
+              Your account has been suspended. Please contact support.
             </p>
           )}
           <Button
