@@ -11,6 +11,7 @@ Each agent has:
 """
 import asyncio
 import json
+import re as _re
 import secrets
 import uuid
 from datetime import datetime, timezone
@@ -500,6 +501,67 @@ def _tools_to_openai(tools: list[dict]) -> list[dict]:
     return result
 
 
+def _is_tool_generation_error(exc: Exception) -> bool:
+    """Return True when the provider rejected a malformed tool call generation."""
+    s = str(exc).lower()
+    return (
+        "tool_use_failed" in s
+        or "failed to call a function" in s
+        or "tool call validation failed" in s
+    )
+
+
+def _build_text_tool_instructions(oai_tools: list[dict]) -> str:
+    """Build a system prompt addendum that teaches any model to call tools via JSON blocks."""
+    lines = [
+        "TOOL CALLING INSTRUCTIONS:",
+        "When you need to use a tool, output a JSON block in this exact format (including the backticks):",
+        "",
+        "```tool_call",
+        '{"name": "tool_name", "args": {"param": "value"}}',
+        "```",
+        "",
+        "Available tools:",
+    ]
+    for t in oai_tools:
+        fn = t.get("function", t)
+        name = fn.get("name", "")
+        desc = fn.get("description", "")
+        props = fn.get("parameters", {}).get("properties", {})
+        param_names = list(props.keys())
+        lines.append(f"- {name}: {desc}")
+        if param_names:
+            lines.append(f"  Parameters: {', '.join(param_names)}")
+    lines += [
+        "",
+        "Call ONE tool per message. Wait for the result before calling another.",
+        "Do NOT use XML tags or any other format — only the ```tool_call block above.",
+    ]
+    return "\n".join(lines)
+
+
+_TOOL_CALL_BLOCK_RE = _re.compile(
+    r"```tool_call\s*\n(\{.*?\})\s*\n```",
+    _re.DOTALL,
+)
+
+
+def _extract_text_tool_calls(text: str) -> list[dict]:
+    """Pull tool call JSON blocks out of a plain-text response."""
+    calls = []
+    for m in _TOOL_CALL_BLOCK_RE.finditer(text):
+        try:
+            data = json.loads(m.group(1))
+            if "name" in data:
+                calls.append({
+                    "name": data["name"].strip(),
+                    "args": data.get("args", data.get("arguments", data.get("parameters", {}))),
+                })
+        except Exception:
+            pass
+    return calls
+
+
 async def _run_agent_openai_compat(
     agent: Agent,
     system_prompt: str,
@@ -524,6 +586,7 @@ async def _run_agent_openai_compat(
     step = 0
     max_steps = agent.max_steps or 10
     ctx = {"agent_id": str(agent.id), "user_id": str(agent.user_id)}
+    text_tool_mode = False  # True once we've fallen back to JSON-in-text tool calling
 
     try:
         while step < max_steps:
@@ -533,43 +596,81 @@ async def _run_agent_openai_compat(
                 "messages": messages,
                 "max_tokens": 4096,
             }
-            if oai_tools:
+            if oai_tools and not text_tool_mode:
                 kwargs["tools"] = oai_tools
                 kwargs["tool_choice"] = "auto"
 
-            response = await client.chat.completions.create(**kwargs)
+            try:
+                response = await client.chat.completions.create(**kwargs)
+            except Exception as exc:
+                if oai_tools and not text_tool_mode and _is_tool_generation_error(exc):
+                    # The model can't generate valid native tool calls.
+                    # Switch to text-mode: inject instructions and retry without tools.
+                    text_tool_mode = True
+                    instructions = _build_text_tool_instructions(oai_tools)
+                    if messages and messages[0]["role"] == "system":
+                        messages[0]["content"] += "\n\n" + instructions
+                    else:
+                        messages.insert(0, {"role": "system", "content": instructions})
+                    kwargs.pop("tools", None)
+                    kwargs.pop("tool_choice", None)
+                    response = await client.chat.completions.create(**kwargs)
+                else:
+                    raise
+
             choice = response.choices[0]
             msg = choice.message
+            text = msg.content or ""
 
-            if msg.content:
-                yield _sse({"type": "text", "content": msg.content})
+            if text_tool_mode:
+                tool_calls = _extract_text_tool_calls(text)
+                if tool_calls:
+                    # Strip the ```tool_call blocks from what the user sees
+                    display = _TOOL_CALL_BLOCK_RE.sub("", text).strip()
+                    if display:
+                        yield _sse({"type": "text", "content": display})
+                    messages.append({"role": "assistant", "content": text})
+                    for tc in tool_calls:
+                        name = tc["name"]
+                        inputs = tc["args"]
+                        yield _sse({"type": "tool_call", "tool": name, "input": inputs})
+                        result_text = await _execute_tool(name, inputs, mcp_map, ctx)
+                        yield _sse({"type": "tool_result", "tool": name, "result": result_text[:500]})
+                        # Append as a user message so any model understands it
+                        messages.append({"role": "user", "content": f"[Tool result for '{name}']: {result_text}"})
+                else:
+                    if text:
+                        yield _sse({"type": "text", "content": text})
+                    break
+            else:
+                if text:
+                    yield _sse({"type": "text", "content": text})
 
-            if not msg.tool_calls or choice.finish_reason == "stop":
-                break
+                if not msg.tool_calls or choice.finish_reason == "stop":
+                    break
 
-            messages.append({"role": "assistant", "content": msg.content or "", "tool_calls": [
-                {
-                    "id": tc.id,
-                    "type": "function",
-                    "function": {"name": tc.function.name.strip(), "arguments": tc.function.arguments},
-                }
-                for tc in msg.tool_calls
-            ]})
+                messages.append({"role": "assistant", "content": text, "tool_calls": [
+                    {
+                        "id": tc.id,
+                        "type": "function",
+                        "function": {"name": tc.function.name.strip(), "arguments": tc.function.arguments},
+                    }
+                    for tc in msg.tool_calls
+                ]})
 
-            for tc in msg.tool_calls:
-                import json as _json
-                name = tc.function.name.strip()
-                try:
-                    inputs = _json.loads(tc.function.arguments or "{}")
-                except Exception:
-                    inputs = {}
-                yield _sse({"type": "tool_call", "tool": name, "input": inputs})
-                result_text = await _execute_tool(name, inputs, mcp_map, ctx)
-                yield _sse({"type": "tool_result", "tool": name, "result": result_text[:500]})
-                messages.append({"role": "tool", "tool_call_id": tc.id, "content": result_text})
+                for tc in msg.tool_calls:
+                    name = tc.function.name.strip()
+                    try:
+                        inputs = json.loads(tc.function.arguments or "{}")
+                    except Exception:
+                        inputs = {}
+                    yield _sse({"type": "tool_call", "tool": name, "input": inputs})
+                    result_text = await _execute_tool(name, inputs, mcp_map, ctx)
+                    yield _sse({"type": "tool_result", "tool": name, "result": result_text[:500]})
+                    messages.append({"role": "tool", "tool_call_id": tc.id, "content": result_text})
 
-            if choice.finish_reason != "tool_calls":
-                break
+                if choice.finish_reason != "tool_calls":
+                    break
 
     except Exception as exc:
         short = str(exc).split("\n")[0].strip()
