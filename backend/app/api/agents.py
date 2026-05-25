@@ -551,14 +551,14 @@ async def _run_agent_openai_compat(
                 {
                     "id": tc.id,
                     "type": "function",
-                    "function": {"name": tc.function.name, "arguments": tc.function.arguments},
+                    "function": {"name": tc.function.name.strip(), "arguments": tc.function.arguments},
                 }
                 for tc in msg.tool_calls
             ]})
 
             for tc in msg.tool_calls:
                 import json as _json
-                name = tc.function.name
+                name = tc.function.name.strip()
                 try:
                     inputs = _json.loads(tc.function.arguments or "{}")
                 except Exception:
