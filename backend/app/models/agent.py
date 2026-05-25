@@ -57,6 +57,9 @@ class Agent(TimestampMixin, Base):
     )
     share_token: Mapped[str | None] = mapped_column(String(64), nullable=True, unique=True)
 
+    # Webhook — POST to this URL after every completed agent run
+    webhook_url: Mapped[str | None] = mapped_column(String(2048), nullable=True)
+
     # Relationships
     user: Mapped["User"] = relationship("User")  # type: ignore[name-defined]
     chatbot: Mapped["ChatbotConfig | None"] = relationship("ChatbotConfig")  # type: ignore[name-defined]
