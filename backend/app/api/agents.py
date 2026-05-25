@@ -869,6 +869,34 @@ def _build_builtin_tools(tools_config: dict) -> list[dict]:
             },
         })
 
+    if tools_config.get("agent_builder"):
+        defs.append({
+            "name": "list_available_models",
+            "description": "List all LLM models available to the current user, grouped by provider. Call this at the start of every conversation.",
+            "input_schema": {"type": "object", "properties": {}, "required": []},
+        })
+        defs.append({
+            "name": "create_agent",
+            "description": "Create a new AI agent with the given configuration.",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string", "description": "Agent display name"},
+                    "description": {"type": "string", "description": "Short description of what the agent does"},
+                    "model": {"type": "string", "description": "Exact model ID (e.g. llama-3.3-70b-versatile)"},
+                    "instructions": {"type": "string", "description": "The system prompt / instructions for the agent"},
+                    "memory_enabled": {"type": "boolean", "description": "Whether the agent remembers past sessions"},
+                    "tool_web_search": {"type": "boolean", "description": "Enable web search tool"},
+                    "tool_http": {"type": "boolean", "description": "Enable HTTP request tool"},
+                    "tool_email": {"type": "boolean", "description": "Enable send email tool"},
+                    "tool_code": {"type": "boolean", "description": "Enable Python code execution tool"},
+                    "tool_sms": {"type": "boolean", "description": "Enable SMS tool"},
+                    "tool_browser": {"type": "boolean", "description": "Enable browser/URL tool"},
+                },
+                "required": ["name", "model", "instructions"],
+            },
+        })
+
     return defs
 
 
@@ -900,6 +928,10 @@ async def _execute_tool(name: str, inputs: dict, mcp_map: dict, ctx: dict | None
             return await _tool_send_sms_verification(inputs, ctx or {})
         elif name == "verify_code":
             return await _tool_verify_code(inputs, ctx or {})
+        elif name == "list_available_models":
+            return await _tool_list_available_models(ctx or {})
+        elif name == "create_agent":
+            return await _tool_create_agent(inputs, ctx or {})
         return f"Unknown tool: {name}"
     except Exception as exc:
         return f"Tool error: {exc}"
@@ -1227,6 +1259,98 @@ async def _tool_send_sms(inputs: dict) -> str:
         return f"SMS sent to {to}."
     except Exception as e:
         return f"Failed to send SMS: {e}"
+
+
+async def _tool_list_available_models(ctx: dict) -> str:
+    user_id_str = ctx.get("user_id", "")
+    if not user_id_str:
+        return "Error: no user context."
+    try:
+        user_id = uuid.UUID(user_id_str)
+    except ValueError:
+        return "Error: invalid user_id."
+
+    from app.db.session import AsyncSessionLocal
+    from app.services.llm.key_store import get_all_keys as _get_all_keys
+
+    _PROVIDER_SETTINGS_KEY = {
+        "anthropic": "anthropic_api_key",
+        "openai": "openai_api_key",
+        "google": "google_ai_api_key",
+        "groq": "groq_api_key",
+        "deepseek": "deepseek_api_key",
+        "perplexity": "perplexity_api_key",
+        "xai": "xai_api_key",
+    }
+    _PROVIDER_MODELS = {
+        "anthropic": ["claude-sonnet-4-6", "claude-opus-4-7", "claude-haiku-4-5"],
+        "openai": ["gpt-4o", "gpt-4o-mini", "gpt-5", "gpt-5-mini"],
+        "google": ["gemini-2.5-pro", "gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-pro"],
+        "groq": ["llama-3.3-70b-versatile", "llama-3.1-8b-instant", "mixtral-8x7b-32768"],
+        "deepseek": ["deepseek-chat", "deepseek-reasoner"],
+        "perplexity": ["sonar-pro", "sonar", "sonar-reasoning"],
+        "xai": ["grok-3", "grok-3-fast", "grok-3-mini"],
+    }
+
+    async with AsyncSessionLocal() as session:
+        user_keys = await _get_all_keys(user_id, session)
+
+    lines = ["Available models (use the exact model ID when creating an agent):"]
+    for provider, models in _PROVIDER_MODELS.items():
+        sk = _PROVIDER_SETTINGS_KEY.get(provider, "")
+        platform_key = getattr(settings, sk, "") if sk else ""
+        if user_keys.get(provider) or platform_key:
+            lines.append(f"\n{provider.upper()}:")
+            for m in models:
+                lines.append(f"  - {m}")
+    if len(lines) == 1:
+        return "No models available. Please add API keys in Settings → Model Keys."
+    return "\n".join(lines)
+
+
+async def _tool_create_agent(inputs: dict, ctx: dict) -> str:
+    user_id_str = ctx.get("user_id", "")
+    if not user_id_str:
+        return "Error: no user context."
+    try:
+        user_id = uuid.UUID(user_id_str)
+    except ValueError:
+        return "Error: invalid user_id."
+
+    name = inputs.get("name", "").strip()
+    model = inputs.get("model", "").strip()
+    instructions = inputs.get("instructions", "").strip()
+    if not name or not model or not instructions:
+        return "Error: 'name', 'model', and 'instructions' are required."
+
+    tools = {
+        "web_search": bool(inputs.get("tool_web_search", False)),
+        "http": bool(inputs.get("tool_http", False)),
+        "email": bool(inputs.get("tool_email", False)),
+        "code": bool(inputs.get("tool_code", False)),
+        "sms": bool(inputs.get("tool_sms", False)),
+        "browser": bool(inputs.get("tool_browser", False)),
+    }
+
+    from app.db.session import AsyncSessionLocal
+
+    async with AsyncSessionLocal() as session:
+        agent = Agent(
+            user_id=user_id,
+            name=name,
+            description=inputs.get("description", ""),
+            model=model,
+            instructions=instructions,
+            tools=tools,
+            memory_enabled=bool(inputs.get("memory_enabled", False)),
+            max_steps=10,
+        )
+        session.add(agent)
+        await session.commit()
+        await session.refresh(agent)
+        agent_id = str(agent.id)
+
+    return f"Agent '{name}' created successfully! Agent ID: {agent_id}. The user can find it in the Agents section."
 
 
 # ─── System prompt builder ────────────────────────────────────────────────────
