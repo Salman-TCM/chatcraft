@@ -18,6 +18,7 @@ from typing import Any, AsyncIterator
 
 import anthropic
 import httpx
+from openai import AsyncOpenAI
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
@@ -347,15 +348,28 @@ async def agent_chat(
 
 # ─── Agent execution loop ─────────────────────────────────────────────────────
 
-_GEMINI_MODELS = {
-    "gemini-1.5-pro", "gemini-1.5-flash",
-    "gemini-2.0-flash", "gemini-2.0-flash-001", "gemini-2.0-flash-lite", "gemini-2.0-flash-lite-001",
-    "gemini-2.5-pro", "gemini-2.5-flash", "gemini-2.5-flash-lite",
+_PROVIDER_BASE_URLS: dict[str, str] = {
+    "openai":     "https://api.openai.com/v1",
+    "groq":       "https://api.groq.com/openai/v1",
+    "deepseek":   "https://api.deepseek.com/v1",
+    "perplexity": "https://api.perplexity.ai",
+    "xai":        "https://api.x.ai/v1",
+}
+
+_SETTINGS_KEY_ATTR: dict[str, str] = {
+    "anthropic":  "anthropic_api_key",
+    "google":     "google_ai_api_key",
+    "openai":     "openai_api_key",
+    "groq":       "groq_api_key",
+    "deepseek":   "deepseek_api_key",
+    "perplexity": "perplexity_api_key",
+    "xai":        "xai_api_key",
 }
 
 
 def _model_provider(model: str) -> str:
-    return "google" if model in _GEMINI_MODELS or model.startswith("gemini") else "anthropic"
+    from app.services.llm.router import get_model_provider
+    return get_model_provider(model)
 
 
 async def _resolve_api_key(user_id: uuid.UUID, model: str, db) -> tuple[str, str | None]:
@@ -364,7 +378,8 @@ async def _resolve_api_key(user_id: uuid.UUID, model: str, db) -> tuple[str, str
     user_key = await _get_user_key(user_id, provider, db)
     if user_key:
         return provider, user_key
-    fallback = settings.anthropic_api_key if provider == "anthropic" else getattr(settings, "google_ai_api_key", None)
+    attr = _SETTINGS_KEY_ATTR.get(provider, "")
+    fallback = getattr(settings, attr, None) if attr else None
     return provider, fallback or None
 
 
@@ -394,8 +409,12 @@ async def _run_agent(
     if provider == "google":
         async for chunk in _run_agent_gemini(agent, system_prompt, tools, mcp_map, user_message, history, api_key):
             yield chunk
-    else:
+    elif provider == "anthropic":
         async for chunk in _run_agent_anthropic(agent, system_prompt, tools, mcp_map, user_message, history, api_key):
+            yield chunk
+    else:
+        base_url = _PROVIDER_BASE_URLS.get(provider, "https://api.openai.com/v1")
+        async for chunk in _run_agent_openai_compat(agent, system_prompt, tools, mcp_map, user_message, history, api_key, base_url):
             yield chunk
 
 
@@ -461,6 +480,100 @@ async def _run_agent_anthropic(
         # Trim verbose API error bodies to the first line for the UI
         short = msg.split("\n")[0].strip()
         yield _sse({"type": "error", "content": short or msg})
+        return
+
+    yield _sse({"type": "done"})
+
+
+def _tools_to_openai(tools: list[dict]) -> list[dict]:
+    """Convert Anthropic-format tool definitions to OpenAI function-calling format."""
+    result = []
+    for t in tools:
+        result.append({
+            "type": "function",
+            "function": {
+                "name": t["name"],
+                "description": t.get("description", ""),
+                "parameters": t.get("input_schema", {"type": "object", "properties": {}}),
+            },
+        })
+    return result
+
+
+async def _run_agent_openai_compat(
+    agent: Agent,
+    system_prompt: str,
+    tools: list[dict],
+    mcp_map: dict[str, Any],
+    user_message: str,
+    history: list[dict],
+    api_key: str,
+    base_url: str,
+) -> AsyncIterator[str]:
+    client = AsyncOpenAI(api_key=api_key, base_url=base_url)
+    model = agent.model or "gpt-4o"
+    oai_tools = _tools_to_openai(tools) if tools else []
+
+    messages: list[dict] = []
+    if system_prompt:
+        messages.append({"role": "system", "content": system_prompt})
+    for h in history:
+        messages.append(h)
+    messages.append({"role": "user", "content": user_message})
+
+    step = 0
+    max_steps = agent.max_steps or 10
+    ctx = {"agent_id": str(agent.id)}
+
+    try:
+        while step < max_steps:
+            step += 1
+            kwargs: dict[str, Any] = {
+                "model": model,
+                "messages": messages,
+                "max_tokens": 4096,
+            }
+            if oai_tools:
+                kwargs["tools"] = oai_tools
+                kwargs["tool_choice"] = "auto"
+
+            response = await client.chat.completions.create(**kwargs)
+            choice = response.choices[0]
+            msg = choice.message
+
+            if msg.content:
+                yield _sse({"type": "text", "content": msg.content})
+
+            if not msg.tool_calls or choice.finish_reason == "stop":
+                break
+
+            messages.append({"role": "assistant", "content": msg.content or "", "tool_calls": [
+                {
+                    "id": tc.id,
+                    "type": "function",
+                    "function": {"name": tc.function.name, "arguments": tc.function.arguments},
+                }
+                for tc in msg.tool_calls
+            ]})
+
+            for tc in msg.tool_calls:
+                import json as _json
+                name = tc.function.name
+                try:
+                    inputs = _json.loads(tc.function.arguments or "{}")
+                except Exception:
+                    inputs = {}
+                yield _sse({"type": "tool_call", "tool": name, "input": inputs})
+                result_text = await _execute_tool(name, inputs, mcp_map, ctx)
+                yield _sse({"type": "tool_result", "tool": name, "result": result_text[:500]})
+                messages.append({"role": "tool", "tool_call_id": tc.id, "content": result_text})
+
+            if choice.finish_reason != "tool_calls":
+                break
+
+    except Exception as exc:
+        short = str(exc).split("\n")[0].strip()
+        yield _sse({"type": "error", "content": short or str(exc)})
         return
 
     yield _sse({"type": "done"})
