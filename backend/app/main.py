@@ -45,6 +45,7 @@ from app.api.agents import router as agents_router, public_router as agents_publ
 from app.api.voice_calls import router as voice_calls_router
 from app.api.settings_comms import router as settings_comms_router
 from app.api.google_sheets import router as google_sheets_router
+from app.api.models import router as models_router
 from app.core.security_headers import SecurityHeadersMiddleware
 from app.core.ip_abuse import IPAbuseMiddleware
 from app.core.config import settings
@@ -138,6 +139,7 @@ app.include_router(agents_router)
 app.include_router(agents_public_router)
 app.include_router(voice_calls_router)
 app.include_router(google_sheets_router)
+app.include_router(models_router)
 
 
 @app.get("/", tags=["health"])
