@@ -8,6 +8,7 @@ const API_URL = process.env.BACKEND_URL ?? process.env.NEXT_PUBLIC_API_URL ?? "h
 const ACCESS_TOKEN_LIFETIME_MS = 14 * 60 * 1000; // 14 min (1 min buffer before 15 min expiry)
 
 export const { handlers, auth, signIn, signOut } = NextAuth({
+  trustHost: true,
   providers: [
     Credentials({
       credentials: {
@@ -25,6 +26,11 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
               password: credentials.password,
             }),
           });
+          if (res.status === 403) {
+            const body = await res.json().catch(() => ({}));
+            const code = body?.detail?.code ?? "ACCOUNT_SUSPENDED";
+            throw new Error(code);
+          }
           if (!res.ok) return null;
           const { data } = await res.json();
           return {
@@ -37,7 +43,8 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
             refreshToken: data.refresh_token ?? "",
             trialEndsAt: data.user.trial_ends_at ?? null,
           };
-        } catch {
+        } catch (err) {
+          if (err instanceof Error && err.message === "ACCOUNT_SUSPENDED") throw err;
           return null;
         }
       },
@@ -62,6 +69,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
               avatar_url: user.image ?? null,
             }),
           });
+          if (res.status === 403) return "/login?error=suspended";
           if (!res.ok) return false;
           const { data } = await res.json();
           // Attach backend tokens so jwt callback can store them
