@@ -162,7 +162,7 @@ class PublicChatRequest(BaseModel):
 async def public_agent_chat(share_token: str, body: PublicChatRequest, db: DBSession):
     """Stream a public agent response. No authentication required."""
     agent = await _get_shared_agent(share_token, db)
-    system_prompt = await _build_system_prompt(agent, db)
+    system_prompt = await _build_system_prompt(agent, db)  # no user_id — never inject token for public
     tools, mcp_map = await _build_tools_with_mcp(agent, agent.user_id, db)
     _, api_key = await _resolve_api_key(agent.user_id, agent.model or "claude-sonnet-4-6", db)
     return StreamingResponse(
@@ -308,7 +308,7 @@ async def agent_chat(
 ):
     """Stream an agent response with tool use, showing thinking steps as SSE events."""
     agent = await _get_owned_agent(agent_id, user.id, db)
-    system_prompt = await _build_system_prompt(agent, db)
+    system_prompt = await _build_system_prompt(agent, db, user_id=user.id)
     tools, mcp_map = await _build_tools_with_mcp(agent, user.id, db)
     _, api_key = await _resolve_api_key(user.id, agent.model or "claude-sonnet-4-6", db)
 
@@ -1203,7 +1203,11 @@ async def _tool_send_sms(inputs: dict) -> str:
 
 # ─── System prompt builder ────────────────────────────────────────────────────
 
-async def _build_system_prompt(agent: Agent, db: DBSession) -> str:
+async def _build_system_prompt(
+    agent: Agent,
+    db: DBSession,
+    user_id: uuid.UUID | None = None,
+) -> str:
     parts: list[str] = []
 
     if agent.chatbot_id:
@@ -1220,7 +1224,23 @@ async def _build_system_prompt(agent: Agent, db: DBSession) -> str:
     if not parts:
         parts.append("You are a helpful AI agent. Use the available tools to complete tasks thoroughly and accurately.")
 
-    return "\n\n".join(parts)
+    prompt = "\n\n".join(parts)
+
+    # Inject runtime variables if placeholders are present and we have a user context.
+    # {{USER_API_TOKEN}} → a 1-hour JWT the agent can use to call the ChatCraft API.
+    # {{BASE_URL}}       → the platform's public API base URL.
+    # Never injected for public (unauthenticated) agent calls.
+    if user_id and ("{{USER_API_TOKEN}}" in prompt or "{{BASE_URL}}" in prompt):
+        from app.core.security import create_access_token
+        from app.models.user import User as _User
+        user = await db.get(_User, user_id)
+        role = user.role.value if user else "free"
+        agent_token = create_access_token(user_id, role, expires_minutes=60)
+        api_base = getattr(settings, "api_url", None) or "http://localhost:8000"
+        prompt = prompt.replace("{{USER_API_TOKEN}}", agent_token)
+        prompt = prompt.replace("{{BASE_URL}}", api_base.rstrip("/"))
+
+    return prompt
 
 
 # ─── Memory helpers ───────────────────────────────────────────────────────────
