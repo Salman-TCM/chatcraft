@@ -61,11 +61,24 @@ export default function AgentsPage() {
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  async function loadAgents() {
+    setLoading(true);
+    try {
+      const { data } = await apiClient.get("/api/v1/agents");
+      setAgents(data.data ?? []);
+    } catch {
+      setError("Failed to load agents. Please refresh.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
   useEffect(() => {
-    apiClient.get("/api/v1/agents")
-      .then(({ data }) => setAgents(data.data ?? []))
-      .catch(() => setError("Failed to load agents. Please refresh."))
-      .finally(() => setLoading(false));
+    loadAgents();
+    // Re-fetch when the tab becomes visible again (e.g. user returns from Agent Builder chat)
+    const onVisible = () => { if (document.visibilityState === "visible") loadAgents(); };
+    document.addEventListener("visibilitychange", onVisible);
+    return () => document.removeEventListener("visibilitychange", onVisible);
   }, []);
 
   async function createAgent() {
@@ -124,10 +137,16 @@ export default function AgentsPage() {
             Build autonomous AI agents with tools, instructions, and knowledge.
           </p>
         </div>
-        <Button size="sm" onClick={createAgent} disabled={creating}>
-          {creating ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
-          New Agent
-        </Button>
+        <div className="flex gap-2">
+          <Button size="sm" variant="outline" onClick={loadAgents} disabled={loading}>
+            <Loader2 className={`h-4 w-4 ${loading ? "animate-spin" : "opacity-0 w-0"}`} />
+            Refresh
+          </Button>
+          <Button size="sm" onClick={createAgent} disabled={creating}>
+            {creating ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
+            New Agent
+          </Button>
+        </div>
       </div>
 
       {/* Empty state */}

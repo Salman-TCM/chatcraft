@@ -1420,10 +1420,10 @@ async def _tool_create_agent(inputs: dict, ctx: dict) -> str:
 
     name = inputs.get("name", "").strip()
     model = inputs.get("model", "").strip()
-    instructions = inputs.get("instructions", "").strip()
-    if not name or not model or not instructions:
-        return "Error: 'name', 'model', and 'instructions' are required."
+    if not name or not model:
+        return "Error: 'name' and 'model' are required."
 
+    instructions = (inputs.get("instructions") or "").strip() or None
     tools = {
         "web_search": bool(inputs.get("tool_web_search", False)),
         "http": bool(inputs.get("tool_http", False)),
@@ -1433,25 +1433,30 @@ async def _tool_create_agent(inputs: dict, ctx: dict) -> str:
         "browser": bool(inputs.get("tool_browser", False)),
     }
 
+    from app.core.logging import logger as _logger
     from app.db.session import AsyncSessionLocal
 
-    async with AsyncSessionLocal() as session:
-        agent = Agent(
-            user_id=user_id,
-            name=name,
-            description=inputs.get("description", ""),
-            model=model,
-            instructions=instructions,
-            tools=tools,
-            memory_enabled=bool(inputs.get("memory_enabled", False)),
-            max_steps=10,
-        )
-        session.add(agent)
-        await session.commit()
-        await session.refresh(agent)
-        agent_id = str(agent.id)
-
-    return f"Agent '{name}' created successfully! Agent ID: {agent_id}. The user can find it in the Agents section."
+    try:
+        async with AsyncSessionLocal() as session:
+            new_agent = Agent(
+                user_id=user_id,
+                name=name,
+                description=(inputs.get("description") or "").strip() or None,
+                model=model,
+                instructions=instructions,
+                tools=tools,
+                memory_enabled=bool(inputs.get("memory_enabled", False)),
+                max_steps=10,
+            )
+            session.add(new_agent)
+            await session.commit()
+            await session.refresh(new_agent)
+            agent_id = str(new_agent.id)
+        _logger.info(f"Agent Builder created agent '{name}' (id={agent_id}) for user {user_id}")
+        return f"SUCCESS: Agent '{name}' has been created. Agent ID: {agent_id}. Tell the user to click Refresh on the Agents page to see it."
+    except Exception as exc:
+        _logger.error(f"Agent Builder failed to create agent '{name}': {exc}")
+        return f"Error creating agent: {exc}"
 
 
 # ─── System prompt builder ────────────────────────────────────────────────────
