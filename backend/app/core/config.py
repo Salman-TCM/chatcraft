@@ -25,6 +25,7 @@ class Settings(BaseSettings):
     google_oauth_client_secret: str = ""
     google_oauth_redirect_uri: str = "http://localhost:8000/api/auth/google/callback"
     frontend_url: str = "http://localhost:3000"
+    api_url: str = "http://localhost:8000"
 
     anthropic_api_key: str = ""
     openai_api_key: str = ""
