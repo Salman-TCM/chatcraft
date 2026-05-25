@@ -33,7 +33,8 @@ const TOOL_META: Record<string, { icon: React.ElementType; label: string; color:
   sheets:       { icon: Sheet,        label: "Sheets",        color: "text-emerald-500" },
   email:        { icon: Mail,         label: "Email",         color: "text-rose-500" },
   sms:          { icon: Smartphone,   label: "SMS",           color: "text-violet-500" },
-  verification: { icon: ShieldCheck,  label: "Verification",  color: "text-amber-500" },
+  verification:   { icon: ShieldCheck,  label: "Verification",  color: "text-amber-500" },
+  agent_builder:  { icon: Bot,          label: "Agent Builder", color: "text-sky-500" },
 };
 
 function modelShortName(model: string) {
