@@ -309,3 +309,71 @@ async def delete_agent(agent_id: str, current_user: CurrentUser):
     if resp.status_code not in (200, 204):
         raise HTTPException(status_code=resp.status_code, detail=resp.text)
     return {"success": True}
+
+
+@router.get("/agents/{agent_id}/conversations")
+async def list_agent_conversations(agent_id: str, current_user: CurrentUser):
+    """Fetch conversation history for an ElevenLabs conversational agent."""
+    async with httpx.AsyncClient() as client:
+        resp = await client.get(
+            f"{_EL_BASE}/convai/conversations",
+            headers=_el_headers(),
+            params={"agent_id": agent_id, "page_size": 50},
+        )
+    if resp.status_code != 200:
+        raise HTTPException(status_code=resp.status_code, detail=resp.text)
+    data = resp.json()
+    conversations = [
+        {
+            "id": c.get("conversation_id"),
+            "status": c.get("status"),
+            "start_time": c.get("start_time_unix_secs"),
+            "call_duration_secs": c.get("call_duration_secs"),
+            "message_count": c.get("metadata", {}).get("conversation_initiation_client_data", {}).get("message_count"),
+            "cost": c.get("metadata", {}).get("usage", {}).get("cost_tokens"),
+        }
+        for c in data.get("conversations", [])
+    ]
+    return {"success": True, "data": conversations}
+
+
+@router.get("/agents/{agent_id}/conversations/{conversation_id}")
+async def get_conversation_transcript(agent_id: str, conversation_id: str, current_user: CurrentUser):
+    """Get the full transcript and metadata for a single conversation."""
+    async with httpx.AsyncClient() as client:
+        resp = await client.get(
+            f"{_EL_BASE}/convai/conversations/{conversation_id}",
+            headers=_el_headers(),
+        )
+    if resp.status_code != 200:
+        raise HTTPException(status_code=resp.status_code, detail=resp.text)
+    data = resp.json()
+    transcript = data.get("transcript", [])
+    return {
+        "success": True,
+        "data": {
+            "conversation_id": conversation_id,
+            "status": data.get("status"),
+            "duration_secs": data.get("metadata", {}).get("call_duration_secs"),
+            "transcript": [
+                {"role": t.get("role"), "message": t.get("message"), "time_in_call_secs": t.get("time_in_call_secs")}
+                for t in transcript
+            ],
+        },
+    }
+
+
+@router.get("/stats")
+async def get_voice_stats(current_user: CurrentUser):
+    """Return aggregate stats across all this user's conversational agents."""
+    async with httpx.AsyncClient() as client:
+        resp = await client.get(f"{_EL_BASE}/convai/agents", headers=_el_headers())
+    if resp.status_code != 200:
+        return {"success": True, "data": {"agent_count": 0, "total_conversations": 0}}
+    agents = resp.json().get("agents", [])
+    return {
+        "success": True,
+        "data": {
+            "agent_count": len(agents),
+        },
+    }

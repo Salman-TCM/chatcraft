@@ -36,6 +36,10 @@ import {
   ChevronDown,
   ChevronUp,
   Settings2,
+  History,
+  Clock,
+  MessageSquare,
+  X,
 } from "lucide-react";
 import { apiClient } from "@/lib/api";
 
@@ -101,6 +105,14 @@ export default function VoiceLabPage() {
   const [agentDetails, setAgentDetails] = useState<Record<string, AgentDetail>>({});
   const [loadingDetail, setLoadingDetail] = useState<string | null>(null);
   const [savingDetail, setSavingDetail] = useState<string | null>(null);
+
+  // Conversation history
+  const [historyAgentId, setHistoryAgentId] = useState<string | null>(null);
+  const [conversations, setConversations] = useState<Record<string, any[]>>({});
+  const [loadingHistory, setLoadingHistory] = useState<string | null>(null);
+  const [selectedConv, setSelectedConv] = useState<any | null>(null);
+  const [convTranscript, setConvTranscript] = useState<any | null>(null);
+  const [loadingTranscript, setLoadingTranscript] = useState(false);
 
   const [previewForm, setPreviewForm] = useState({ voice_id: "", text: "Hello, this is a preview of my voice." });
   const [previewing, setPreviewing] = useState(false);
@@ -220,6 +232,28 @@ export default function VoiceLabPage() {
     navigator.clipboard.writeText(id);
     setCopiedId(id);
     setTimeout(() => setCopiedId(null), 2000);
+  }
+
+  async function toggleHistory(agentId: string) {
+    if (historyAgentId === agentId) { setHistoryAgentId(null); return; }
+    setHistoryAgentId(agentId);
+    if (conversations[agentId]) return;
+    setLoadingHistory(agentId);
+    try {
+      const { data } = await apiClient.get(`/api/v1/voice-lab/agents/${agentId}/conversations`);
+      setConversations(prev => ({ ...prev, [agentId]: data.data ?? [] }));
+    } catch {}
+    setLoadingHistory(null);
+  }
+
+  async function openTranscript(agentId: string, conv: any) {
+    setSelectedConv(conv);
+    setLoadingTranscript(true);
+    try {
+      const { data } = await apiClient.get(`/api/v1/voice-lab/agents/${agentId}/conversations/${conv.id}`);
+      setConvTranscript(data.data);
+    } catch {}
+    setLoadingTranscript(false);
   }
 
   return (
@@ -479,6 +513,17 @@ export default function VoiceLabPage() {
                           size="icon"
                           variant="ghost"
                           className="h-7 w-7"
+                          title="Conversation history"
+                          onClick={() => toggleHistory(agent.id)}
+                        >
+                          {loadingHistory === agent.id
+                            ? <Clock className="h-3.5 w-3.5 animate-spin" />
+                            : <History className={`h-3.5 w-3.5 ${historyAgentId === agent.id ? "text-primary" : ""}`} />}
+                        </Button>
+                        <Button
+                          size="icon"
+                          variant="ghost"
+                          className="h-7 w-7"
                           title="Setup checklist"
                           onClick={() => toggleAgentDetail(agent.id)}
                         >
@@ -601,6 +646,39 @@ export default function VoiceLabPage() {
                         ) : null}
                       </div>
                     )}
+                    {/* Conversation history panel */}
+                    {historyAgentId === agent.id && (
+                      <div className="mt-3 border-t pt-3 space-y-2">
+                        <p className="text-xs font-semibold flex items-center gap-1.5">
+                          <History className="h-3.5 w-3.5" /> Conversation History
+                        </p>
+                        {(conversations[agent.id] ?? []).length === 0 ? (
+                          <p className="text-[11px] text-muted-foreground">No conversations recorded yet.</p>
+                        ) : (
+                          <div className="space-y-1.5 max-h-48 overflow-y-auto">
+                            {(conversations[agent.id] ?? []).map((conv: any) => (
+                              <button
+                                key={conv.id}
+                                onClick={() => openTranscript(agent.id, conv)}
+                                className="w-full text-left rounded-md border px-3 py-2 text-xs hover:bg-muted/50 flex items-center justify-between gap-2"
+                              >
+                                <div className="flex items-center gap-2 min-w-0">
+                                  <MessageSquare className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                                  <span className="truncate font-mono text-muted-foreground">{conv.id?.slice(0,8)}…</span>
+                                  <span className={`text-[10px] px-1.5 py-0.5 rounded-full ${conv.status === "done" ? "bg-green-100 text-green-700" : "bg-muted text-muted-foreground"}`}>
+                                    {conv.status}
+                                  </span>
+                                </div>
+                                <div className="text-[10px] text-muted-foreground shrink-0">
+                                  {conv.call_duration_secs ? `${conv.call_duration_secs}s` : "—"}
+                                  {conv.start_time ? ` · ${new Date(conv.start_time * 1000).toLocaleDateString()}` : ""}
+                                </div>
+                              </button>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    )}
                   </CardContent>
                 </Card>
               );
@@ -608,6 +686,46 @@ export default function VoiceLabPage() {
           </div>
         )}
       </div>
+
+      {/* Transcript modal */}
+      {selectedConv && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+          <div className="bg-background rounded-xl shadow-xl w-full max-w-lg max-h-[80vh] flex flex-col">
+            <div className="flex items-center justify-between p-4 border-b">
+              <div>
+                <p className="text-sm font-semibold">Conversation Transcript</p>
+                <p className="text-[11px] text-muted-foreground font-mono">{selectedConv.id}</p>
+              </div>
+              <button onClick={() => { setSelectedConv(null); setConvTranscript(null); }} className="text-muted-foreground hover:text-foreground">
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+            <div className="flex-1 overflow-y-auto p-4 space-y-2">
+              {loadingTranscript && <p className="text-sm text-muted-foreground text-center py-8">Loading…</p>}
+              {!loadingTranscript && convTranscript && convTranscript.transcript?.length === 0 && (
+                <p className="text-sm text-muted-foreground text-center py-8">No transcript available</p>
+              )}
+              {!loadingTranscript && convTranscript?.transcript?.map((t: any, i: number) => (
+                <div key={i} className={`flex ${t.role === "user" ? "justify-end" : "justify-start"}`}>
+                  <div className={`rounded-xl px-3 py-2 text-xs max-w-[80%] ${t.role === "user" ? "bg-primary text-primary-foreground rounded-br-sm" : "bg-muted rounded-bl-sm"}`}>
+                    <p className="font-medium capitalize text-[10px] opacity-60 mb-0.5">{t.role}</p>
+                    <p>{t.message}</p>
+                    {t.time_in_call_secs !== undefined && (
+                      <p className="text-[10px] opacity-50 mt-0.5">{t.time_in_call_secs}s</p>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+            {convTranscript && (
+              <div className="border-t px-4 py-2 flex items-center gap-4 text-[11px] text-muted-foreground">
+                <span>Status: <strong>{convTranscript.status}</strong></span>
+                {convTranscript.duration_secs && <span>Duration: <strong>{convTranscript.duration_secs}s</strong></span>}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
