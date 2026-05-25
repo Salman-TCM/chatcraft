@@ -205,6 +205,8 @@ def _user_dict(u: User) -> dict:
         "name": u.name,
         "role": u.role.value,
         "email_verified": u.email_verified,
+        "is_suspended": getattr(u, "is_suspended", False),
+        "suspended_reason": getattr(u, "suspended_reason", None),
         "subscription": {
             "plan": sub.plan.value if sub else None,
             "status": sub.status.value if sub else None,
@@ -449,6 +451,98 @@ async def impersonate_user(
     await db.commit()
 
     return {"success": True, "data": {"access_token": token, "expires_in": 900, "user": _user_dict(u)}}
+
+
+@router.post("/users/{user_id}/suspend", response_model=dict)
+async def suspend_user(
+    user_id: uuid.UUID,
+    db: DBSession,
+    caller: CurrentUser,
+    reason: str | None = None,
+) -> dict:
+    from app.models.admin_log import AdminActionLog
+    from datetime import datetime, timezone
+
+    if str(user_id) == str(caller.id):
+        raise HTTPException(status_code=400, detail="Cannot suspend your own account")
+    result = await db.execute(select(User).where(User.id == user_id))
+    u = result.scalar_one_or_none()
+    if not u:
+        raise HTTPException(status_code=404, detail="User not found")
+    u.is_suspended = True
+    u.suspended_at = datetime.now(timezone.utc)
+    u.suspended_reason = reason
+    db.add(AdminActionLog(
+        admin_user_id=caller.id, admin_email=caller.email,
+        action="suspend", target_user_id=u.id, target_email=u.email,
+        old_value="active", new_value=f"suspended: {reason or 'no reason'}",
+    ))
+    await db.commit()
+    return {"success": True}
+
+
+@router.post("/users/{user_id}/unsuspend", response_model=dict)
+async def unsuspend_user(user_id: uuid.UUID, db: DBSession, caller: CurrentUser) -> dict:
+    from app.models.admin_log import AdminActionLog
+
+    result = await db.execute(select(User).where(User.id == user_id))
+    u = result.scalar_one_or_none()
+    if not u:
+        raise HTTPException(status_code=404, detail="User not found")
+    u.is_suspended = False
+    u.suspended_at = None
+    u.suspended_reason = None
+    db.add(AdminActionLog(
+        admin_user_id=caller.id, admin_email=caller.email,
+        action="unsuspend", target_user_id=u.id, target_email=u.email,
+        old_value="suspended", new_value="active",
+    ))
+    await db.commit()
+    return {"success": True}
+
+
+# ─── Platform settings ────────────────────────────────────────────────────────
+
+_DEFAULT_SETTINGS = {
+    "allow_signups": True,
+    "require_email_verification": True,
+    "max_chatbots_free": 3,
+    "max_messages_free": 500,
+    "maintenance_mode": False,
+    "maintenance_message": "We'll be back shortly.",
+    "feature_voice_lab": True,
+    "feature_agent_builder": True,
+    "feature_browser_agent": True,
+    "feature_social": True,
+}
+
+
+@router.get("/settings", response_model=dict)
+async def get_platform_settings(db: DBSession) -> dict:
+    from app.models.platform_settings import PlatformSetting
+
+    result = await db.execute(select(PlatformSetting))
+    stored = {r.key: r.value for r in result.scalars().all()}
+    # Merge with defaults so new keys always appear
+    merged = {**_DEFAULT_SETTINGS, **{k: v for k, v in stored.items() if k in _DEFAULT_SETTINGS}}
+    return {"success": True, "data": merged}
+
+
+@router.patch("/settings", response_model=dict)
+async def update_platform_settings(body: dict, db: DBSession, caller: CurrentUser) -> dict:
+    from app.models.platform_settings import PlatformSetting
+
+    for key, value in body.items():
+        if key not in _DEFAULT_SETTINGS:
+            continue
+        result = await db.execute(select(PlatformSetting).where(PlatformSetting.key == key))
+        row = result.scalar_one_or_none()
+        if row:
+            row.value = value
+        else:
+            db.add(PlatformSetting(key=key, value=value))
+    await db.commit()
+    return {"success": True}
 
 
 @router.get("/action-log", response_model=dict)
