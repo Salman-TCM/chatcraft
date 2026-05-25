@@ -5,7 +5,7 @@ import { usePathname, useRouter } from "next/navigation";
 import Link from "next/link";
 import {
   LayoutDashboard, Users, Bot, CreditCard, LogOut,
-  ShieldAlert, Menu, X, Building2, ScrollText,
+  ShieldAlert, Menu, X, Building2, ScrollText, Settings,
 } from "lucide-react";
 import { signOut, useSession } from "next-auth/react";
 
@@ -17,6 +17,7 @@ const NAV = [
   { href: "/admin/agencies",          label: "Agencies",  icon: Building2 },
   { href: "/admin/action-log",        label: "Action Log",    icon: ScrollText },
   { href: "/admin/impersonation-log", label: "Impersonation", icon: ShieldAlert },
+  { href: "/admin/settings",          label: "Settings",      icon: Settings },
 ];
 
 export default function AdminLayout({ children }: { children: React.ReactNode }) {
