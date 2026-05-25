@@ -141,6 +141,15 @@ const TOOLS = [
     bg: "bg-amber-50 border-amber-200",
     activeBg: "bg-amber-600",
   },
+  {
+    key: "agent_builder",
+    label: "Agent Builder",
+    icon: Bot,
+    description: "List available models and create new agents (for meta-agent / Agent Builder use)",
+    color: "text-sky-600",
+    bg: "bg-sky-50 border-sky-200",
+    activeBg: "bg-sky-600",
+  },
 ];
 
 type Tab = "identity" | "model" | "instructions" | "tools" | "mcp" | "advanced" | "share" | "analytics";
