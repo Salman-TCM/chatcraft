@@ -9,9 +9,11 @@ Each agent has:
   - Agentic loop with configurable max_steps
   - Optional public share link
 """
+import asyncio
 import json
 import secrets
 import uuid
+from datetime import datetime, timezone
 from typing import Any, AsyncIterator
 
 import anthropic
@@ -19,13 +21,15 @@ import httpx
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
-from sqlalchemy import select
+from sqlalchemy import func, select
 
 from app.core.config import settings
 from app.core.dependencies import CurrentUser, DBSession
 from app.models.agent import Agent
+from app.models.agent_conversation import AgentConversation
 from app.models.chatbot_config import ChatbotConfig
 from app.models.mcp import MCPServerConfig
+from app.models.usage_log import UsageLog
 from app.schemas.agent import AgentCreateRequest, AgentResponse, AgentUpdateRequest
 from app.services.kb.rag import RAGService
 from app.services.llm.key_store import get_key as _get_user_key
@@ -167,6 +171,126 @@ async def public_agent_chat(share_token: str, body: PublicChatRequest, db: DBSes
     )
 
 
+# ─── Memory endpoints ─────────────────────────────────────────────────────────
+
+@router.get("/{agent_id}/memory")
+async def list_agent_memory(agent_id: uuid.UUID, user: CurrentUser, db: DBSession):
+    """Return the last 20 persisted conversation sessions for this agent."""
+    agent = await _get_owned_agent(agent_id, user.id, db)
+    result = await db.execute(
+        select(AgentConversation)
+        .where(AgentConversation.agent_id == agent.id, AgentConversation.user_id == user.id)
+        .order_by(AgentConversation.created_at.desc())
+        .limit(20)
+    )
+    sessions = result.scalars().all()
+    return {
+        "success": True,
+        "data": [
+            {
+                "id": str(s.id),
+                "message_count": len(s.messages),
+                "tool_calls": s.tool_calls,
+                "preview": next((m["content"][:120] for m in s.messages if m.get("role") == "user"), ""),
+                "created_at": s.created_at.isoformat(),
+            }
+            for s in sessions
+        ],
+    }
+
+
+@router.delete("/{agent_id}/memory")
+async def clear_agent_memory(agent_id: uuid.UUID, user: CurrentUser, db: DBSession):
+    """Wipe all memory sessions for this agent."""
+    agent = await _get_owned_agent(agent_id, user.id, db)
+    result = await db.execute(
+        select(AgentConversation).where(
+            AgentConversation.agent_id == agent.id,
+            AgentConversation.user_id == user.id,
+        )
+    )
+    for session in result.scalars().all():
+        await db.delete(session)
+    await db.commit()
+    return {"success": True}
+
+
+@router.delete("/{agent_id}/memory/{session_id}")
+async def delete_memory_session(
+    agent_id: uuid.UUID, session_id: uuid.UUID, user: CurrentUser, db: DBSession
+):
+    agent = await _get_owned_agent(agent_id, user.id, db)
+    result = await db.execute(
+        select(AgentConversation).where(
+            AgentConversation.id == session_id,
+            AgentConversation.agent_id == agent.id,
+            AgentConversation.user_id == user.id,
+        )
+    )
+    session = result.scalar_one_or_none()
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+    await db.delete(session)
+    await db.commit()
+    return {"success": True}
+
+
+# ─── Analytics endpoint ───────────────────────────────────────────────────────
+
+@router.get("/{agent_id}/analytics")
+async def get_agent_analytics(agent_id: uuid.UUID, user: CurrentUser, db: DBSession):
+    """Return 30-day usage stats for this agent."""
+    agent = await _get_owned_agent(agent_id, user.id, db)
+
+    # Conversation count
+    conv_count_result = await db.execute(
+        select(func.count()).select_from(AgentConversation).where(
+            AgentConversation.agent_id == agent.id,
+            AgentConversation.user_id == user.id,
+        )
+    )
+    total_conversations = conv_count_result.scalar() or 0
+
+    # Usage logs aggregates
+    usage_result = await db.execute(
+        select(
+            func.count().label("runs"),
+            func.coalesce(func.sum(UsageLog.input_tokens), 0).label("input_tokens"),
+            func.coalesce(func.sum(UsageLog.output_tokens), 0).label("output_tokens"),
+            func.coalesce(func.sum(UsageLog.cost_usd), 0).label("cost_usd"),
+        ).where(UsageLog.agent_id == agent.id)
+    )
+    row = usage_result.one()
+
+    # Daily run counts for chart (last 14 days)
+    from sqlalchemy import cast, Date, text as sa_text
+    daily_result = await db.execute(
+        select(
+            cast(UsageLog.created_at, Date).label("day"),
+            func.count().label("runs"),
+        )
+        .where(
+            UsageLog.agent_id == agent.id,
+            UsageLog.created_at >= sa_text("now() - interval '14 days'"),
+        )
+        .group_by("day")
+        .order_by("day")
+    )
+    daily = [{"date": str(r.day), "runs": r.runs} for r in daily_result]
+
+    return {
+        "success": True,
+        "data": {
+            "total_conversations": total_conversations,
+            "total_runs": int(row.runs),
+            "input_tokens": int(row.input_tokens),
+            "output_tokens": int(row.output_tokens),
+            "cost_usd": float(row.cost_usd),
+            "daily": daily,
+        },
+    }
+
+
 # ─── Chat / Run ───────────────────────────────────────────────────────────────
 
 class AgentChatRequest(BaseModel):
@@ -186,8 +310,36 @@ async def agent_chat(
     system_prompt = await _build_system_prompt(agent, db)
     tools, mcp_map = await _build_tools_with_mcp(agent, user.id, db)
     _, api_key = await _resolve_api_key(user.id, agent.model or "claude-sonnet-4-6", db)
+
+    # Load memory and inject as extra history if enabled
+    history = list(body.conversation_history)
+    if agent.memory_enabled and not history:
+        history = await _load_agent_memory(agent.id, user.id, db)
+
+    async def _stream_and_track():
+        collected_messages: list[dict] = [{"role": "user", "content": body.message}]
+        assistant_text: list[str] = []
+        tool_call_count = 0
+
+        async for chunk in _run_agent(agent, system_prompt, tools, mcp_map, body.message, history, api_key=api_key):
+            yield chunk
+            try:
+                evt = json.loads(chunk[6:]) if chunk.startswith("data: ") else {}
+                if evt.get("type") == "text":
+                    assistant_text.append(evt.get("content", ""))
+                elif evt.get("type") == "tool_call":
+                    tool_call_count += 1
+            except Exception:
+                pass
+
+        # Persist conversation + fire webhook after stream ends
+        final_text = "".join(assistant_text)
+        if final_text:
+            collected_messages.append({"role": "assistant", "content": final_text})
+        asyncio.create_task(_post_run_tasks(agent, user.id, collected_messages, tool_call_count, db))
+
     return StreamingResponse(
-        _run_agent(agent, system_prompt, tools, mcp_map, body.message, body.conversation_history, api_key=api_key),
+        _stream_and_track(),
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
@@ -956,6 +1108,80 @@ async def _build_system_prompt(agent: Agent, db: DBSession) -> str:
         parts.append("You are a helpful AI agent. Use the available tools to complete tasks thoroughly and accurately.")
 
     return "\n\n".join(parts)
+
+
+# ─── Memory helpers ───────────────────────────────────────────────────────────
+
+async def _load_agent_memory(agent_id: uuid.UUID, user_id: uuid.UUID, db) -> list[dict]:
+    """Load the last 5 conversation sessions and flatten them into a history list."""
+    result = await db.execute(
+        select(AgentConversation)
+        .where(AgentConversation.agent_id == agent_id, AgentConversation.user_id == user_id)
+        .order_by(AgentConversation.created_at.desc())
+        .limit(5)
+    )
+    sessions = list(reversed(result.scalars().all()))  # oldest first
+    history: list[dict] = []
+    for s in sessions:
+        for msg in s.messages:
+            if msg.get("role") in ("user", "assistant"):
+                history.append({"role": msg["role"], "content": msg["content"]})
+    return history
+
+
+async def _post_run_tasks(
+    agent: Agent,
+    user_id: uuid.UUID,
+    messages: list[dict],
+    tool_call_count: int,
+    db,
+) -> None:
+    """Persist the conversation session and fire the webhook. Runs as a background task."""
+    from app.db.session import AsyncSessionLocal
+
+    async with AsyncSessionLocal() as session:
+        try:
+            # Persist memory session
+            if agent.memory_enabled and len(messages) >= 2:
+                conv = AgentConversation(
+                    agent_id=agent.id,
+                    user_id=user_id,
+                    messages=messages,
+                    tool_calls=tool_call_count,
+                )
+                session.add(conv)
+
+            # Log a usage record for analytics
+            # Approximate token count from text length (4 chars ≈ 1 token)
+            total_chars = sum(len(m.get("content", "") or "") for m in messages)
+            approx_tokens = total_chars // 4
+            log = UsageLog(
+                user_id=user_id,
+                agent_id=agent.id,
+                model=agent.model,
+                input_tokens=approx_tokens // 2,
+                output_tokens=approx_tokens // 2,
+                cost_usd=0,
+            )
+            session.add(log)
+            await session.commit()
+        except Exception:
+            pass
+
+    # Fire webhook (fire-and-forget, never raises)
+    if agent.webhook_url:
+        try:
+            payload = {
+                "agent_id": str(agent.id),
+                "agent_name": agent.name,
+                "messages": messages,
+                "tool_calls": tool_call_count,
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+            }
+            async with httpx.AsyncClient(timeout=5) as client:
+                await client.post(agent.webhook_url, json=payload)
+        except Exception:
+            pass
 
 
 # ─── Helpers ──────────────────────────────────────────────────────────────────
