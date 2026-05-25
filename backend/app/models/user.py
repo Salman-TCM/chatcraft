@@ -1,7 +1,7 @@
 import enum
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, Enum, String
+from sqlalchemy import Boolean, DateTime, Enum, String, Text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -82,6 +82,11 @@ class User(TimestampMixin, Base):
     # Google OAuth tokens for Sheets/Docs (user-level, separate from sign-in)
     # {sheets: {access_token, refresh_token, expires_at, email}}
     google_oauth_tokens: Mapped[dict | None] = mapped_column(JSONB, nullable=True, default=None)
+
+    # Suspension
+    is_suspended: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
+    suspended_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    suspended_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     # Relationships
     subscription: Mapped["Subscription | None"] = relationship(  # type: ignore[name-defined]
