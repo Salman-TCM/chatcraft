@@ -7,6 +7,7 @@ import {
   ChevronUp, Code2, Copy, ExternalLink, Globe, Loader2, Mail,
   Link2, MessageSquare, RefreshCw, Send, Server, ShieldCheck,
   Chrome, Sheet, Smartphone, Trash2, Zap, ToggleLeft, ToggleRight,
+  BarChart2, Webhook, Brain, Clock,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -42,6 +43,7 @@ interface Agent {
   is_active: boolean;
   share_enabled: boolean;
   share_token: string | null;
+  webhook_url: string | null;
 }
 
 interface MCPServer {
@@ -141,7 +143,7 @@ const TOOLS = [
   },
 ];
 
-type Tab = "identity" | "model" | "instructions" | "tools" | "mcp" | "advanced" | "share";
+type Tab = "identity" | "model" | "instructions" | "tools" | "mcp" | "advanced" | "share" | "analytics";
 
 const TABS: { id: Tab; label: string }[] = [
   { id: "identity",     label: "Identity" },
@@ -151,6 +153,7 @@ const TABS: { id: Tab; label: string }[] = [
   { id: "mcp",          label: "MCP" },
   { id: "advanced",     label: "Advanced" },
   { id: "share",        label: "Share" },
+  { id: "analytics",   label: "Analytics" },
 ];
 
 // ── Model selector ────────────────────────────────────────────────────────────
@@ -235,6 +238,16 @@ export default function AgentBuilderPage() {
   const [memoryEnabled, setMemoryEnabled] = useState(false);
   const [maxSteps, setMaxSteps] = useState(10);
   const [isActive, setIsActive] = useState(true);
+  const [webhookUrl, setWebhookUrl] = useState("");
+
+  // Memory sessions
+  const [memorySessions, setMemorySessions] = useState<{id:string;message_count:number;tool_calls:number;preview:string;created_at:string}[]>([]);
+  const [memoryLoading, setMemoryLoading] = useState(false);
+  const [clearingMemory, setClearingMemory] = useState(false);
+
+  // Analytics
+  const [analytics, setAnalytics] = useState<{total_conversations:number;total_runs:number;input_tokens:number;output_tokens:number;cost_usd:number;daily:{date:string;runs:number}[]} | null>(null);
+  const [analyticsLoading, setAnalyticsLoading] = useState(false);
 
   // Test chat
   const [chatInput, setChatInput] = useState("");
@@ -265,6 +278,7 @@ export default function AgentBuilderPage() {
       setIsActive(a.is_active);
       setShareEnabled(a.share_enabled ?? false);
       setShareToken(a.share_token ?? null);
+      setWebhookUrl(a.webhook_url ?? "");
       setChatbots(botsRes.data.data ?? []);
       setProviderMeta(metaRes.data.data ?? {});
       const configured = new Set<string>(
@@ -281,6 +295,11 @@ export default function AgentBuilderPage() {
     chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [chatMessages]);
 
+  useEffect(() => {
+    if (activeTab === "analytics" && !analytics && !analyticsLoading) loadAnalytics();
+    if (activeTab === "advanced" && memoryEnabled && memorySessions.length === 0 && !memoryLoading) loadMemory();
+  }, [activeTab]);
+
   async function save() {
     setSaving(true);
     try {
@@ -294,6 +313,7 @@ export default function AgentBuilderPage() {
         memory_enabled: memoryEnabled,
         max_steps: maxSteps,
         is_active: isActive,
+        webhook_url: webhookUrl || null,
       });
       setSaved(true);
       setTimeout(() => setSaved(false), 2500);
@@ -338,6 +358,42 @@ export default function AgentBuilderPage() {
       setShareEnabled(true);
     } finally {
       setShareLoading(false);
+    }
+  }
+
+  async function loadMemory() {
+    setMemoryLoading(true);
+    try {
+      const { data } = await apiClient.get(`/api/v1/agents/${id}/memory`);
+      setMemorySessions(data.data ?? []);
+    } finally {
+      setMemoryLoading(false);
+    }
+  }
+
+  async function clearMemory() {
+    if (!confirm("Clear all memory sessions? This cannot be undone.")) return;
+    setClearingMemory(true);
+    try {
+      await apiClient.delete(`/api/v1/agents/${id}/memory`);
+      setMemorySessions([]);
+    } finally {
+      setClearingMemory(false);
+    }
+  }
+
+  async function deleteMemorySession(sessionId: string) {
+    await apiClient.delete(`/api/v1/agents/${id}/memory/${sessionId}`);
+    setMemorySessions(prev => prev.filter(s => s.id !== sessionId));
+  }
+
+  async function loadAnalytics() {
+    setAnalyticsLoading(true);
+    try {
+      const { data } = await apiClient.get(`/api/v1/agents/${id}/analytics`);
+      setAnalytics(data.data);
+    } finally {
+      setAnalyticsLoading(false);
     }
   }
 
@@ -804,6 +860,54 @@ Always prefer primary sources over aggregator sites.`}
                     {memoryEnabled && <Check className="h-2.5 w-2.5 text-white" />}
                   </div>
                 </div>
+
+                {memoryEnabled && (
+                  <div className="mt-2 rounded-lg border bg-muted/30 p-3 space-y-2">
+                    <div className="flex items-center justify-between">
+                      <p className="text-[11px] font-medium text-muted-foreground flex items-center gap-1">
+                        <Brain className="h-3 w-3" /> Memory sessions ({memorySessions.length})
+                      </p>
+                      <div className="flex gap-1.5">
+                        <button onClick={loadMemory} className="text-[10px] text-muted-foreground hover:text-foreground">
+                          {memoryLoading ? <Loader2 className="h-3 w-3 animate-spin" /> : "Refresh"}
+                        </button>
+                        {memorySessions.length > 0 && (
+                          <button onClick={clearMemory} className="text-[10px] text-red-500 hover:text-red-700">
+                            {clearingMemory ? <Loader2 className="h-3 w-3 animate-spin" /> : "Clear all"}
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                    {memorySessions.length === 0 && !memoryLoading && (
+                      <p className="text-[11px] text-muted-foreground/60">No memory sessions yet</p>
+                    )}
+                    {memorySessions.map(s => (
+                      <div key={s.id} className="flex items-start gap-2 text-[11px] group">
+                        <Clock className="h-3 w-3 mt-0.5 shrink-0 text-muted-foreground" />
+                        <div className="flex-1 min-w-0">
+                          <p className="truncate text-muted-foreground">{s.preview || "Empty session"}</p>
+                          <p className="text-muted-foreground/50">{s.message_count} msgs · {s.tool_calls} tools · {new Date(s.created_at).toLocaleDateString()}</p>
+                        </div>
+                        <button onClick={() => deleteMemorySession(s.id)} className="opacity-0 group-hover:opacity-100 text-red-400 hover:text-red-600">
+                          <Trash2 className="h-3 w-3" />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              <div className="space-y-1.5">
+                <Label className="text-xs flex items-center gap-1.5"><Webhook className="h-3.5 w-3.5" /> Webhook URL</Label>
+                <Input
+                  placeholder="https://your-server.com/agent-webhook"
+                  value={webhookUrl}
+                  onChange={e => setWebhookUrl(e.target.value)}
+                  className="h-8 text-sm font-mono"
+                />
+                <p className="text-[11px] text-muted-foreground">
+                  After each agent run, we POST the full conversation JSON to this URL (5s timeout, fire-and-forget).
+                </p>
               </div>
 
               <div className="space-y-2">
@@ -823,6 +927,63 @@ Always prefer primary sources over aggregator sites.`}
                   </div>
                 </div>
               </div>
+            </div>
+          )}
+
+          {/* ─ Analytics tab ─ */}
+          {activeTab === "analytics" && (
+            <div className="space-y-5">
+              {analyticsLoading && (
+                <div className="flex justify-center py-10"><Loader2 className="h-5 w-5 animate-spin text-muted-foreground" /></div>
+              )}
+              {!analyticsLoading && analytics && (
+                <>
+                  <div className="grid grid-cols-2 gap-3">
+                    {[
+                      { label: "Conversations", value: analytics.total_conversations, icon: MessageSquare, color: "text-indigo-500" },
+                      { label: "Total Runs", value: analytics.total_runs, icon: Zap, color: "text-amber-500" },
+                      { label: "Input Tokens", value: analytics.input_tokens.toLocaleString(), icon: Code2, color: "text-blue-500" },
+                      { label: "Cost (est.)", value: `$${analytics.cost_usd.toFixed(4)}`, icon: BarChart2, color: "text-emerald-500" },
+                    ].map(({ label, value, icon: Icon, color }) => (
+                      <div key={label} className="rounded-lg border bg-muted/20 p-3">
+                        <div className="flex items-center gap-1.5 mb-1">
+                          <Icon className={`h-3.5 w-3.5 ${color}`} />
+                          <p className="text-[11px] text-muted-foreground">{label}</p>
+                        </div>
+                        <p className="text-lg font-semibold">{value}</p>
+                      </div>
+                    ))}
+                  </div>
+
+                  {analytics.daily.length > 0 && (
+                    <div className="rounded-lg border p-3">
+                      <p className="text-[11px] font-medium text-muted-foreground mb-3">Runs — last 14 days</p>
+                      <div className="flex items-end gap-1 h-20">
+                        {analytics.daily.map(d => {
+                          const max = Math.max(...analytics.daily.map(x => x.runs), 1);
+                          const pct = (d.runs / max) * 100;
+                          return (
+                            <div key={d.date} className="flex-1 flex flex-col items-center gap-1" title={`${d.date}: ${d.runs} runs`}>
+                              <div className="w-full bg-indigo-500 rounded-sm" style={{ height: `${Math.max(pct, 4)}%` }} />
+                              <p className="text-[9px] text-muted-foreground/60 rotate-45 origin-left">{d.date.slice(5)}</p>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
+
+                  <button onClick={loadAnalytics} className="text-[11px] text-muted-foreground hover:text-foreground flex items-center gap-1">
+                    <RefreshCw className="h-3 w-3" /> Refresh
+                  </button>
+                </>
+              )}
+              {!analyticsLoading && !analytics && (
+                <div className="flex flex-col items-center gap-2 py-10 text-muted-foreground">
+                  <BarChart2 className="h-8 w-8 opacity-30" />
+                  <p className="text-sm">No data yet — start chatting with your agent</p>
+                </div>
+              )}
             </div>
           )}
 
