@@ -19,6 +19,8 @@ interface AdminUser {
   name: string | null;
   role: string;
   email_verified: boolean;
+  is_suspended: boolean;
+  suspended_reason: string | null;
   stripe_customer_id: string | null;
   subscription: {
     plan: string | null;
@@ -55,6 +57,8 @@ export default function AdminUserDetailPage() {
   const [deleting, setDeleting] = useState(false);
 
   const [impersonating, setImpersonating] = useState(false);
+  const [suspending, setSuspending] = useState(false);
+  const [suspendReason, setSuspendReason] = useState("");
 
   async function load() {
     setLoading(true);
@@ -95,6 +99,27 @@ export default function AdminUserDetailPage() {
       router.push("/admin/users");
     } finally {
       setDeleting(false);
+    }
+  }
+
+  async function handleSuspend() {
+    if (!confirm(`Suspend ${user?.email}? They will be locked out immediately.`)) return;
+    setSuspending(true);
+    try {
+      await apiClient.post(`/api/admin/users/${id}/suspend`, null, { params: { reason: suspendReason || undefined } });
+      await load();
+    } finally {
+      setSuspending(false);
+    }
+  }
+
+  async function handleUnsuspend() {
+    setSuspending(true);
+    try {
+      await apiClient.post(`/api/admin/users/${id}/unsuspend`);
+      await load();
+    } finally {
+      setSuspending(false);
     }
   }
 
@@ -141,6 +166,15 @@ export default function AdminUserDetailPage() {
           <Button size="sm" variant="outline" onClick={handleImpersonate} disabled={impersonating}>
             <Eye className="h-4 w-4" /> {impersonating ? "…" : "Impersonate"}
           </Button>
+          {user.is_suspended ? (
+            <Button size="sm" variant="outline" onClick={handleUnsuspend} disabled={suspending} className="border-green-300 text-green-700 hover:bg-green-50">
+              {suspending ? "…" : "Unsuspend"}
+            </Button>
+          ) : (
+            <Button size="sm" variant="outline" onClick={handleSuspend} disabled={suspending} className="border-amber-300 text-amber-700 hover:bg-amber-50">
+              {suspending ? "…" : "Suspend"}
+            </Button>
+          )}
           <Button
             size="sm"
             variant="destructive"
@@ -174,6 +208,12 @@ export default function AdminUserDetailPage() {
               <div>
                 <dt className="text-xs text-muted-foreground">Role</dt>
                 <dd className={`font-semibold capitalize ${roleColor[user.role]}`}>{user.role}</dd>
+              </div>
+              <div>
+                <dt className="text-xs text-muted-foreground">Account Status</dt>
+                <dd className={`font-semibold text-xs ${user.is_suspended ? "text-red-600" : "text-green-600"}`}>
+                  {user.is_suspended ? `Suspended${user.suspended_reason ? ` — ${user.suspended_reason}` : ""}` : "Active"}
+                </dd>
               </div>
               <div>
                 <dt className="text-xs text-muted-foreground">Stripe Customer</dt>
