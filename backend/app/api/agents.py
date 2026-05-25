@@ -433,7 +433,7 @@ async def _run_agent_anthropic(
 
     step = 0
     max_steps = agent.max_steps or 10
-    ctx = {"agent_id": str(agent.id)}
+    ctx = {"agent_id": str(agent.id), "user_id": str(agent.user_id)}
 
     try:
         while step < max_steps:
@@ -523,7 +523,7 @@ async def _run_agent_openai_compat(
 
     step = 0
     max_steps = agent.max_steps or 10
-    ctx = {"agent_id": str(agent.id)}
+    ctx = {"agent_id": str(agent.id), "user_id": str(agent.user_id)}
 
     try:
         while step < max_steps:
@@ -636,7 +636,7 @@ async def _run_agent_gemini(
     chat = model.start_chat(history=gemini_history)
     step = 0
     max_steps = agent.max_steps or 10
-    ctx = {"agent_id": str(agent.id)}
+    ctx = {"agent_id": str(agent.id), "user_id": str(agent.user_id)}
     current_message: Any = user_message
 
     try:
@@ -891,7 +891,7 @@ async def _execute_tool(name: str, inputs: dict, mcp_map: dict, ctx: dict | None
         elif name == "google_sheets":
             return await _tool_sheets(inputs)
         elif name == "send_email":
-            return await _tool_send_email(inputs)
+            return await _tool_send_email(inputs, ctx or {})
         elif name == "send_sms":
             return await _tool_send_sms(inputs)
         elif name == "send_email_verification":
@@ -1051,58 +1051,86 @@ async def _tool_sheets(inputs: dict) -> str:
     return "Unknown operation."
 
 
-async def _tool_send_email(inputs: dict) -> str:
+async def _tool_send_email(inputs: dict, ctx: dict | None = None) -> str:
+    import smtplib
+    import uuid as _uuid
+    from email.mime.multipart import MIMEMultipart
+    from email.mime.text import MIMEText
+
     to = inputs.get("to", "")
     subject = inputs.get("subject", "(no subject)")
     body = inputs.get("body", "")
     if not to:
         return "Error: recipient email address is required."
 
-    # Try AWS SES first
-    if getattr(settings, "aws_access_key_id", None) and getattr(settings, "aws_secret_access_key", None):
-        try:
-            import boto3
-            ses = boto3.client(
-                "ses",
-                region_name=getattr(settings, "aws_region", "us-east-1"),
-                aws_access_key_id=settings.aws_access_key_id,
-                aws_secret_access_key=settings.aws_secret_access_key,
-            )
-            ses.send_email(
-                Source=getattr(settings, "email_from", "noreply@chatcraft.ai"),
-                Destination={"ToAddresses": [to]},
-                Message={
-                    "Subject": {"Data": subject},
-                    "Body": {"Text": {"Data": body}, "Html": {"Data": f"<html><body><p>{body}</p></body></html>"}},
-                },
-            )
-            return f"Email sent to {to}."
-        except Exception as e:
-            pass  # Fall through to SMTP
+    smtp_cfg: dict | None = None
+    from_addr: str = settings.email_from or "noreply@chatcraft.ai"
 
-    # Try SMTP (platform config)
-    smtp_host = getattr(settings, "smtp_host", None)
-    if smtp_host:
+    # Load user's saved SMTP config from DB
+    user_id_str = (ctx or {}).get("user_id")
+    if user_id_str:
         try:
-            import smtplib
-            from email.mime.text import MIMEText
-            msg = MIMEText(body, "plain")
+            from app.db.session import AsyncSessionLocal
+            from app.models.user_communication_setting import UserCommunicationSetting
+            from sqlalchemy import select as _select
+            async with AsyncSessionLocal() as _db:
+                row = await _db.scalar(
+                    _select(UserCommunicationSetting).where(
+                        UserCommunicationSetting.user_id == _uuid.UUID(user_id_str),
+                        UserCommunicationSetting.type == "smtp",
+                    )
+                )
+                if row and row.config and row.config.get("smtp_host"):
+                    smtp_cfg = row.config
+                    from_addr = smtp_cfg.get("from_email") or smtp_cfg.get("smtp_user") or from_addr
+        except Exception:
+            pass
+
+    if smtp_cfg:
+        try:
+            host = smtp_cfg["smtp_host"]
+            port = int(smtp_cfg.get("smtp_port", 587))
+            user = smtp_cfg.get("smtp_user", "")
+            password = smtp_cfg.get("smtp_password", "")
+
+            msg = MIMEMultipart("alternative")
             msg["Subject"] = subject
-            msg["From"] = getattr(settings, "email_from", "noreply@chatcraft.ai")
+            msg["From"] = from_addr
             msg["To"] = to
-            port = int(getattr(settings, "smtp_port", 587))
-            with smtplib.SMTP(smtp_host, port) as srv:
+            msg.attach(MIMEText(body, "plain"))
+            msg.attach(MIMEText(f"<html><body><p>{body.replace(chr(10), '<br>')}</p></body></html>", "html"))
+
+            with smtplib.SMTP(host, port) as srv:
+                srv.ehlo()
                 if port != 25:
                     srv.starttls()
-                smtp_user = getattr(settings, "smtp_user", None)
-                if smtp_user:
-                    srv.login(smtp_user, getattr(settings, "smtp_password", ""))
-                srv.sendmail(msg["From"], [to], msg.as_string())
-            return f"Email sent to {to}."
-        except Exception as e:
-            return f"Failed to send email: {e}"
+                    srv.ehlo()
+                if user and password:
+                    srv.login(user, password)
+                srv.sendmail(from_addr, [to], msg.as_string())
+            return f"Email sent successfully to {to}."
+        except Exception as exc:
+            return f"Failed to send email: {exc}"
 
-    return "Email not configured — set AWS SES or SMTP credentials in settings."
+    # Fallback: Resend API
+    if getattr(settings, "resend_api_key", None):
+        try:
+            async with httpx.AsyncClient(timeout=15) as client:
+                r = await client.post(
+                    "https://api.resend.com/emails",
+                    headers={"Authorization": f"Bearer {settings.resend_api_key}"},
+                    json={"from": from_addr, "to": [to], "subject": subject, "text": body},
+                )
+            if r.status_code in (200, 201):
+                return f"Email sent successfully to {to}."
+            return f"Failed to send email via Resend: {r.text}"
+        except Exception as exc:
+            return f"Failed to send email: {exc}"
+
+    return (
+        "Email not configured. Go to Dashboard → Settings → Communications "
+        "and add your SMTP credentials first."
+    )
 
 
 async def _tool_send_email_verification(inputs: dict, ctx: dict) -> str:
