@@ -13,6 +13,7 @@ class AgentToolsConfig(BaseModel):
     email: bool = False
     sms: bool = False
     verification: bool = False
+    agent_builder: bool = False
 
 
 class AgentCreateRequest(BaseModel):
