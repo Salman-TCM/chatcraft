@@ -1010,7 +1010,7 @@ async def _execute_tool(name: str, inputs: dict, mcp_map: dict, ctx: dict | None
             return await _tool_mcp(mcp_map[name]["server"], mcp_map[name]["original_name"], inputs)
         # Built-in tools
         if name == "web_search":
-            return await _tool_web_search(inputs.get("query", ""))
+            return await _tool_web_search(inputs.get("query", ""), ctx or {})
         elif name == "http_request":
             return await _tool_http(inputs)
         elif name == "run_code":
@@ -1076,30 +1076,141 @@ async def _mcp_rpc(server: MCPServerConfig, method: str, params: dict) -> dict:
 
 # ─── Built-in tool implementations ───────────────────────────────────────────
 
-async def _tool_web_search(query: str) -> str:
-    if settings.brave_search_api_key:
-        async with httpx.AsyncClient() as client:
-            resp = await client.get(
+async def _tool_web_search(query: str, ctx: dict | None = None) -> str:
+    user_id_str = (ctx or {}).get("user_id")
+
+    async def _user_search_key(provider: str) -> str | None:
+        if not user_id_str:
+            return None
+        try:
+            from app.db.session import AsyncSessionLocal
+            async with AsyncSessionLocal() as _db:
+                return await _get_user_key(uuid.UUID(user_id_str), provider, _db)
+        except Exception:
+            return None
+
+    async def _try_tavily(key: str) -> str | None:
+        async with httpx.AsyncClient(timeout=15) as c:
+            r = await c.post("https://api.tavily.com/search", json={"api_key": key, "query": query, "max_results": 5})
+        if r.status_code == 200:
+            results = r.json().get("results", [])
+            lines = [f"{x['title']}: {x['content']} ({x['url']})" for x in results]
+            return "\n".join(lines) if lines else None
+        return None
+
+    async def _try_serper(key: str) -> str | None:
+        async with httpx.AsyncClient(timeout=15) as c:
+            r = await c.post(
+                "https://google.serper.dev/search",
+                headers={"X-API-KEY": key, "Content-Type": "application/json"},
+                json={"q": query, "num": 5},
+            )
+        if r.status_code == 200:
+            results = r.json().get("organic", [])
+            lines = [f"{x['title']}: {x.get('snippet', '')} ({x['link']})" for x in results[:5]]
+            return "\n".join(lines) if lines else None
+        return None
+
+    async def _try_bing(key: str) -> str | None:
+        async with httpx.AsyncClient(timeout=15) as c:
+            r = await c.get(
+                "https://api.bing.microsoft.com/v7.0/search",
+                params={"q": query, "count": 5},
+                headers={"Ocp-Apim-Subscription-Key": key},
+            )
+        if r.status_code == 200:
+            items = r.json().get("webPages", {}).get("value", [])
+            lines = [f"{x['name']}: {x.get('snippet', '')} ({x['url']})" for x in items[:5]]
+            return "\n".join(lines) if lines else None
+        return None
+
+    async def _try_brave(key: str) -> str | None:
+        async with httpx.AsyncClient(timeout=15) as c:
+            r = await c.get(
                 "https://api.search.brave.com/res/v1/web/search",
                 params={"q": query, "count": 5},
-                headers={"Accept": "application/json", "X-Subscription-Token": settings.brave_search_api_key},
-                timeout=15,
+                headers={"Accept": "application/json", "X-Subscription-Token": key},
             )
-        if resp.status_code == 200:
-            data = resp.json()
-            results = data.get("web", {}).get("results", [])
-            lines = [f"{r['title']}: {r['description']} ({r['url']})" for r in results[:5]]
-            return "\n".join(lines) or "No results."
-    async with httpx.AsyncClient() as client:
-        resp = await client.get(
-            "https://api.duckduckgo.com/",
-            params={"q": query, "format": "json", "no_html": "1"},
-            timeout=15,
-        )
-    data = resp.json()
-    abstract = data.get("AbstractText") or data.get("Answer") or ""
-    related = [r.get("Text", "") for r in data.get("RelatedTopics", [])[:5] if "Text" in r]
-    return (abstract + "\n" + "\n".join(related)).strip() or "No results found."
+        if r.status_code == 200:
+            results = r.json().get("web", {}).get("results", [])
+            lines = [f"{x['title']}: {x.get('description', '')} ({x['url']})" for x in results[:5]]
+            return "\n".join(lines) if lines else None
+        return None
+
+    async def _try_serpapi(key: str) -> str | None:
+        async with httpx.AsyncClient(timeout=15) as c:
+            r = await c.get("https://serpapi.com/search.json", params={"q": query, "num": 5, "api_key": key})
+        if r.status_code == 200:
+            results = r.json().get("organic_results", [])
+            lines = [f"{x['title']}: {x.get('snippet', '')} ({x['link']})" for x in results[:5]]
+            return "\n".join(lines) if lines else None
+        return None
+
+    async def _try_you(key: str) -> str | None:
+        async with httpx.AsyncClient(timeout=15) as c:
+            r = await c.get(
+                "https://api.ydc-index.io/search",
+                params={"query": query, "num_web_results": 5},
+                headers={"X-API-Key": key},
+            )
+        if r.status_code == 200:
+            hits = r.json().get("hits", [])
+            lines = [f"{x['title']}: {' '.join(x.get('snippets', [])[:2])} ({x['url']})" for x in hits[:5]]
+            return "\n".join(lines) if lines else None
+        return None
+
+    async def _try_exa(key: str) -> str | None:
+        async with httpx.AsyncClient(timeout=15) as c:
+            r = await c.post(
+                "https://api.exa.ai/search",
+                headers={"x-api-key": key, "Content-Type": "application/json"},
+                json={"query": query, "numResults": 5, "useAutoprompt": True},
+            )
+        if r.status_code == 200:
+            results = r.json().get("results", [])
+            lines = [f"{x['title']}: {x.get('text', '')[:200]} ({x['url']})" for x in results[:5]]
+            return "\n".join(lines) if lines else None
+        return None
+
+    # Try each provider — user key first, then platform .env key
+    _providers = [
+        ("tavily",       _try_tavily,  settings.tavily_api_key),
+        ("serper",       _try_serper,  ""),
+        ("bing",         _try_bing,    ""),
+        ("brave_search", _try_brave,   settings.brave_search_api_key),
+        ("serpapi",      _try_serpapi, ""),
+        ("you",          _try_you,     ""),
+        ("exa",          _try_exa,     ""),
+    ]
+    for provider, fn, platform_key in _providers:
+        key = await _user_search_key(provider) or platform_key or None
+        if not key:
+            continue
+        try:
+            result = await fn(key)
+            if result:
+                return result
+        except Exception:
+            continue
+
+    # Free fallback: DuckDuckGo — no key required
+    try:
+        from duckduckgo_search import DDGS
+        loop = asyncio.get_running_loop()
+        news = await loop.run_in_executor(None, lambda: list(DDGS().news(query, max_results=5)))
+        if news:
+            lines = [
+                f"{r['title']}: {r['body']} ({r['url']})" + (f" [{r.get('date', '')}]" if r.get("date") else "")
+                for r in news
+            ]
+            return "\n".join(lines)
+        results = await loop.run_in_executor(None, lambda: list(DDGS().text(query, max_results=5)))
+        if results:
+            return "\n".join(f"{r['title']}: {r['body']} ({r['href']})" for r in results)
+    except Exception:
+        pass
+
+    return "No search results found. Add a search API key in Settings → Search Integrations for better results (Tavily is free at app.tavily.com)."
 
 
 async def _tool_http(inputs: dict) -> str:
