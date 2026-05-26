@@ -92,6 +92,10 @@ class Settings(BaseSettings):
     perplexity_api_key: str = ""
     xai_api_key: str = ""
 
+    # Web search (set one of these — Tavily recommended, free tier 1000/month at app.tavily.com)
+    tavily_api_key: str = ""
+    brave_search_api_key: str = ""  # optional paid upgrade
+
     # Cloud browser (Browserbase)
     browserbase_api_key: str = ""
     browserbase_project_id: str = ""
