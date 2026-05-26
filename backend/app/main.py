@@ -41,6 +41,7 @@ from app.api.manage import router as manage_router
 from app.api.white_label import router as white_label_router
 from app.api.push import router as push_router
 from app.api.model_keys import router as model_keys_router
+from app.api.search_keys import router as search_keys_router
 from app.api.agents import router as agents_router, public_router as agents_public_router
 from app.api.voice_calls import router as voice_calls_router
 from app.api.settings_comms import router as settings_comms_router
@@ -134,6 +135,7 @@ app.include_router(manage_router)
 app.include_router(white_label_router)
 app.include_router(push_router)
 app.include_router(model_keys_router)
+app.include_router(search_keys_router)
 app.include_router(settings_comms_router)
 app.include_router(agents_router)
 app.include_router(agents_public_router)
