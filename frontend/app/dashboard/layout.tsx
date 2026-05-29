@@ -9,6 +9,7 @@ import {
   ClipboardList, LayoutTemplate, ShoppingBag, Wallet,
   Mic, Monitor, Plug, Tag, BarChart2, Settings,
   ChevronDown, LogOut, Menu, X, AlertCircle, ShieldAlert,
+  PanelLeftClose, PanelLeftOpen,
 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { signOut } from "next-auth/react";
@@ -88,13 +89,35 @@ function NavLink({
   isActive,
   badge,
   onClick,
+  collapsed,
 }: {
   item: NavItem;
   isActive: boolean;
   badge?: number;
   onClick?: () => void;
+  collapsed?: boolean;
 }) {
   const Icon = item.icon;
+
+  if (collapsed) {
+    return (
+      <Link
+        href={item.href}
+        onClick={onClick}
+        title={item.label}
+        className="relative flex h-8 w-8 items-center justify-center rounded-lg transition-colors mx-auto"
+        style={isActive ? { backgroundColor: INDIGO } : undefined}
+      >
+        <Icon className="h-4 w-4 shrink-0" style={isActive ? { color: "#fff" } : undefined} />
+        {badge !== undefined && badge > 0 && (
+          <span className="absolute -top-1 -right-1 flex h-3.5 min-w-[0.875rem] items-center justify-center rounded-full bg-red-500 px-0.5 text-[9px] font-semibold text-white leading-none">
+            {badge > 99 ? "99+" : badge}
+          </span>
+        )}
+      </Link>
+    );
+  }
+
   return (
     <Link
       href={item.href}
@@ -153,9 +176,13 @@ function SectionLabel({
 function SidebarContent({
   pathname,
   onNavigate,
+  collapsed,
+  onToggleCollapse,
 }: {
   pathname: string;
   onNavigate: () => void;
+  collapsed?: boolean;
+  onToggleCollapse?: () => void;
 }) {
   const user = useAppStore((s) => s.user);
   const agencyTheme = useAppStore((s) => s.agencyTheme);
@@ -207,10 +234,74 @@ function SidebarContent({
     setOpenSections((prev) => ({ ...prev, [label]: !prev[label] }));
   }
 
-  return (
-    <aside className="flex h-full w-[216px] flex-col bg-secondary border-r">
+  const allNavItems = [
+    ...PINNED,
+    ...SECTIONS.flatMap((s) => s.items),
+    ...AI_TOOLS,
+    ...FOOTER_NAV,
+  ];
 
-      {/* ── Brand header (max 48px) ─────────────────────────────────────────── */}
+  if (collapsed) {
+    return (
+      <aside className="flex h-full w-12 flex-col bg-secondary border-r transition-all duration-200">
+        {/* Brand mark */}
+        <div className="flex h-12 shrink-0 items-center justify-center">
+          <div
+            className="flex h-7 w-7 items-center justify-center rounded-lg text-sm font-bold text-white"
+            style={{ backgroundColor: brandColour }}
+          >
+            {platformName[0]}
+          </div>
+        </div>
+
+        {/* Expand button */}
+        <button
+          title="Expand sidebar"
+          onClick={onToggleCollapse}
+          className="mx-auto mb-1 flex h-7 w-7 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
+        >
+          <PanelLeftOpen className="h-3.5 w-3.5" />
+        </button>
+
+        {/* Scrollable icon-only nav */}
+        <div className="flex-1 overflow-y-auto py-1 space-y-1 [&::-webkit-scrollbar]:w-0">
+          {allNavItems.map((item) => (
+            <NavLink
+              key={item.href}
+              item={item}
+              isActive={active(pathname, item.href)}
+              badge={item.href === "/dashboard/inbox" ? inboxUnread : undefined}
+              onClick={onNavigate}
+              collapsed
+            />
+          ))}
+        </div>
+
+        {/* Footer: avatar + sign-out */}
+        <div className="shrink-0 pb-2 space-y-1 border-t border-border/50 pt-2">
+          {user?.role === "admin" && (
+            <Link href="/admin" title="Admin Panel"
+              className="flex h-8 w-8 mx-auto items-center justify-center rounded-lg text-rose-600 hover:bg-rose-50 transition-colors">
+              <ShieldAlert className="h-4 w-4" />
+            </Link>
+          )}
+          <div className="flex h-8 w-8 mx-auto items-center justify-center rounded-full text-[11px] font-semibold text-white"
+            style={{ backgroundColor: brandColour }} title={user?.name ?? user?.email ?? ""}>
+            {initials}
+          </div>
+          <button title="Sign out" onClick={() => signOut({ callbackUrl: "/login" })}
+            className="flex h-8 w-8 mx-auto items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground transition-colors">
+            <LogOut className="h-3.5 w-3.5" />
+          </button>
+        </div>
+      </aside>
+    );
+  }
+
+  return (
+    <aside className="flex h-full w-[216px] flex-col bg-secondary border-r transition-all duration-200">
+
+      {/* ── Brand header ─────────────────────────────────────────────────────── */}
       <div className="flex h-12 shrink-0 items-center gap-2.5 px-3">
         {agencyTheme?.logo ? (
           <PlatformLogo logoUrl={agencyTheme.logo} platformName={platformName} height={28} />
@@ -222,9 +313,17 @@ function SidebarContent({
             >
               {platformName[0]}
             </div>
-            <span className="text-sm font-semibold tracking-tight">{platformName}</span>
+            <span className="text-sm font-semibold tracking-tight flex-1 truncate">{platformName}</span>
           </>
         )}
+        {/* Collapse button */}
+        <button
+          title="Collapse sidebar"
+          onClick={onToggleCollapse}
+          className="shrink-0 rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground transition-colors ml-auto"
+        >
+          <PanelLeftClose className="h-3.5 w-3.5" />
+        </button>
       </div>
 
       {/* ── Scrollable body ─────────────────────────────────────────────────── */}
@@ -270,7 +369,7 @@ function SidebarContent({
             </div>
           ))}
 
-          {/* AI Tools — always expanded, "New" badge */}
+          {/* AI Tools */}
           <div>
             <div className="flex items-center justify-between px-2 py-1">
               <span className="text-[10px] font-semibold uppercase tracking-[0.07em] text-muted-foreground/60">
@@ -298,7 +397,6 @@ function SidebarContent({
       <div className="shrink-0">
         <div className="border-t border-border/50 mx-2" />
 
-        {/* Utility nav */}
         <div className="px-2 pt-1.5 pb-1 space-y-0.5">
           {FOOTER_NAV.map((item) => (
             <NavLink
@@ -312,7 +410,6 @@ function SidebarContent({
 
         <div className="border-t border-border/50 mx-2" />
 
-        {/* Admin panel shortcut — only for admins */}
         {user?.role === "admin" && (
           <div className="px-2 pt-1.5 pb-1">
             <Link
@@ -329,14 +426,12 @@ function SidebarContent({
 
         {/* User row */}
         <div className="flex items-center gap-2 px-3 py-2.5">
-          {/* Avatar */}
           <div
             className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-[11px] font-semibold text-white"
             style={{ backgroundColor: brandColour }}
           >
             {initials}
           </div>
-          {/* Name / role */}
           <div className="min-w-0 flex-1">
             <p className="text-xs font-medium leading-tight truncate">
               {user?.name ?? user?.email ?? "—"}
@@ -345,7 +440,6 @@ function SidebarContent({
               {user?.role ?? "free"}
             </p>
           </div>
-          {/* System-alert badge */}
           {sysAlerts > 0 && (
             <button
               title="System alerts — click to dismiss"
@@ -356,7 +450,6 @@ function SidebarContent({
               {sysAlerts}
             </button>
           )}
-          {/* Sign out */}
           <button
             title="Sign out"
             onClick={() => signOut({ callbackUrl: "/login" })}
@@ -373,7 +466,8 @@ function SidebarContent({
 // ─── Layout ───────────────────────────────────────────────────────────────────
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
-  const [mobileOpen, setMobileOpen] = useState(false);
+  const [mobileOpen,    setMobileOpen]    = useState(false);
+  const [sideCollapsed, setSideCollapsed] = useState(false);
   const agencyTheme = useAppStore((s) => s.agencyTheme);
   const brandColour = agencyTheme?.primaryColour ?? INDIGO;
   const platformName = agencyTheme?.name ?? "ChatCraft AI";
@@ -384,7 +478,12 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
 
       {/* Desktop sidebar */}
       <div className="hidden md:flex shrink-0">
-        <SidebarContent pathname={pathname} onNavigate={() => {}} />
+        <SidebarContent
+          pathname={pathname}
+          onNavigate={() => {}}
+          collapsed={sideCollapsed}
+          onToggleCollapse={() => setSideCollapsed((c) => !c)}
+        />
       </div>
 
       {/* Mobile overlay */}
