@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Check, Download, Loader2, Trash2, Key, ExternalLink, Plug, Mail, Search } from "lucide-react";
+import { Check, Download, Loader2, Trash2, Key, ExternalLink, Plug, Mail, Search, Wallet } from "lucide-react";
 import { signOut } from "next-auth/react";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
@@ -245,6 +245,21 @@ export default function SettingsPage() {
             </p>
           </div>
           <Link href="/dashboard/settings/search">
+            <Button size="sm" variant="outline">
+              Manage <ExternalLink className="h-3.5 w-3.5 ml-1.5" />
+            </Button>
+          </Link>
+        </Card>
+        <Card className="flex items-center justify-between p-4">
+          <div>
+            <p className="text-sm font-medium flex items-center gap-2">
+              <Wallet className="h-4 w-4" /> Wallet Pass Credentials
+            </p>
+            <p className="text-xs text-muted-foreground mt-0.5">
+              Configure Apple Wallet (.p12 certificate) and Google Wallet (service account) signing credentials.
+            </p>
+          </div>
+          <Link href="/dashboard/settings/wallet-passes">
             <Button size="sm" variant="outline">
               Manage <ExternalLink className="h-3.5 w-3.5 ml-1.5" />
             </Button>
