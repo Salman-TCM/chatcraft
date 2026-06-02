@@ -675,14 +675,14 @@
 - [x] SMS channel in inbox
 
 ### Phone Calls (Twilio + Voice AI)
-- [ ] Inbound call webhook handler (`POST /api/webhooks/twilio/voice`)
-- [ ] OpenAI Realtime API integration for voice calls (WebRTC/WebSocket)
-- [ ] ElevenLabs outbound call trigger
-- [ ] DTMF transfer destinations (press 1 for sales, press 2 for support)
-- [ ] Missed-call AI takeover + SMS fallback configuration
-- [ ] Post-call transcript saved to conversation
-- [ ] AI-generated call summary saved to contact
-- [ ] Phone channel in inbox
+- [x] Inbound call webhook handler (`POST /api/webhooks/twilio/voice`)
+- [x] OpenAI Realtime API integration for voice calls (WebRTC/WebSocket) — browser-based via realtime_proxy
+- [x] ElevenLabs outbound call trigger (`POST /webhooks/voice/outbound` via Twilio)
+- [x] DTMF transfer destinations (press 1 for sales, press 2 for support) — `/webhooks/voice/{id}/dtmf`
+- [x] Missed-call AI takeover + SMS fallback configuration — status callback auto-sends SMS on no-answer
+- [x] Post-call transcript saved to conversation — status callback saves full transcript as internal note
+- [x] AI-generated call summary saved to contact — LLM summarises transcript on call end
+- [x] Phone channel in inbox — phone badge already in inbox channel filter
 
 ### X (Twitter)
 - [ ] Twitter/X OAuth integration
