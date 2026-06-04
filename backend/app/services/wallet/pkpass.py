@@ -120,6 +120,24 @@ def build_pkpass(
     }
     pk_type = pass_type_map.get(program.type, "generic")
 
+    # Build back fields (receipt scan link, card serial)
+    back_fields = [
+        {"key": "serial", "label": "Card ID", "value": card.serial},
+    ]
+    rs_cfg = getattr(program, "receipt_scanning_config", None) or {}
+    if rs_cfg.get("enabled") and program.type in ("points", "punch_card"):
+        from app.core.config import settings as _s
+        frontend_base = getattr(_s, "frontend_base_url", "") or getattr(_s, "api_base_url", "") or ""
+        receipt_url = f"{frontend_base}/pass/{card.serial}/scan-receipt"
+        back_fields.insert(0, {
+            "key": "receipt_scan",
+            "label": "Scan Receipt",
+            "value": "Tap to earn from your receipt",
+            "attributedValue": f"<a href='{receipt_url}'>Scan Receipt for Points</a>",
+        })
+
+    auth_token = getattr(card, "auth_token", None) or card.serial
+
     pass_json: dict = {
         "formatVersion": 1,
         "passTypeIdentifier": settings.apple_pass_type_identifier,
@@ -131,7 +149,7 @@ def build_pkpass(
         "foregroundColor": fg_color,
         "labelColor": label_color,
         "webServiceURL": pass_url,
-        "authenticationToken": card.serial,
+        "authenticationToken": auth_token,
         "barcode": {
             "message": card.serial,
             "format": "PKBarcodeFormatQR",
@@ -141,6 +159,7 @@ def build_pkpass(
             "primaryFields": fields.get("primary", []),
             "secondaryFields": fields.get("secondary", []),
             "auxiliaryFields": fields.get("auxiliary", []),
+            "backFields": back_fields,
         },
     }
 
