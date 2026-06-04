@@ -3,13 +3,38 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
-  Bot, Plus, Trash2, Settings2, Loader2,
+  Bot, Plus, Settings2, Loader2,
   Globe, Code2, Chrome, Sheet, Mail, Link2,
-  Smartphone, ShieldCheck, Zap, Circle, Eye,
+  Smartphone, ShieldCheck, Zap, Circle, Play,
+  MoreHorizontal, ExternalLink, MessageCircle, PanelRight,
+  Mic, LayoutTemplate, Copy, QrCode, PauseCircle, PlayCircle,
+  FolderOpen, Lock, Unlock, Trash2, Check,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuSub,
+  DropdownMenuSubContent,
+  DropdownMenuSubTrigger,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+} from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { apiClient } from "@/lib/api";
+import { AgentConfigModal } from "./components/AgentConfigModal";
 
 interface Agent {
   id: string;
@@ -17,24 +42,34 @@ interface Agent {
   description: string | null;
   model: string;
   tools: Record<string, boolean>;
+  instructions: string | null;
+  memory_enabled: boolean;
+  max_steps: number;
   is_published: boolean;
   is_active: boolean;
-  max_steps: number;
   share_enabled: boolean;
   share_token: string | null;
+  webhook_url: string | null;
   created_at: string;
 }
 
+type EmbedType = "direct" | "bubble" | "sidetab" | "voice" | "iframe";
+
+interface EmbedModal {
+  agent: Agent;
+  type: EmbedType;
+}
+
 const TOOL_META: Record<string, { icon: React.ElementType; label: string; color: string }> = {
-  web_search:   { icon: Globe,        label: "Web Search",    color: "text-blue-500" },
-  browser:      { icon: Chrome,       label: "Browser",       color: "text-orange-500" },
-  code:         { icon: Code2,        label: "Run Code",      color: "text-purple-500" },
-  http:         { icon: Link2,        label: "HTTP",          color: "text-green-500" },
-  sheets:       { icon: Sheet,        label: "Sheets",        color: "text-emerald-500" },
-  email:        { icon: Mail,         label: "Email",         color: "text-rose-500" },
-  sms:          { icon: Smartphone,   label: "SMS",           color: "text-violet-500" },
-  verification:   { icon: ShieldCheck,  label: "Verification",  color: "text-amber-500" },
-  agent_builder:  { icon: Bot,          label: "Agent Builder", color: "text-sky-500" },
+  web_search:    { icon: Globe,        label: "Web Search",    color: "text-blue-500" },
+  browser:       { icon: Chrome,       label: "Browser",       color: "text-orange-500" },
+  code:          { icon: Code2,        label: "Run Code",      color: "text-purple-500" },
+  http:          { icon: Link2,        label: "HTTP",          color: "text-green-500" },
+  sheets:        { icon: Sheet,        label: "Sheets",        color: "text-emerald-500" },
+  email:         { icon: Mail,         label: "Email",         color: "text-rose-500" },
+  sms:           { icon: Smartphone,   label: "SMS",           color: "text-violet-500" },
+  verification:  { icon: ShieldCheck,  label: "Verification",  color: "text-amber-500" },
+  agent_builder: { icon: Bot,          label: "Agent Builder", color: "text-sky-500" },
 };
 
 function modelShortName(model: string) {
@@ -54,12 +89,318 @@ function modelBadgeColor(model: string) {
   return "bg-muted text-muted-foreground";
 }
 
+function getEmbedContent(agent: Agent, type: EmbedType): { title: string; description: string; code: string } {
+  const origin = typeof window !== "undefined" ? window.location.origin : "https://yourplatform.com";
+  const shareUrl = `${origin}/share/agents/${agent.id}`;
+
+  switch (type) {
+    case "direct":
+      return {
+        title: "Direct Link",
+        description: "Share this URL directly with users to open the agent in a full-page view.",
+        code: shareUrl,
+      };
+    case "bubble":
+      return {
+        title: "Floating Bubble",
+        description: "Add a floating chat bubble to any website. Paste before </body>.",
+        code: `<script
+  src="${origin}/widget.js"
+  data-agent-id="${agent.id}"
+  data-type="bubble"
+  data-position="bottom-right">
+</script>`,
+      };
+    case "sidetab":
+      return {
+        title: "Side Tab",
+        description: "A clickable tab on the edge of the page that slides open a chat panel.",
+        code: `<script
+  src="${origin}/widget.js"
+  data-agent-id="${agent.id}"
+  data-type="sidetab"
+  data-label="Chat with us">
+</script>`,
+      };
+    case "voice":
+      return {
+        title: "Voice Launcher",
+        description: "A microphone button that opens a voice conversation with the agent.",
+        code: `<script
+  src="${origin}/widget.js"
+  data-agent-id="${agent.id}"
+  data-type="voice-launcher"
+  data-position="bottom-right">
+</script>`,
+      };
+    case "iframe":
+      return {
+        title: "iFrame Embed",
+        description: "Embed the agent inside any page using an inline iFrame.",
+        code: `<iframe
+  src="${origin}/embed/agents/${agent.id}"
+  width="400"
+  height="600"
+  frameborder="0"
+  allow="microphone">
+</iframe>`,
+      };
+  }
+}
+
+// ─── Embed Modal ─────────────────────────────────────────────────────────────
+
+function EmbedDialog({
+  modal,
+  onClose,
+}: {
+  modal: EmbedModal;
+  onClose: () => void;
+}) {
+  const [copied, setCopied] = useState(false);
+  const content = getEmbedContent(modal.agent, modal.type);
+
+  const copy = () => {
+    navigator.clipboard.writeText(content.code);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+
+  return (
+    <Dialog open onOpenChange={onClose}>
+      <DialogContent className="max-w-lg">
+        <DialogHeader>
+          <DialogTitle>{content.title}</DialogTitle>
+          <DialogDescription>{content.description}</DialogDescription>
+        </DialogHeader>
+        <div className="space-y-3">
+          <pre className="rounded-lg bg-muted p-4 text-xs font-mono overflow-x-auto whitespace-pre-wrap break-all leading-relaxed">
+            {content.code}
+          </pre>
+          <Button className="w-full" onClick={copy}>
+            {copied ? (
+              <><Check className="h-4 w-4 mr-2" /> Copied!</>
+            ) : (
+              <><Copy className="h-4 w-4 mr-2" /> Copy {modal.type === "direct" ? "Link" : "Code"}</>
+            )}
+          </Button>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+// ─── QR Code Modal ───────────────────────────────────────────────────────────
+
+function QrDialog({ agent, onClose }: { agent: Agent; onClose: () => void }) {
+  const [copied, setCopied] = useState(false);
+  const origin = typeof window !== "undefined" ? window.location.origin : "";
+  const shareUrl = `${origin}/share/agents/${agent.id}`;
+  const qrSrc = `https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(shareUrl)}`;
+
+  const copy = () => {
+    navigator.clipboard.writeText(shareUrl);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+
+  return (
+    <Dialog open onOpenChange={onClose}>
+      <DialogContent className="max-w-sm">
+        <DialogHeader>
+          <DialogTitle>QR Code — {agent.name}</DialogTitle>
+          <DialogDescription>Scan to open this agent on any device.</DialogDescription>
+        </DialogHeader>
+        <div className="flex flex-col items-center gap-4">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src={qrSrc} alt="QR Code" className="rounded-lg border w-48 h-48" />
+          <div className="w-full space-y-2">
+            <p className="text-xs text-muted-foreground text-center break-all">{shareUrl}</p>
+            <div className="flex gap-2">
+              <Button variant="outline" className="flex-1" onClick={copy}>
+                {copied ? <><Check className="h-3.5 w-3.5 mr-1.5" /> Copied</> : <><Copy className="h-3.5 w-3.5 mr-1.5" /> Copy URL</>}
+              </Button>
+              <Button variant="outline" className="flex-1" asChild>
+                <a href={qrSrc} download={`qr-${agent.name}.png`}>
+                  <QrCode className="h-3.5 w-3.5 mr-1.5" /> Download
+                </a>
+              </Button>
+            </div>
+          </div>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+// ─── Move to Folder Modal ────────────────────────────────────────────────────
+
+function FolderDialog({ agent, onClose }: { agent: Agent; onClose: () => void }) {
+  const [folderName, setFolderName] = useState("");
+
+  return (
+    <Dialog open onOpenChange={onClose}>
+      <DialogContent className="max-w-sm">
+        <DialogHeader>
+          <DialogTitle>Move to Folder</DialogTitle>
+          <DialogDescription>Organise <strong>{agent.name}</strong> into a folder.</DialogDescription>
+        </DialogHeader>
+        <div className="space-y-3">
+          <div className="space-y-1.5">
+            <Label>Folder name</Label>
+            <Input
+              placeholder="e.g. Customer Support"
+              value={folderName}
+              onChange={(e) => setFolderName(e.target.value)}
+            />
+          </div>
+          <Button className="w-full" onClick={onClose} disabled={!folderName.trim()}>
+            <FolderOpen className="h-4 w-4 mr-2" /> Move
+          </Button>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+// ─── Options Dropdown ────────────────────────────────────────────────────────
+
+function AgentOptionsMenu({
+  agent,
+  locked,
+  onEmbed,
+  onQr,
+  onDuplicate,
+  onTogglePause,
+  onFolder,
+  onToggleLock,
+  onDelete,
+}: {
+  agent: Agent;
+  locked: boolean;
+  onEmbed: (type: EmbedType) => void;
+  onQr: () => void;
+  onDuplicate: () => void;
+  onTogglePause: () => void;
+  onFolder: () => void;
+  onToggleLock: () => void;
+  onDelete: () => void;
+}) {
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button
+          size="sm"
+          variant="outline"
+          className="h-7 w-7 px-0 shrink-0"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <MoreHorizontal className="h-3.5 w-3.5" />
+        </Button>
+      </DropdownMenuTrigger>
+
+      <DropdownMenuContent
+        align="end"
+        className="w-52"
+        onClick={(e) => e.stopPropagation()}
+      >
+        {/* Custom GPT submenu */}
+        <DropdownMenuSub>
+          <DropdownMenuSubTrigger className="gap-2">
+            <Bot className="h-3.5 w-3.5 text-muted-foreground" />
+            Custom GPT
+          </DropdownMenuSubTrigger>
+          <DropdownMenuSubContent className="w-48">
+            <DropdownMenuLabel className="text-[10px] uppercase tracking-wide text-muted-foreground pb-1">
+              Deploy as
+            </DropdownMenuLabel>
+            <DropdownMenuItem onClick={() => onEmbed("direct")} className="gap-2">
+              <ExternalLink className="h-3.5 w-3.5 text-muted-foreground" />
+              Direct Link
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={() => onEmbed("bubble")} className="gap-2">
+              <MessageCircle className="h-3.5 w-3.5 text-muted-foreground" />
+              Floating Bubble
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={() => onEmbed("sidetab")} className="gap-2">
+              <PanelRight className="h-3.5 w-3.5 text-muted-foreground" />
+              Side Tab
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={() => onEmbed("voice")} className="gap-2">
+              <Mic className="h-3.5 w-3.5 text-muted-foreground" />
+              Voice Launcher
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={() => onEmbed("iframe")} className="gap-2">
+              <LayoutTemplate className="h-3.5 w-3.5 text-muted-foreground" />
+              iFrame
+            </DropdownMenuItem>
+          </DropdownMenuSubContent>
+        </DropdownMenuSub>
+
+        <DropdownMenuSeparator />
+
+        <DropdownMenuItem onClick={onDuplicate} className="gap-2">
+          <Copy className="h-3.5 w-3.5 text-muted-foreground" />
+          Duplicate
+        </DropdownMenuItem>
+
+        <DropdownMenuItem onClick={onQr} className="gap-2">
+          <QrCode className="h-3.5 w-3.5 text-muted-foreground" />
+          QR Code
+        </DropdownMenuItem>
+
+        <DropdownMenuItem onClick={onTogglePause} className="gap-2">
+          {agent.is_active ? (
+            <><PauseCircle className="h-3.5 w-3.5 text-muted-foreground" /> Pause Bot</>
+          ) : (
+            <><PlayCircle className="h-3.5 w-3.5 text-green-500" /> Resume Bot</>
+          )}
+        </DropdownMenuItem>
+
+        <DropdownMenuItem onClick={onFolder} className="gap-2">
+          <FolderOpen className="h-3.5 w-3.5 text-muted-foreground" />
+          Move to Folder
+        </DropdownMenuItem>
+
+        <DropdownMenuItem onClick={onToggleLock} className="gap-2">
+          {locked ? (
+            <><Unlock className="h-3.5 w-3.5 text-muted-foreground" /> Unlock</>
+          ) : (
+            <><Lock className="h-3.5 w-3.5 text-muted-foreground" /> Lock</>
+          )}
+        </DropdownMenuItem>
+
+        <DropdownMenuSeparator />
+
+        <DropdownMenuItem
+          onClick={onDelete}
+          className="gap-2 text-destructive focus:text-destructive"
+        >
+          <Trash2 className="h-3.5 w-3.5" />
+          Delete
+        </DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
+// ─── Main Page ───────────────────────────────────────────────────────────────
+
 export default function AgentsPage() {
   const router = useRouter();
   const [agents, setAgents] = useState<Agent[]>([]);
   const [loading, setLoading] = useState(true);
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [configAgent, setConfigAgent] = useState<Agent | null>(null);
+
+  // Per-agent UI state (local — not persisted to backend yet)
+  const [lockedAgents, setLockedAgents] = useState<Set<string>>(new Set());
+
+  // Modals
+  const [embedModal, setEmbedModal] = useState<EmbedModal | null>(null);
+  const [qrAgent, setQrAgent] = useState<Agent | null>(null);
+  const [folderAgent, setFolderAgent] = useState<Agent | null>(null);
 
   async function loadAgents() {
     setLoading(true);
@@ -75,7 +416,6 @@ export default function AgentsPage() {
 
   useEffect(() => {
     loadAgents();
-    // Re-fetch when the tab becomes visible again (e.g. user returns from Agent Builder chat)
     const onVisible = () => { if (document.visibilityState === "visible") loadAgents(); };
     document.addEventListener("visibilitychange", onVisible);
     return () => document.removeEventListener("visibilitychange", onVisible);
@@ -90,22 +430,65 @@ export default function AgentsPage() {
         tools: {},
         max_steps: 10,
       });
-      router.push(`/dashboard/agents/${data.data.id}`);
+      setAgents(prev => [data.data, ...prev]);
+      setConfigAgent(data.data);
     } catch {
       setError("Failed to create agent. Please try again.");
+    } finally {
       setCreating(false);
     }
   }
 
-  async function deleteAgent(e: React.MouseEvent, id: string) {
-    e.stopPropagation();
-    if (!confirm("Delete this agent? This cannot be undone.")) return;
+  async function duplicateAgent(agent: Agent) {
     try {
-      await apiClient.delete(`/api/v1/agents/${id}`);
-      setAgents(prev => prev.filter(a => a.id !== id));
+      const { data } = await apiClient.post("/api/v1/agents", {
+        name: `${agent.name} (Copy)`,
+        description: agent.description,
+        model: agent.model,
+        instructions: agent.instructions,
+        memory_enabled: agent.memory_enabled,
+        max_steps: agent.max_steps,
+        tools: agent.tools,
+      });
+      setAgents(prev => [data.data, ...prev]);
+    } catch {
+      setError("Failed to duplicate agent.");
+    }
+  }
+
+  async function togglePause(agent: Agent) {
+    try {
+      const { data } = await apiClient.put(`/api/v1/agents/${agent.id}`, {
+        is_active: !agent.is_active,
+      });
+      setAgents(prev => prev.map(a => a.id === agent.id ? { ...a, is_active: data.data.is_active } : a));
+    } catch {
+      setError("Failed to update agent status.");
+    }
+  }
+
+  async function deleteAgent(agent: Agent) {
+    if (!confirm(`Delete "${agent.name}"? This cannot be undone.`)) return;
+    try {
+      await apiClient.delete(`/api/v1/agents/${agent.id}`);
+      setAgents(prev => prev.filter(a => a.id !== agent.id));
     } catch {
       setError("Failed to delete agent.");
     }
+  }
+
+  function toggleLock(agentId: string) {
+    setLockedAgents(prev => {
+      const next = new Set(prev);
+      if (next.has(agentId)) next.delete(agentId);
+      else next.add(agentId);
+      return next;
+    });
+  }
+
+  function handleAgentUpdated(updated: Agent) {
+    setAgents(prev => prev.map(a => a.id === updated.id ? { ...a, ...updated } : a));
+    setConfigAgent(null);
   }
 
   const enabledTools = (agent: Agent) =>
@@ -123,9 +506,9 @@ export default function AgentsPage() {
     <div className="mx-auto max-w-5xl space-y-6 p-6">
 
       {error && (
-        <div className="rounded-md bg-destructive/10 px-4 py-3 text-sm text-destructive">
+        <div className="rounded-md bg-destructive/10 px-4 py-3 text-sm text-destructive flex items-center justify-between">
           {error}
-          <button className="ml-2 underline text-xs" onClick={() => setError(null)}>Dismiss</button>
+          <button className="underline text-xs ml-2" onClick={() => setError(null)}>Dismiss</button>
         </div>
       )}
 
@@ -171,11 +554,13 @@ export default function AgentsPage() {
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
         {agents.map((agent) => {
           const tools = enabledTools(agent);
+          const locked = lockedAgents.has(agent.id);
+
           return (
             <Card
               key={agent.id}
-              className="p-4 flex flex-col gap-3 cursor-pointer hover:shadow-md transition-shadow group"
-              onClick={() => router.push(`/dashboard/agents/${agent.id}`)}
+              className="p-4 flex flex-col gap-3 cursor-pointer hover:shadow-md transition-shadow"
+              onClick={() => setConfigAgent(agent)}
             >
               {/* Card header */}
               <div className="flex items-start justify-between gap-2">
@@ -184,10 +569,13 @@ export default function AgentsPage() {
                     <Bot className={`h-4.5 w-4.5 ${agent.is_active ? "text-indigo-600" : "text-muted-foreground"}`} />
                   </div>
                   <div className="min-w-0">
-                    <p className="font-semibold text-sm truncate">{agent.name}</p>
+                    <div className="flex items-center gap-1.5">
+                      <p className="font-semibold text-sm truncate">{agent.name}</p>
+                      {locked && <Lock className="h-3 w-3 text-muted-foreground shrink-0" />}
+                    </div>
                     <div className="flex items-center gap-1.5 mt-0.5">
                       <Circle
-                        className={`h-1.5 w-1.5 fill-current ${agent.is_active ? "text-green-500" : "text-muted-foreground/40"}`}
+                        className={`h-1.5 w-1.5 fill-current ${agent.is_active ? "text-green-500" : "text-amber-400"}`}
                       />
                       <span className="text-[10px] text-muted-foreground">
                         {agent.is_active ? "Active" : "Paused"}
@@ -195,12 +583,6 @@ export default function AgentsPage() {
                     </div>
                   </div>
                 </div>
-                <button
-                  onClick={(e) => deleteAgent(e, agent.id)}
-                  className="opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-destructive transition-all p-1 rounded"
-                >
-                  <Trash2 className="h-3.5 w-3.5" />
-                </button>
               </div>
 
               {/* Description */}
@@ -220,7 +602,7 @@ export default function AgentsPage() {
               </div>
 
               {/* Active tools */}
-              {tools.length > 0 && (
+              {tools.length > 0 ? (
                 <div className="flex flex-wrap gap-1">
                   {tools.map((t) => {
                     const meta = TOOL_META[t];
@@ -237,9 +619,7 @@ export default function AgentsPage() {
                     );
                   })}
                 </div>
-              )}
-
-              {tools.length === 0 && (
+              ) : (
                 <p className="text-[11px] text-muted-foreground/60 italic">No tools — instruction-only agent</p>
               )}
 
@@ -249,7 +629,7 @@ export default function AgentsPage() {
                   size="sm"
                   variant="outline"
                   className="h-7 text-xs flex-1"
-                  onClick={(e) => { e.stopPropagation(); router.push(`/dashboard/agents/${agent.id}`); }}
+                  onClick={(e) => { e.stopPropagation(); setConfigAgent(agent); }}
                 >
                   <Settings2 className="h-3 w-3" />
                   Configure
@@ -258,24 +638,61 @@ export default function AgentsPage() {
                   size="sm"
                   variant="outline"
                   className="h-7 text-xs flex-1"
-                  title={agent.share_token ? "Open public preview" : "Enable sharing in Configure → Share tab"}
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    if (agent.share_token) {
-                      window.open(`/agent/${agent.share_token}`, "_blank");
-                    } else {
-                      router.push(`/dashboard/agents/${agent.id}?tab=share`);
-                    }
-                  }}
+                  onClick={(e) => { e.stopPropagation(); router.push(`/dashboard/agents/run/${agent.id}`); }}
                 >
-                  <Eye className="h-3 w-3" />
-                  Preview
+                  <Play className="h-3 w-3" />
+                  Run
                 </Button>
+                <AgentOptionsMenu
+                  agent={agent}
+                  locked={locked}
+                  onEmbed={(type) => setEmbedModal({ agent, type })}
+                  onQr={() => setQrAgent(agent)}
+                  onDuplicate={() => duplicateAgent(agent)}
+                  onTogglePause={() => togglePause(agent)}
+                  onFolder={() => setFolderAgent(agent)}
+                  onToggleLock={() => toggleLock(agent.id)}
+                  onDelete={() => deleteAgent(agent)}
+                />
               </div>
             </Card>
           );
         })}
       </div>
+
+      {/* Config modal */}
+      {configAgent && (
+        <AgentConfigModal
+          agent={configAgent}
+          open={true}
+          onClose={() => setConfigAgent(null)}
+          onUpdate={handleAgentUpdated}
+        />
+      )}
+
+      {/* Embed modal */}
+      {embedModal && (
+        <EmbedDialog
+          modal={embedModal}
+          onClose={() => setEmbedModal(null)}
+        />
+      )}
+
+      {/* QR Code modal */}
+      {qrAgent && (
+        <QrDialog
+          agent={qrAgent}
+          onClose={() => setQrAgent(null)}
+        />
+      )}
+
+      {/* Move to Folder modal */}
+      {folderAgent && (
+        <FolderDialog
+          agent={folderAgent}
+          onClose={() => setFolderAgent(null)}
+        />
+      )}
     </div>
   );
 }
