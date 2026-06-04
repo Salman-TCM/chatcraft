@@ -521,6 +521,8 @@ function NodeConfigPanel({
                   ["comment_on_post","Comment on Post (Instagram)"],
                   ["ai_web","AI Web (Browse / Research)"],
                   ["send_webhook","Send Webhook"],
+                  ["wallet_action","Wallet: Card Action"],
+                  ["wallet_push","Wallet: Send Push Notification"],
                 ].map(([v,l]) => (
                   <option key={v} value={v}>{l}</option>
                 ))}
@@ -749,6 +751,72 @@ function NodeConfigPanel({
                 <Label className="text-xs">Webhook URL</Label>
                 <Input className="h-8 text-xs" value={local.url ?? ""} onChange={e => set("url", e.target.value)} placeholder="https://hooks.zapier.com/..." />
               </div>
+            )}
+            {local.action === "wallet_action" && (
+              <>
+                <div className="space-y-1">
+                  <Label className="text-xs">Card serial (variable)</Label>
+                  <Input className="h-8 text-xs font-mono" value={local.serial ?? ""} onChange={e => set("serial", e.target.value)} placeholder="{{wallet_serial}} or {{contact.wallet_serial}}" />
+                </div>
+                <div className="space-y-1">
+                  <Label className="text-xs">Wallet action</Label>
+                  <select className="w-full rounded-md border text-xs px-2 py-1.5" value={local.wallet_action ?? "add_punch"} onChange={e => set("wallet_action", e.target.value)}>
+                    <optgroup label="Punch Card">
+                      <option value="add_punch">Add Punch</option>
+                      <option value="remove_punch">Remove Punch</option>
+                      <option value="redeem">Redeem Reward</option>
+                    </optgroup>
+                    <optgroup label="Points">
+                      <option value="add_points">Add Points</option>
+                      <option value="remove_points">Remove Points</option>
+                      <option value="redeem_points_reward">Redeem Points Reward</option>
+                    </optgroup>
+                    <optgroup label="Membership">
+                      <option value="set_tier">Set Tier</option>
+                    </optgroup>
+                    <optgroup label="Coupon">
+                      <option value="redeem_coupon">Redeem Coupon</option>
+                    </optgroup>
+                    <optgroup label="Prepaid Balance">
+                      <option value="load_balance">Load Balance</option>
+                      <option value="deduct_balance">Deduct Balance</option>
+                    </optgroup>
+                    <optgroup label="Event Ticket">
+                      <option value="check_in">Check In</option>
+                      <option value="un_check_in">Un-Check In</option>
+                    </optgroup>
+                  </select>
+                </div>
+                {["add_punch","remove_punch","add_points","remove_points","redeem_points_reward","set_tier","load_balance","deduct_balance"].includes(local.wallet_action ?? "") && (
+                  <div className="space-y-1">
+                    <Label className="text-xs">Value (amount / tier name)</Label>
+                    <Input className="h-8 text-xs" value={local.value ?? ""} onChange={e => set("value", e.target.value)} placeholder="e.g. 10 or Gold" />
+                  </div>
+                )}
+                <div className="space-y-1">
+                  <Label className="text-xs">Custom push message <span className="text-muted-foreground font-normal">(optional)</span></Label>
+                  <Input className="h-8 text-xs" value={local.message ?? ""} onChange={e => set("message", e.target.value)} placeholder="You just earned {{wallet_punches}} punches!" />
+                </div>
+                <div className="flex items-center justify-between">
+                  <Label className="text-xs">Silent (skip push notification)</Label>
+                  <input type="checkbox" checked={!!local.silent} onChange={e => set("silent", e.target.checked)} className="h-4 w-4" />
+                </div>
+              </>
+            )}
+            {local.action === "wallet_push" && (
+              <>
+                <div className="space-y-1">
+                  <Label className="text-xs">Card serial (variable)</Label>
+                  <Input className="h-8 text-xs font-mono" value={local.serial ?? ""} onChange={e => set("serial", e.target.value)} placeholder="{{wallet_serial}}" />
+                </div>
+                <div className="space-y-1">
+                  <Label className="text-xs">Message</Label>
+                  <textarea className="w-full rounded-md border text-xs px-3 py-2 min-h-[60px] resize-y focus:outline-none focus:ring-1 focus:ring-primary"
+                    value={local.message ?? ""} onChange={e => set("message", e.target.value)}
+                    placeholder="You have {{wallet_punches}} of {{wallet_max_punches}} punches!" />
+                  <p className="text-[10px] text-muted-foreground">Variables: {'{{wallet_punches}}'}, {'{{wallet_points}}'}, {'{{customerName}}'}, {'{{wallet_program_name}}'}</p>
+                </div>
+              </>
             )}
           </>
         )}
