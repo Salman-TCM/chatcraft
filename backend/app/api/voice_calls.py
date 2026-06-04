@@ -28,7 +28,7 @@ from sqlalchemy import select
 from app.core.config import settings
 from app.core.dependencies import CurrentUser, DBSession
 from app.models.chatbot_config import ChatbotConfig
-from app.models.contact import Contact
+from app.models.crm import Contact
 from app.models.conversation import Conversation, ConversationStatus
 from app.services.channels.processor import process_incoming
 from app.services.llm.router import LLMRouter
