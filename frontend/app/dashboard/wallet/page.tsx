@@ -4,7 +4,8 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import {
   Wallet, Plus, Loader2, Pencil, Trash2, Users, Send, X,
   ChevronDown, ChevronRight, Download, Smartphone, RefreshCw,
-  Check, AlertCircle, Upload, Lock,
+  Check, AlertCircle, Upload, Lock, Link2, QrCode, RotateCcw,
+  Clock, Camera, ScanLine,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -20,13 +21,21 @@ interface WalletProgram {
   id: string; name: string; type: string; description: string | null;
   status: string; config: Record<string, unknown>;
   brand_overrides: Record<string, string>; google_class_id: string | null;
-  created_at: string;
+  join_token: string | null; scanner_token: string | null;
+  join_url: string | null; scanner_url: string | null;
+  join_form_fields: string[]; receipt_scanning_config: Record<string, unknown>;
+  device_count: number; created_at: string;
 }
 interface WalletCard {
   id: string; serial: string; customer_name: string | null;
   customer_email: string | null; customer_phone: string | null;
   status: string; state: Record<string, unknown>;
   google_pass_object_id: string | null; created_at: string;
+}
+interface WalletEvent {
+  id: string; action: string; delta: Record<string, unknown>;
+  message: string | null; source: string; receipt_scan_id: string | null;
+  created_at: string;
 }
 interface Agent {
   id: string; name: string; description: string | null;
@@ -35,44 +44,31 @@ interface Agent {
 
 // ── Constants ──────────────────────────────────────────────────────────────────
 const ACTION_LABELS: Record<string, { label: string; hasValue: boolean; valueLabel?: string }> = {
-  add_punch:      { label: "Add Punch",      hasValue: false },
-  remove_punch:   { label: "Remove Punch",   hasValue: false },
-  set_punches:    { label: "Set Punches",    hasValue: true,  valueLabel: "Count"     },
-  redeem:         { label: "Redeem",         hasValue: false },
-  add_points:     { label: "Add Points",     hasValue: true,  valueLabel: "Points"    },
-  remove_points:  { label: "Remove Points",  hasValue: true,  valueLabel: "Points"    },
-  set_tier:       { label: "Set Tier",       hasValue: true,  valueLabel: "Tier name" },
-  load_balance:   { label: "Load Balance",   hasValue: true,  valueLabel: "Amount"    },
-  deduct_balance: { label: "Deduct Balance", hasValue: true,  valueLabel: "Amount"    },
-  refund_balance: { label: "Refund Balance", hasValue: true,  valueLabel: "Amount"    },
-  set_balance:    { label: "Set Balance",    hasValue: true,  valueLabel: "Amount"    },
-  check_in:       { label: "Check In",       hasValue: false },
-  un_check_in:    { label: "Un-Check In",    hasValue: false },
+  add_punch:          { label: "Add Punch",         hasValue: false },
+  remove_punch:       { label: "Remove Punch",      hasValue: false },
+  set_punches:        { label: "Set Punches",        hasValue: true,  valueLabel: "Count"     },
+  redeem:             { label: "Redeem",             hasValue: false },
+  redeem_coupon:      { label: "Redeem Coupon",      hasValue: false },
+  add_points:         { label: "Add Points",         hasValue: true,  valueLabel: "Points"    },
+  remove_points:      { label: "Remove Points",      hasValue: true,  valueLabel: "Points"    },
+  redeem_points_reward:{ label: "Redeem Reward",     hasValue: true,  valueLabel: "Point cost" },
+  set_tier:           { label: "Set Tier",           hasValue: true,  valueLabel: "Tier name" },
+  load_balance:       { label: "Load Balance",       hasValue: true,  valueLabel: "Amount"    },
+  deduct_balance:     { label: "Deduct Balance",     hasValue: true,  valueLabel: "Amount"    },
+  refund_balance:     { label: "Refund Balance",     hasValue: true,  valueLabel: "Amount"    },
+  set_balance:        { label: "Set Balance",        hasValue: true,  valueLabel: "Amount"    },
+  check_in:           { label: "Check In",           hasValue: false },
+  un_check_in:        { label: "Un-Check In",        hasValue: false },
 };
 const TYPE_ACTIONS: Record<string, string[]> = {
   punch_card:      ["add_punch", "remove_punch", "set_punches", "redeem"],
-  points:          ["add_points", "remove_points", "set_tier", "redeem"],
+  points:          ["add_points", "remove_points", "redeem_points_reward", "set_tier", "redeem"],
   membership:      ["set_tier", "add_points", "remove_points"],
   prepaid_balance: ["load_balance", "deduct_balance", "refund_balance", "set_balance"],
   event_ticket:    ["check_in", "un_check_in"],
-  coupon:          ["redeem"],
+  coupon:          ["redeem_coupon"],
   business_card:   [],
 };
-const TOOL_LABELS: Record<string, string> = {
-  web_search: "web search", send_email: "email", send_sms: "SMS",
-  create_contact: "contacts", update_contact: "contact updates",
-  create_task: "tasks", send_notification: "push notifications",
-};
-// Deterministic 7×7 QR pattern — no Math.random() in render
-const QR7 = [
-  1,1,1,1,1,1,1,
-  1,0,0,0,0,0,1,
-  1,0,1,0,1,0,1,
-  1,0,0,1,0,0,1,
-  1,0,1,0,1,0,1,
-  1,0,0,0,0,0,1,
-  1,1,1,1,1,1,1,
-];
 const JOIN_FIELDS = [
   { key: "name",        label: "Full name"   },
   { key: "email",       label: "Email"       },
@@ -80,9 +76,15 @@ const JOIN_FIELDS = [
   { key: "birthday",    label: "Birthday"    },
   { key: "postal_code", label: "Postal code" },
 ];
+const TOOL_LABELS: Record<string, string> = {
+  web_search: "web search", send_email: "email", send_sms: "SMS",
+  create_contact: "contacts", update_contact: "contact updates",
+  create_task: "tasks", send_notification: "push notifications",
+};
+// Deterministic 7×7 QR placeholder
+const QR7 = [1,1,1,1,1,1,1,1,0,0,0,0,0,1,1,0,1,0,1,0,1,1,0,0,1,0,0,1,1,0,1,0,1,0,1,1,0,0,0,0,0,1,1,1,1,1,1,1,1];
 
 // ── Wallet pass preview ────────────────────────────────────────────────────────
-// Proportions mirror a real Apple Wallet loyalty pass (375×150 at 1x)
 function WalletCardPreview({ type, name, config, brand, programTypes }: {
   type: string; name: string; config: Record<string, string>;
   brand: Record<string, string>; programTypes: ProgramType[];
@@ -92,18 +94,19 @@ function WalletCardPreview({ type, name, config, brand, programTypes }: {
   const dim = brand.label_color      || `${fg}99`;
   const typeInfo   = programTypes.find((t) => t.value === type);
   const maxPunches = Math.min(Math.max(parseInt(config.max_punches || "10") || 10, 1), 14);
+  const stripUrl   = brand.strip_image_url;
 
   return (
-    <div
-      className="relative flex-shrink-0 overflow-hidden"
-      style={{ backgroundColor: bg, width: 288, height: 172, borderRadius: 16 }}
-    >
-      {/* Subtle glass sheen */}
+    <div className="relative flex-shrink-0 overflow-hidden"
+      style={{ backgroundColor: bg, width: 288, height: 172, borderRadius: 16 }}>
+      {/* Strip image */}
+      {stripUrl && (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img src={stripUrl} alt="" className="absolute inset-0 w-full h-full object-cover opacity-30" />
+      )}
       <div className="absolute inset-0 pointer-events-none"
         style={{ background: "linear-gradient(135deg, rgba(255,255,255,0.12) 0%, transparent 60%)" }} />
-
-      {/* Top row: logo + type label */}
-      <div className="flex items-center justify-between px-4 pt-3.5">
+      <div className="flex items-center justify-between px-4 pt-3.5 relative">
         <div className="h-6 flex items-center">
           {brand.logo_url ? (
             // eslint-disable-next-line @next/next/no-img-element
@@ -119,31 +122,26 @@ function WalletCardPreview({ type, name, config, brand, programTypes }: {
           {typeInfo?.label?.toUpperCase() ?? type.toUpperCase()}
         </span>
       </div>
-
-      {/* Program name */}
-      <div className="px-4 mt-2">
+      <div className="px-4 mt-2 relative">
         <p className="text-[17px] font-bold leading-tight truncate" style={{ color: fg }}>
           {name || "Program name"}
         </p>
       </div>
-
-      {/* Type-specific content */}
-      <div className="px-4 mt-2.5">
+      <div className="px-4 mt-2.5 relative">
         {type === "punch_card" && (
           <div className="flex flex-wrap gap-[5px]">
             {Array.from({ length: maxPunches }).map((_, i) => (
-              <div key={i} style={{
-                width: 14, height: 14, borderRadius: "50%",
-                border: `1.5px solid ${fg}`,
-                backgroundColor: i < Math.ceil(maxPunches / 4) ? fg : "transparent",
-              }} />
+              <div key={i} style={{ width: 14, height: 14, borderRadius: "50%", border: `1.5px solid ${fg}`,
+                backgroundColor: i < Math.ceil(maxPunches / 4) ? fg : "transparent" }} />
             ))}
           </div>
         )}
         {type === "points" && (
           <div>
             <span style={{ color: fg, fontSize: 26, fontWeight: 700, lineHeight: 1 }}>1,250</span>
-            <span style={{ color: dim, fontSize: 12, marginLeft: 4 }}>points</span>
+            <span style={{ color: dim, fontSize: 12, marginLeft: 4 }}>
+              {config.points_label || "points"}
+            </span>
           </div>
         )}
         {type === "membership" && (
@@ -179,8 +177,6 @@ function WalletCardPreview({ type, name, config, brand, programTypes }: {
           <p className="text-xs" style={{ color: dim }}>Digital business card</p>
         )}
       </div>
-
-      {/* Bottom-right QR placeholder */}
       <div className="absolute bottom-3 right-3 bg-white rounded-md p-1" style={{ width: 38, height: 38 }}>
         <div className="grid w-full h-full" style={{ gridTemplateColumns: "repeat(7,1fr)", gap: 1 }}>
           {QR7.map((cell, i) => (
@@ -192,11 +188,8 @@ function WalletCardPreview({ type, name, config, brand, programTypes }: {
   );
 }
 
-// ── Field with inline validation icon ─────────────────────────────────────────
-function ValidatedInput({
-  label, value, onChange, onBlur, placeholder, touched, error, className = "",
-  type = "text",
-}: {
+// ── Field components ───────────────────────────────────────────────────────────
+function ValidatedInput({ label, value, onChange, onBlur, placeholder, touched, error, className = "", type = "text" }: {
   label: string; value: string; onChange: (v: string) => void; onBlur?: () => void;
   placeholder: string; touched: boolean; error?: string; className?: string; type?: string;
 }) {
@@ -206,14 +199,9 @@ function ValidatedInput({
     <div className={`space-y-1.5 ${className}`}>
       <Label className="text-sm">{label}</Label>
       <div className="relative">
-        <Input
-          type={type}
-          value={value}
-          onChange={(e) => onChange(e.target.value)}
-          onBlur={onBlur}
+        <Input type={type} value={value} onChange={(e) => onChange(e.target.value)} onBlur={onBlur}
           placeholder={placeholder}
-          className={`pr-8 ${invalid ? "border-destructive focus-visible:ring-destructive" : ""}`}
-        />
+          className={`pr-8 ${invalid ? "border-destructive focus-visible:ring-destructive" : ""}`} />
         {valid   && <Check       className="absolute right-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-green-500 pointer-events-none" />}
         {invalid && <AlertCircle className="absolute right-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-destructive pointer-events-none" />}
       </div>
@@ -222,7 +210,6 @@ function ValidatedInput({
   );
 }
 
-// ── Color field with swatch + native picker ────────────────────────────────────
 function ColorField({ label, value, onChange, placeholder }: {
   label: string; value: string; onChange: (v: string) => void; placeholder: string;
 }) {
@@ -235,15 +222,15 @@ function ColorField({ label, value, onChange, placeholder }: {
           <input type="color" value={value || placeholder} onChange={(e) => onChange(e.target.value)}
             className="absolute inset-0 opacity-0 w-full h-full cursor-pointer" />
         </div>
-        <Input value={value} onChange={(e) => onChange(e.target.value)}
-          placeholder={placeholder} className="h-8 text-sm font-mono" />
+        <Input value={value} onChange={(e) => onChange(e.target.value)} placeholder={placeholder} className="h-8 text-sm font-mono" />
       </div>
     </div>
   );
 }
 
-// ── Logo upload zone ───────────────────────────────────────────────────────────
-function LogoUploadZone({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+function ImageUploadZone({ label, value, onChange, hint }: {
+  label: string; value: string; onChange: (v: string) => void; hint?: string;
+}) {
   const [drag, setDrag] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
 
@@ -255,10 +242,10 @@ function LogoUploadZone({ value, onChange }: { value: string; onChange: (v: stri
   }
 
   const hasUpload = value?.startsWith("data:");
-
   return (
     <div className="space-y-1.5">
-      <Label className="text-sm">Logo</Label>
+      <Label className="text-sm">{label}</Label>
+      {hint && <p className="text-xs text-muted-foreground -mt-1">{hint}</p>}
       <div
         onDragOver={(e) => { e.preventDefault(); setDrag(true); }}
         onDragLeave={() => setDrag(false)}
@@ -271,41 +258,30 @@ function LogoUploadZone({ value, onChange }: { value: string; onChange: (v: stri
         {hasUpload ? (
           <div className="flex items-center gap-3 p-3">
             {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src={value} alt="" className="h-9 max-w-[90px] object-contain rounded" />
-            <span className="text-sm text-muted-foreground flex-1">Logo ready</span>
-            <button
-              onClick={(e) => { e.stopPropagation(); onChange(""); }}
-              className="shrink-0 rounded-md p-1 hover:bg-muted text-muted-foreground hover:text-foreground transition-colors"
-              title="Remove logo"
-            >
+            <img src={value} alt="" className="h-9 max-w-[120px] object-contain rounded" />
+            <span className="text-sm text-muted-foreground flex-1">Image ready</span>
+            <button onClick={(e) => { e.stopPropagation(); onChange(""); }}
+              className="shrink-0 rounded-md p-1 hover:bg-muted text-muted-foreground hover:text-foreground transition-colors">
               <X className="h-4 w-4" />
             </button>
           </div>
         ) : (
           <div className="flex flex-col items-center gap-1.5 py-4">
             <Upload className="h-5 w-5 text-muted-foreground/60" />
-            <p className="text-sm text-muted-foreground">
-              Drop an image, or <span className="text-primary font-medium">browse</span>
-            </p>
-            <p className="text-xs text-muted-foreground/60">PNG · SVG · JPG</p>
+            <p className="text-sm text-muted-foreground">Drop an image, or <span className="text-primary font-medium">browse</span></p>
+            <p className="text-xs text-muted-foreground/60">PNG · JPG · WebP</p>
           </div>
         )}
       </div>
-      <input ref={fileRef} type="file" accept="image/*" className="hidden"
-        onChange={(e) => readFile(e.target.files?.[0])} />
+      <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={(e) => readFile(e.target.files?.[0])} />
       {!hasUpload && (
-        <Input
-          value={value.startsWith("data:") ? "" : value}
-          onChange={(e) => onChange(e.target.value)}
-          placeholder="Paste a logo URL instead"
-          className="h-8 text-sm"
-        />
+        <Input value={value.startsWith("data:") ? "" : value} onChange={(e) => onChange(e.target.value)}
+          placeholder="Or paste a URL" className="h-8 text-sm" />
       )}
     </div>
   );
 }
 
-// ── Collapsible (used only for join form — one level, no nesting) ──────────────
 function Collapsible({ title, complete, children, defaultOpen = false }: {
   title: string; complete: boolean; children: React.ReactNode; defaultOpen?: boolean;
 }) {
@@ -316,11 +292,8 @@ function Collapsible({ title, complete, children, defaultOpen = false }: {
         className="flex w-full items-center justify-between px-4 py-3 text-sm font-medium hover:bg-muted/40 transition-colors">
         <span>{title}</span>
         <div className="flex items-center gap-2">
-          {complete && (
-            <span className="flex h-4 w-4 items-center justify-center rounded-full bg-green-100">
-              <Check className="h-2.5 w-2.5 text-green-600" />
-            </span>
-          )}
+          {complete && <span className="flex h-4 w-4 items-center justify-center rounded-full bg-green-100">
+            <Check className="h-2.5 w-2.5 text-green-600" /></span>}
           {open ? <ChevronDown className="h-4 w-4 text-muted-foreground" />
                 : <ChevronRight className="h-4 w-4 text-muted-foreground" />}
         </div>
@@ -330,7 +303,22 @@ function Collapsible({ title, complete, children, defaultOpen = false }: {
   );
 }
 
-// ── 2-step stepper ─────────────────────────────────────────────────────────────
+function CopyButton({ value, label = "Copy" }: { value: string; label?: string }) {
+  const [copied, setCopied] = useState(false);
+  async function copy() {
+    await navigator.clipboard.writeText(value);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  }
+  return (
+    <button onClick={copy}
+      className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors">
+      {copied ? <Check className="h-3 w-3 text-green-500" /> : <Link2 className="h-3 w-3" />}
+      {copied ? "Copied!" : label}
+    </button>
+  );
+}
+
 type ModalStep = "setup" | "appearance";
 
 function StepIndicator({ current, onGoBack }: { current: ModalStep; onGoBack: () => void }) {
@@ -343,19 +331,11 @@ function StepIndicator({ current, onGoBack }: { current: ModalStep; onGoBack: ()
         const active = i === ci;
         return (
           <div key={step.label} className="flex items-center">
-            <button
-              onClick={done ? onGoBack : undefined}
-              disabled={!done}
+            <button onClick={done ? onGoBack : undefined} disabled={!done}
               className={`flex items-center gap-2 text-sm font-medium transition-colors ${
-                active ? "text-foreground"
-                : done  ? "text-muted-foreground hover:text-foreground cursor-pointer"
-                :         "text-muted-foreground/50 cursor-default"}`}
-            >
+                active ? "text-foreground" : done ? "text-muted-foreground hover:text-foreground cursor-pointer" : "text-muted-foreground/50 cursor-default"}`}>
               <div className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-semibold shrink-0 transition-all ${
-                done   ? "bg-primary text-primary-foreground"
-                : active ? "bg-foreground text-background"
-                :          "bg-muted text-muted-foreground"}`}
-              >
+                done ? "bg-primary text-primary-foreground" : active ? "bg-foreground text-background" : "bg-muted text-muted-foreground"}`}>
                 {done ? <Check className="h-3 w-3" /> : i + 1}
               </div>
               {step.label}
@@ -371,11 +351,21 @@ function StepIndicator({ current, onGoBack }: { current: ModalStep; onGoBack: ()
 }
 
 function agentCapabilities(tools: Record<string, boolean>): string {
-  const active = Object.entries(tools)
-    .filter(([, v]) => v)
-    .map(([k]) => TOOL_LABELS[k] ?? k.replace(/_/g, " "));
+  const active = Object.entries(tools).filter(([, v]) => v).map(([k]) => TOOL_LABELS[k] ?? k.replace(/_/g, " "));
   if (!active.length) return "No tools enabled";
   return active.slice(0, 4).join(", ") + (active.length > 4 ? ` +${active.length - 4}` : "");
+}
+
+function formatEventAction(action: string): string {
+  return action.replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase());
+}
+
+function formatRelativeTime(iso: string): string {
+  const diff = Date.now() - new Date(iso).getTime();
+  if (diff < 60_000) return "just now";
+  if (diff < 3_600_000) return `${Math.floor(diff / 60_000)}m ago`;
+  if (diff < 86_400_000) return `${Math.floor(diff / 3_600_000)}h ago`;
+  return new Date(iso).toLocaleDateString();
 }
 
 // ── Main page ──────────────────────────────────────────────────────────────────
@@ -402,7 +392,7 @@ export default function WalletPage() {
   const [progBrand,      setProgBrand]      = useState<Record<string, string>>({});
   const [progAgentId,    setProgAgentId]    = useState("");
   const [joinFields,     setJoinFields]     = useState<string[]>(["name", "email"]);
-  // Track which fields have been interacted with (for validation)
+  const [receiptScanConfig, setReceiptScanConfig] = useState<Record<string, string>>({});
   const [nameTouched,    setNameTouched]    = useState(false);
   const [configTouched,  setConfigTouched]  = useState<Set<string>>(new Set());
   const [saving,         setSaving]         = useState(false);
@@ -425,7 +415,14 @@ export default function WalletPage() {
   const [pushMessage, setPushMessage] = useState("");
   const [sendingPush, setSendingPush] = useState(false);
 
-  // ── Data loading ─────────────────────────────────────────────────────────────
+  // Events (per card)
+  const [cardEvents,      setCardEvents]      = useState<Record<string, WalletEvent[]>>({});
+  const [loadingEvents,   setLoadingEvents]   = useState<Record<string, boolean>>({});
+  const [expandedEvents,  setExpandedEvents]  = useState<Set<string>>(new Set());
+
+  // Rotating tokens
+  const [rotatingToken, setRotatingToken] = useState(false);
+
   const load = useCallback(async () => {
     setLoading(true);
     try {
@@ -454,10 +451,9 @@ export default function WalletPage() {
     setCardsLoading(false);
   }
 
-  // ── Modal helpers ─────────────────────────────────────────────────────────────
   function resetModal() {
     setProgName(""); setProgDesc(""); setProgType(""); setProgConfig({}); setProgBrand({});
-    setProgAgentId(""); setJoinFields(["name", "email"]);
+    setProgAgentId(""); setJoinFields(["name", "email"]); setReceiptScanConfig({});
     setNameTouched(false); setConfigTouched(new Set());
     setModalStep("setup");
   }
@@ -474,7 +470,10 @@ export default function WalletPage() {
     setProgType(p.type);
     setProgConfig(Object.fromEntries(Object.entries(p.config).map(([k, v]) => [k, String(v)])));
     setProgBrand({ ...p.brand_overrides });
-    setProgAgentId(""); setJoinFields(["name", "email"]);
+    setProgAgentId(""); setJoinFields(p.join_form_fields || ["name", "email"]);
+    setReceiptScanConfig(
+      Object.fromEntries(Object.entries(p.receipt_scanning_config || {}).map(([k, v]) => [k, String(v)]))
+    );
     setNameTouched(false); setConfigTouched(new Set());
     setModalStep("setup");
     setShowModal(true);
@@ -484,12 +483,24 @@ export default function WalletPage() {
     if (!progName.trim() || !progType) return;
     setSaving(true);
     try {
+      const rsConfig: Record<string, unknown> = {};
+      for (const [k, v] of Object.entries(receiptScanConfig)) {
+        if (v === "") continue;
+        if (k === "enabled") rsConfig[k] = v === "true";
+        else if (k === "merchant_keywords_str") {
+          rsConfig["merchant_keywords"] = v.split(",").map((s: string) => s.trim()).filter(Boolean);
+        } else if (!isNaN(Number(v))) rsConfig[k] = Number(v);
+        else rsConfig[k] = v;
+      }
       const payload = {
         name: progName.trim(),
         description: progDesc.trim() || null,
         type: progType,
         config: progConfig,
         brand_overrides: progBrand,
+        join_form_fields: joinFields,
+        receipt_scanning_config: rsConfig,
+        ...(progAgentId ? { chatbot_id: progAgentId } : {}),
       };
       if (editingProgram) {
         await apiClient.patch(`/api/wallet/programs/${editingProgram.id}`, payload);
@@ -515,9 +526,7 @@ export default function WalletPage() {
     setIssuingCard(true);
     try {
       await apiClient.post(`/api/wallet/programs/${activeProgram.id}/cards`, {
-        customer_name:  issueName  || null,
-        customer_email: issueEmail || null,
-        customer_phone: issuePhone || null,
+        customer_name: issueName || null, customer_email: issueEmail || null, customer_phone: issuePhone || null,
       });
       setShowIssueModal(false);
       setIssueName(""); setIssueEmail(""); setIssuePhone("");
@@ -539,8 +548,7 @@ export default function WalletPage() {
     setRunningAction(true);
     try {
       const res = await apiClient.post(`/api/wallet/cards/${actionCard.serial}/action`, {
-        action: selectedAction,
-        value: actionValue || undefined,
+        action: selectedAction, value: actionValue || undefined,
       });
       setCards((p) => p.map((c) => c.serial === actionCard.serial ? res.data.data : c));
       setActionCard(res.data.data);
@@ -563,30 +571,65 @@ export default function WalletPage() {
     setSendingPush(false);
   }
 
+  async function loadCardEvents(serial: string) {
+    if (loadingEvents[serial]) return;
+    setLoadingEvents((p) => ({ ...p, [serial]: true }));
+    try {
+      const res = await apiClient.get(`/api/wallet/cards/${serial}/events?limit=20`);
+      setCardEvents((p) => ({ ...p, [serial]: res.data.data ?? [] }));
+    } catch {}
+    setLoadingEvents((p) => ({ ...p, [serial]: false }));
+  }
+
+  function toggleEvents(serial: string) {
+    setExpandedEvents((prev) => {
+      const next = new Set(prev);
+      if (next.has(serial)) {
+        next.delete(serial);
+      } else {
+        next.add(serial);
+        if (!cardEvents[serial]) loadCardEvents(serial);
+      }
+      return next;
+    });
+  }
+
+  async function rotateJoinToken() {
+    if (!activeProgram) return;
+    setRotatingToken(true);
+    try {
+      const res = await apiClient.post(`/api/wallet/programs/${activeProgram.id}/rotate-join-token`);
+      setActiveProgram((p) => p ? { ...p, join_token: res.data.data.join_token, join_url: res.data.data.join_url } : p);
+    } catch {}
+    setRotatingToken(false);
+  }
+
   function configFields(type: string): { key: string; label: string; placeholder: string; numeric?: boolean }[] {
     if (type === "punch_card")      return [
-      { key: "max_punches",        label: "Max punches",       placeholder: "10",                     numeric: true },
-      { key: "reward_description", label: "Reward",            placeholder: "e.g. Free coffee"                     },
+      { key: "max_punches",        label: "Max punches",       placeholder: "10",          numeric: true },
+      { key: "reward_description", label: "Reward",            placeholder: "Free coffee"               },
     ];
     if (type === "points")          return [
-      { key: "points_per_dollar",  label: "Points per dollar", placeholder: "1",                      numeric: true },
-      { key: "default_tier",       label: "Starting tier",     placeholder: "e.g. Bronze"                          },
+      { key: "points_per_dollar",  label: "Points per dollar", placeholder: "1",           numeric: true },
+      { key: "points_label",       label: "Points unit",       placeholder: "Points"                    },
+      { key: "points_threshold",   label: "Reward threshold",  placeholder: "100",         numeric: true },
+      { key: "reward_description", label: "Reward name",       placeholder: "Free item"                 },
     ];
     if (type === "membership")      return [
-      { key: "default_tier",       label: "Default tier",      placeholder: "e.g. Standard"                        },
+      { key: "default_tier",       label: "Default tier",      placeholder: "Standard"                  },
     ];
     if (type === "prepaid_balance") return [
-      { key: "initial_balance",    label: "Starting balance",  placeholder: "0",                      numeric: true },
-      { key: "currency",           label: "Currency",          placeholder: "USD"                                  },
+      { key: "initial_balance",    label: "Starting balance",  placeholder: "0",           numeric: true },
+      { key: "currency",           label: "Currency",          placeholder: "USD"                       },
     ];
     if (type === "event_ticket")    return [
-      { key: "event_name",         label: "Event name",        placeholder: "e.g. Annual Summit 2026"              },
-      { key: "event_date",         label: "Date",              placeholder: "e.g. Jan 15, 2026"                    },
-      { key: "default_seat",       label: "Default seat",      placeholder: "General Admission"                    },
+      { key: "event_name",         label: "Event name",        placeholder: "Annual Summit 2026"        },
+      { key: "event_date",         label: "Date",              placeholder: "Jan 15, 2026"              },
+      { key: "default_seat",       label: "Default seat",      placeholder: "General Admission"         },
     ];
     if (type === "coupon")          return [
-      { key: "offer_label",        label: "Offer label",       placeholder: "e.g. Welcome offer"                   },
-      { key: "offer_value",        label: "Discount",          placeholder: "e.g. 20% off"                         },
+      { key: "offer_label",        label: "Offer label",       placeholder: "Welcome offer"             },
+      { key: "offer_value",        label: "Discount",          placeholder: "20% off"                   },
     ];
     return [];
   }
@@ -595,7 +638,6 @@ export default function WalletPage() {
     setConfigTouched((prev) => { const n = new Set(prev); n.add(key); return n; });
   }
 
-  // Derived
   const selectedAgent   = agents.find((a) => a.id === progAgentId) ?? null;
   const typeInfo        = programTypes.find((t) => t.value === progType);
   const nameError       = nameTouched && !progName.trim() ? "Program name is required" : undefined;
@@ -603,22 +645,19 @@ export default function WalletPage() {
   const setupCanAdvance = !!progType && !!progName.trim() && !descOverLimit;
   const apiBase         = process.env.NEXT_PUBLIC_API_URL ?? "";
 
-  // ── Modal step content ────────────────────────────────────────────────────────
+  // ── Setup step ─────────────────────────────────────────────────────────────
   function renderSetup() {
     const fields = configFields(progType);
+    const showReceipt = ["punch_card", "points"].includes(progType);
 
     return (
       <div className="space-y-6">
-
-        {/* Type selector — locked in edit mode */}
         {editingProgram ? (
           <div className="flex items-center gap-3 rounded-lg bg-muted/50 border px-4 py-3">
             <span className="text-2xl shrink-0">{typeInfo?.icon}</span>
             <div className="flex-1 min-w-0">
               <p className="text-sm font-medium">{typeInfo?.label}</p>
-              <p className="text-xs text-muted-foreground mt-0.5">
-                Program type cannot be changed after creation
-              </p>
+              <p className="text-xs text-muted-foreground mt-0.5">Program type cannot be changed after creation</p>
             </div>
             <Lock className="h-4 w-4 text-muted-foreground shrink-0" />
           </div>
@@ -627,49 +666,25 @@ export default function WalletPage() {
             <Label className="text-sm">Program type</Label>
             <div className="grid grid-cols-2 gap-2">
               {programTypes.map((t) => (
-                <button
-                  key={t.value}
-                  onClick={() => { setProgType(t.value); setProgConfig({}); }}
+                <button key={t.value} onClick={() => { setProgType(t.value); setProgConfig({}); }}
                   className={`text-left rounded-xl border-2 px-3 py-3 transition-all duration-150 ${
-                    progType === t.value
-                      ? "border-primary bg-primary/5 shadow-sm"
-                      : "border-border hover:border-border/60 hover:bg-muted/30"}`}
-                >
+                    progType === t.value ? "border-primary bg-primary/5 shadow-sm" : "border-border hover:border-border/60 hover:bg-muted/30"}`}>
                   <div className="text-xl mb-1">{t.icon}</div>
                   <p className="text-sm font-medium leading-tight">{t.label}</p>
-                  <p className="text-xs text-muted-foreground mt-0.5 leading-snug line-clamp-2">
-                    {t.description}
-                  </p>
+                  <p className="text-xs text-muted-foreground mt-0.5 leading-snug line-clamp-2">{t.description}</p>
                 </button>
               ))}
             </div>
           </div>
         )}
 
-        {/* Details — animate in once a type is picked */}
         {progType && (
           <div className="space-y-4">
-
-            {/* Name */}
-            <ValidatedInput
-              label="Program name"
-              value={progName}
-              onChange={setProgName}
+            <ValidatedInput label="Program name" value={progName} onChange={setProgName}
               onBlur={() => setNameTouched(true)}
-              placeholder={
-                progType === "punch_card"      ? "e.g. Coffee Club"
-                : progType === "points"        ? "e.g. Rewards Program"
-                : progType === "membership"    ? "e.g. Gold Membership"
-                : progType === "event_ticket"  ? "e.g. Annual Conference"
-                : progType === "coupon"        ? "e.g. Welcome Offer"
-                : progType === "business_card" ? "e.g. My Business Card"
-                : "e.g. Store Credit"
-              }
-              touched={nameTouched}
-              error={nameError}
-            />
+              placeholder={progType === "punch_card" ? "e.g. Coffee Club" : progType === "points" ? "e.g. Rewards Program" : "e.g. Program name"}
+              touched={nameTouched} error={nameError} />
 
-            {/* Description */}
             <div className="space-y-1.5">
               <div className="flex items-center justify-between">
                 <Label className="text-sm">Description <span className="text-muted-foreground font-normal text-xs">optional</span></Label>
@@ -677,17 +692,11 @@ export default function WalletPage() {
                   {progDesc.length} / 200
                 </span>
               </div>
-              <textarea
-                value={progDesc}
-                onChange={(e) => setProgDesc(e.target.value)}
-                placeholder="e.g. Earn rewards on every purchase — redeemable in store."
-                rows={2}
-                className={`w-full rounded-md border bg-background px-3 py-2 text-sm resize-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring transition-colors ${
-                  descOverLimit ? "border-destructive" : ""}`}
-              />
+              <textarea value={progDesc} onChange={(e) => setProgDesc(e.target.value)}
+                placeholder="e.g. Earn rewards on every purchase." rows={2}
+                className={`w-full rounded-md border bg-background px-3 py-2 text-sm resize-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring transition-colors ${descOverLimit ? "border-destructive" : ""}`} />
             </div>
 
-            {/* Type-specific config — shown inline, no collapsible */}
             {fields.length > 0 && (
               <div className={`grid gap-3 ${fields.length >= 2 ? "grid-cols-2" : "grid-cols-1"}`}>
                 {fields.map((f) => {
@@ -695,31 +704,70 @@ export default function WalletPage() {
                   const val     = progConfig[f.key] ?? "";
                   const err     = touched && val && f.numeric && isNaN(Number(val)) ? "Must be a number" : undefined;
                   return (
-                    <ValidatedInput
-                      key={f.key}
-                      label={f.label}
-                      value={val}
+                    <ValidatedInput key={f.key} label={f.label} value={val}
                       onChange={(v) => setProgConfig((p) => ({ ...p, [f.key]: v }))}
-                      onBlur={() => touchConfig(f.key)}
-                      placeholder={f.placeholder}
-                      touched={configTouched.has(f.key)}
-                      error={err}
-                    />
+                      onBlur={() => touchConfig(f.key)} placeholder={f.placeholder}
+                      touched={configTouched.has(f.key)} error={err} />
                   );
                 })}
               </div>
             )}
 
-            {/* AI agent — simple select, no decorator */}
+            {/* Receipt scanning config */}
+            {showReceipt && (
+              <Collapsible title="Receipt scanning" complete={receiptScanConfig.enabled === "true"}>
+                <p className="text-sm text-muted-foreground -mt-1">
+                  Let customers scan receipts to earn {progType === "points" ? "points" : "punches"} automatically.
+                </p>
+                <div className="flex items-center gap-2">
+                  <input type="checkbox" id="rs-enabled" checked={receiptScanConfig.enabled === "true"}
+                    onChange={(e) => setReceiptScanConfig((p) => ({ ...p, enabled: e.target.checked ? "true" : "false" }))}
+                    className="rounded" />
+                  <label htmlFor="rs-enabled" className="text-sm font-medium">Enable receipt scanning</label>
+                </div>
+                {receiptScanConfig.enabled === "true" && (
+                  <div className="grid grid-cols-2 gap-3">
+                    {progType === "points" ? (
+                      <ValidatedInput label="Points per $1" value={receiptScanConfig.points_per_dollar ?? "1"}
+                        onChange={(v) => setReceiptScanConfig((p) => ({ ...p, points_per_dollar: v }))}
+                        placeholder="1" touched={false} />
+                    ) : (
+                      <ValidatedInput label="Punches per receipt" value={receiptScanConfig.punches_per_receipt ?? "1"}
+                        onChange={(v) => setReceiptScanConfig((p) => ({ ...p, punches_per_receipt: v }))}
+                        placeholder="1" touched={false} />
+                    )}
+                    <ValidatedInput label="Min receipt ($)" value={receiptScanConfig.min_amount ?? "0"}
+                      onChange={(v) => setReceiptScanConfig((p) => ({ ...p, min_amount: v }))}
+                      placeholder="0" touched={false} />
+                    <ValidatedInput label="Max award/scan" value={receiptScanConfig.max_award_per_scan ?? "100"}
+                      onChange={(v) => setReceiptScanConfig((p) => ({ ...p, max_award_per_scan: v }))}
+                      placeholder="100" touched={false} />
+                    <ValidatedInput label="Max scans/day" value={receiptScanConfig.max_scans_per_day ?? "5"}
+                      onChange={(v) => setReceiptScanConfig((p) => ({ ...p, max_scans_per_day: v }))}
+                      placeholder="5" touched={false} />
+                    <div className="col-span-2 space-y-1.5">
+                      <Label className="text-sm">Merchant keywords <span className="text-muted-foreground font-normal text-xs">optional, comma-separated</span></Label>
+                      <Input value={receiptScanConfig.merchant_keywords_str ?? ""}
+                        onChange={(e) => setReceiptScanConfig((p) => ({ ...p, merchant_keywords_str: e.target.value }))}
+                        placeholder="e.g. MyCafé, My Cafe" className="h-8 text-sm" />
+                    </div>
+                    <div className="col-span-2 space-y-1.5">
+                      <Label className="text-sm">Custom AI prompt <span className="text-muted-foreground font-normal text-xs">optional</span></Label>
+                      <textarea value={receiptScanConfig.custom_prompt ?? ""}
+                        onChange={(e) => setReceiptScanConfig((p) => ({ ...p, custom_prompt: e.target.value }))}
+                        placeholder='e.g. "only count items in the breakfast menu"'
+                        rows={2}
+                        className="w-full rounded-md border bg-background px-3 py-2 text-sm resize-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" />
+                    </div>
+                  </div>
+                )}
+              </Collapsible>
+            )}
+
             <div className="space-y-1.5">
-              <Label className="text-sm">
-                AI Agent <span className="text-muted-foreground font-normal text-xs">optional</span>
-              </Label>
-              <select
-                value={progAgentId}
-                onChange={(e) => setProgAgentId(e.target.value)}
-                className="w-full h-9 rounded-md border bg-background px-3 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-              >
+              <Label className="text-sm">AI Agent <span className="text-muted-foreground font-normal text-xs">optional</span></Label>
+              <select value={progAgentId} onChange={(e) => setProgAgentId(e.target.value)}
+                className="w-full h-9 rounded-md border bg-background px-3 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
                 <option value="">None</option>
                 {agents.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
               </select>
@@ -735,87 +783,45 @@ export default function WalletPage() {
     );
   }
 
+  // ── Appearance step ────────────────────────────────────────────────────────
   function renderAppearance() {
     return (
       <div className="space-y-5">
-
-        <LogoUploadZone
+        <ImageUploadZone label="Icon / Logo" hint="Recommended: 512×512 px, square. Shown in the pass corner."
           value={progBrand.logo_url ?? ""}
-          onChange={(v) => setProgBrand((b) => ({ ...b, logo_url: v }))}
-        />
+          onChange={(v) => setProgBrand((b) => ({ ...b, logo_url: v }))} />
 
-        {/* 3-column color row */}
+        <ImageUploadZone label="Strip / Banner image" hint="Recommended: 1125×369 px (3:1). Shown behind pass fields."
+          value={progBrand.strip_image_url ?? ""}
+          onChange={(v) => setProgBrand((b) => ({ ...b, strip_image_url: v }))} />
+
         <div className="grid grid-cols-3 gap-3">
-          <ColorField
-            label="Background"
-            value={progBrand.background_color ?? ""}
-            placeholder="#4f46e5"
-            onChange={(v) => setProgBrand((b) => ({ ...b, background_color: v }))}
-          />
-          <ColorField
-            label="Text"
-            value={progBrand.foreground_color ?? ""}
-            placeholder="#ffffff"
-            onChange={(v) => setProgBrand((b) => ({ ...b, foreground_color: v }))}
-          />
-          <ColorField
-            label="Labels"
-            value={progBrand.label_color ?? ""}
-            placeholder="#c0c0ff"
-            onChange={(v) => setProgBrand((b) => ({ ...b, label_color: v }))}
-          />
+          <ColorField label="Background" value={progBrand.background_color ?? ""} placeholder="#4f46e5"
+            onChange={(v) => setProgBrand((b) => ({ ...b, background_color: v }))} />
+          <ColorField label="Text" value={progBrand.foreground_color ?? ""} placeholder="#ffffff"
+            onChange={(v) => setProgBrand((b) => ({ ...b, foreground_color: v }))} />
+          <ColorField label="Labels" value={progBrand.label_color ?? ""} placeholder="#c0c0ff"
+            onChange={(v) => setProgBrand((b) => ({ ...b, label_color: v }))} />
         </div>
 
-        {/* Join form — optional, collapsed by default */}
         <Collapsible title="Customize join form" complete={joinFields.length >= 2}>
-          <p className="text-sm text-muted-foreground -mt-1">
-            Select which fields customers fill when signing up for this program.
-          </p>
+          <p className="text-sm text-muted-foreground -mt-1">Select which fields customers fill when signing up.</p>
           <div className="flex flex-wrap gap-2">
             {JOIN_FIELDS.map((f) => {
               const enabled  = joinFields.includes(f.key);
               const required = f.key === "name";
               return (
-                <button
-                  key={f.key}
-                  disabled={required}
-                  title={required ? "Name is always required" : undefined}
+                <button key={f.key} disabled={required} title={required ? "Name is always required" : undefined}
                   onClick={() => setJoinFields((prev) =>
                     enabled && !required ? prev.filter((k) => k !== f.key) : [...prev, f.key]
                   )}
                   className={`rounded-full px-3 py-1 text-sm border transition-colors ${
-                    enabled ? "bg-primary/10 text-primary border-primary/30 font-medium"
-                            : "border-border text-muted-foreground hover:border-primary/40"
-                  } ${required ? "cursor-not-allowed" : ""}`}
-                >
+                    enabled ? "bg-primary/10 text-primary border-primary/30 font-medium" : "border-border text-muted-foreground hover:border-primary/40"
+                  } ${required ? "cursor-not-allowed" : ""}`}>
                   {f.label}{required ? " *" : ""}
                 </button>
               );
             })}
-          </div>
-          {/* Minimal form preview */}
-          <div className="rounded-lg border bg-muted/20 p-4 space-y-2.5">
-            <p className="text-xs font-medium text-muted-foreground">Form preview</p>
-            {joinFields.map((fk) => {
-              const field = JOIN_FIELDS.find((f) => f.key === fk);
-              return field ? (
-                <div key={fk} className="space-y-1">
-                  <p className="text-xs text-muted-foreground">{field.label}</p>
-                  <div className="h-8 rounded-md border border-border/60 bg-background px-3 flex items-center">
-                    <span className="text-xs text-muted-foreground/40">Enter {field.label.toLowerCase()}</span>
-                  </div>
-                </div>
-              ) : null;
-            })}
-            <button
-              className="w-full h-8 rounded-md text-sm font-medium mt-1 transition-opacity hover:opacity-90"
-              style={{
-                backgroundColor: progBrand.background_color || "#4f46e5",
-                color: progBrand.foreground_color || "#ffffff",
-              }}
-            >
-              Join program
-            </button>
           </div>
         </Collapsible>
       </div>
@@ -826,6 +832,10 @@ export default function WalletPage() {
   if (view === "cards" && activeProgram) {
     const activeProgramType = programTypes.find((t) => t.value === activeProgram.type);
     const availableActions  = TYPE_ACTIONS[activeProgram.type] ?? [];
+    const joinUrl           = activeProgram.join_url || "";
+    const scannerUrl        = activeProgram.scanner_url || "";
+    const hasReceiptScan    = Boolean(activeProgram.receipt_scanning_config?.enabled) &&
+                              ["points", "punch_card"].includes(activeProgram.type);
 
     return (
       <div className="p-6 max-w-5xl mx-auto">
@@ -836,6 +846,11 @@ export default function WalletPage() {
               <h1 className="text-xl font-semibold">{activeProgram.name}</h1>
               <p className="text-sm text-muted-foreground">
                 {activeProgramType?.icon} {activeProgramType?.label} · {cards.length} card{cards.length !== 1 ? "s" : ""}
+                {activeProgram.device_count > 0 && (
+                  <span className="ml-2 text-xs bg-blue-100 text-blue-700 rounded-full px-2 py-0.5">
+                    {activeProgram.device_count} device{activeProgram.device_count !== 1 ? "s" : ""}
+                  </span>
+                )}
               </p>
             </div>
           </div>
@@ -851,6 +866,60 @@ export default function WalletPage() {
           </div>
         </div>
 
+        {/* Join link + Scanner link info */}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-5">
+          {/* Join link */}
+          <Card className="p-4">
+            <div className="flex items-start justify-between gap-3">
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-medium flex items-center gap-1.5 mb-1">
+                  <QrCode className="h-4 w-4 text-muted-foreground" /> Join Link
+                </p>
+                <p className="text-xs text-muted-foreground truncate">{joinUrl || "No join link"}</p>
+                <div className="flex items-center gap-3 mt-2">
+                  {joinUrl && <CopyButton value={joinUrl} label="Copy URL" />}
+                  <button
+                    onClick={rotateJoinToken}
+                    disabled={rotatingToken}
+                    className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
+                    title="Rotate token — the old URL will stop working"
+                  >
+                    {rotatingToken ? <Loader2 className="h-3 w-3 animate-spin" /> : <RotateCcw className="h-3 w-3" />}
+                    Rotate
+                  </button>
+                </div>
+              </div>
+            </div>
+          </Card>
+
+          {/* Scanner link */}
+          <Card className="p-4">
+            <div className="flex items-start justify-between gap-3">
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-medium flex items-center gap-1.5 mb-1">
+                  <ScanLine className="h-4 w-4 text-muted-foreground" /> Staff Scanner
+                </p>
+                <p className="text-xs text-muted-foreground truncate">{scannerUrl || "No scanner link"}</p>
+                <div className="flex items-center gap-3 mt-2">
+                  {scannerUrl && <CopyButton value={scannerUrl} label="Copy scanner URL" />}
+                  {scannerUrl && (
+                    <a href={scannerUrl} target="_blank" rel="noreferrer"
+                      className="text-xs text-primary hover:underline">Open scanner →</a>
+                  )}
+                </div>
+              </div>
+            </div>
+          </Card>
+        </div>
+
+        {/* Receipt scanning badge */}
+        {hasReceiptScan && (
+          <div className="mb-4 flex items-center gap-2 rounded-lg bg-green-50 border border-green-200 px-3 py-2 text-sm text-green-800">
+            <Camera className="h-4 w-4" />
+            Receipt scanning is enabled — customers can earn from receipts on their pass.
+          </div>
+        )}
+
         {cardsLoading ? (
           <div className="flex justify-center py-16">
             <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
@@ -859,7 +928,7 @@ export default function WalletPage() {
           <Card className="p-12 text-center">
             <Wallet className="h-10 w-10 mx-auto text-muted-foreground mb-3" />
             <p className="font-medium mb-1">No cards issued yet</p>
-            <p className="text-sm text-muted-foreground mb-5">Issue your first card to a customer.</p>
+            <p className="text-sm text-muted-foreground mb-5">Issue your first card to a customer or share the join link.</p>
             <Button onClick={() => setShowIssueModal(true)}>
               <Plus className="h-4 w-4 mr-1.5" /> Issue card
             </Button>
@@ -867,54 +936,105 @@ export default function WalletPage() {
         ) : (
           <div className="space-y-2">
             {cards.map((card) => (
-              <Card key={card.id} className="p-4">
-                <div className="flex items-start justify-between gap-4">
-                  <div className="min-w-0">
-                    <div className="flex items-center gap-2 mb-0.5">
-                      <p className="font-medium truncate">{card.customer_name ?? "Guest"}</p>
-                      <span className={`shrink-0 text-xs px-2 py-0.5 rounded-full font-medium ${
-                        card.status === "active" ? "bg-green-100 text-green-700" : "bg-red-100 text-red-600"}`}>
-                        {card.status}
-                      </span>
+              <Card key={card.id} className="overflow-hidden">
+                <div className="p-4">
+                  <div className="flex items-start justify-between gap-4">
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-2 mb-0.5">
+                        <p className="font-medium truncate">{card.customer_name ?? "Guest"}</p>
+                        <span className={`shrink-0 text-xs px-2 py-0.5 rounded-full font-medium ${
+                          card.status === "active" ? "bg-green-100 text-green-700" : "bg-red-100 text-red-600"}`}>
+                          {card.status}
+                        </span>
+                      </div>
+                      <p className="text-sm text-muted-foreground">
+                        {[card.customer_email, card.customer_phone].filter(Boolean).join(" · ") || "No contact info"}
+                      </p>
+                      {Object.keys(card.state).length > 0 && (
+                        <div className="flex flex-wrap gap-1.5 mt-2">
+                          {Object.entries(card.state).map(([k, v]) => (
+                            <span key={k} className="text-xs bg-muted px-2 py-0.5 rounded-md">
+                              {k}: <strong>{String(v)}</strong>
+                            </span>
+                          ))}
+                        </div>
+                      )}
                     </div>
-                    <p className="text-sm text-muted-foreground">
-                      {[card.customer_email, card.customer_phone].filter(Boolean).join(" · ") || "No contact info"}
-                    </p>
-                    {Object.keys(card.state).length > 0 && (
-                      <div className="flex flex-wrap gap-1.5 mt-2">
-                        {Object.entries(card.state).map(([k, v]) => (
-                          <span key={k} className="text-xs bg-muted px-2 py-0.5 rounded-md">
-                            {k}: <strong>{String(v)}</strong>
-                          </span>
+                    <div className="flex items-center gap-0.5 shrink-0">
+                      {availableActions.length > 0 && card.status === "active" && (
+                        <Button variant="ghost" size="sm" title="Manage card"
+                          onClick={() => { setActionCard(card); setSelectedAction(""); setActionValue(""); }}>
+                          <RefreshCw className="h-4 w-4" />
+                        </Button>
+                      )}
+                      <Button variant="ghost" size="sm" title="Send push notification"
+                        onClick={() => { setPushTarget({ type: "card", serial: card.serial }); setPushMessage(""); }}>
+                        <Send className="h-4 w-4" />
+                      </Button>
+                      <a href={`${apiBase}/api/wallet/cards/${card.serial}/pkpass`} target="_blank" rel="noreferrer">
+                        <Button variant="ghost" size="sm" title="Download Apple Wallet pass">
+                          <Download className="h-4 w-4" />
+                        </Button>
+                      </a>
+                      <Button variant="ghost" size="sm" title="Event history"
+                        onClick={() => toggleEvents(card.serial)}>
+                        <Clock className="h-4 w-4" />
+                      </Button>
+                      <Button variant="ghost" size="sm" onClick={() => revokeCard(card.serial)}
+                        disabled={card.status !== "active"}
+                        title={card.status !== "active" ? "Card already revoked" : "Revoke card"}
+                        className="text-destructive hover:text-destructive disabled:opacity-30">
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Event history (collapsible) */}
+                {expandedEvents.has(card.serial) && (
+                  <div className="border-t bg-muted/20 px-4 py-3">
+                    {loadingEvents[card.serial] ? (
+                      <div className="flex justify-center py-3">
+                        <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+                      </div>
+                    ) : (cardEvents[card.serial] || []).length === 0 ? (
+                      <p className="text-xs text-muted-foreground text-center py-2">No events yet</p>
+                    ) : (
+                      <div className="space-y-1.5">
+                        <p className="text-xs font-medium text-muted-foreground mb-2">Recent activity</p>
+                        {(cardEvents[card.serial] || []).map((ev) => (
+                          <div key={ev.id} className="flex items-start gap-2 text-xs">
+                            <span className="text-muted-foreground shrink-0 mt-0.5">
+                              {formatRelativeTime(ev.created_at)}
+                            </span>
+                            <div className="flex-1 min-w-0">
+                              <span className="font-medium">{formatEventAction(ev.action)}</span>
+                              {ev.message && <span className="text-muted-foreground ml-1">— {ev.message}</span>}
+                              <span className="ml-1 text-muted-foreground/60">({ev.source})</span>
+                            </div>
+                            {ev.receipt_scan_id && (
+                              <button
+                                onClick={async () => {
+                                  try {
+                                    const res = await apiClient.get(`/api/wallet/receipt-scans/${ev.receipt_scan_id}/image`);
+                                    const img = res.data.data?.image_data;
+                                    if (img) {
+                                      const win = window.open();
+                                      if (win) win.document.write(`<img src="data:image/jpeg;base64,${img}" style="max-width:100%">`);
+                                    }
+                                  } catch {}
+                                }}
+                                className="text-primary hover:underline shrink-0"
+                              >
+                                View receipt
+                              </button>
+                            )}
+                          </div>
                         ))}
                       </div>
                     )}
                   </div>
-                  <div className="flex items-center gap-0.5 shrink-0">
-                    {availableActions.length > 0 && card.status === "active" && (
-                      <Button variant="ghost" size="sm" title="Manage card"
-                        onClick={() => { setActionCard(card); setSelectedAction(""); setActionValue(""); }}>
-                        <RefreshCw className="h-4 w-4" />
-                      </Button>
-                    )}
-                    <Button variant="ghost" size="sm" title="Send push notification"
-                      onClick={() => { setPushTarget({ type: "card", serial: card.serial }); setPushMessage(""); }}>
-                      <Send className="h-4 w-4" />
-                    </Button>
-                    <a href={`${apiBase}/api/wallet/cards/${card.serial}/pkpass`} target="_blank" rel="noreferrer">
-                      <Button variant="ghost" size="sm" title="Download Apple Wallet pass">
-                        <Download className="h-4 w-4" />
-                      </Button>
-                    </a>
-                    <Button variant="ghost" size="sm"
-                      onClick={() => revokeCard(card.serial)}
-                      disabled={card.status !== "active"}
-                      title={card.status !== "active" ? "Card already revoked" : "Revoke card"}
-                      className="text-destructive hover:text-destructive disabled:opacity-30">
-                      <Trash2 className="h-4 w-4" />
-                    </Button>
-                  </div>
-                </div>
+                )}
               </Card>
             ))}
           </div>
@@ -971,8 +1091,7 @@ export default function WalletPage() {
               <div className="p-4 space-y-3">
                 <div className="space-y-1.5">
                   <Label className="text-sm">Action</Label>
-                  <select value={selectedAction}
-                    onChange={(e) => { setSelectedAction(e.target.value); setActionValue(""); }}
+                  <select value={selectedAction} onChange={(e) => { setSelectedAction(e.target.value); setActionValue(""); }}
                     className="w-full h-9 rounded-md border bg-background px-3 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
                     <option value="">Select action</option>
                     {availableActions.map((a) => (
@@ -1020,12 +1139,12 @@ export default function WalletPage() {
               </div>
               <div className="p-4 space-y-1.5">
                 <Label className="text-sm">Message</Label>
-                <textarea
-                  className="w-full h-24 rounded-md border bg-background px-3 py-2 text-sm resize-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                  value={pushMessage}
-                  onChange={(e) => setPushMessage(e.target.value)}
-                  placeholder="Your pass has been updated."
-                />
+                <textarea className="w-full h-24 rounded-md border bg-background px-3 py-2 text-sm resize-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  value={pushMessage} onChange={(e) => setPushMessage(e.target.value)}
+                  placeholder="Your pass has been updated." />
+                <p className="text-xs text-muted-foreground">
+                  Variables: {'{{wallet_punches}}'}, {'{{wallet_points}}'}, {'{{customerName}}'}, {'{{wallet_program_name}}'}
+                </p>
               </div>
               <div className="flex justify-end gap-2 p-4 border-t">
                 <Button variant="outline" onClick={() => setPushTarget(null)}>Cancel</Button>
@@ -1048,7 +1167,7 @@ export default function WalletPage() {
         <div>
           <h1 className="text-2xl font-semibold">Wallet Programs</h1>
           <p className="text-sm text-muted-foreground mt-0.5">
-            Loyalty cards, passes, and tickets issued through Apple &amp; Google Wallet.
+            Loyalty cards, passes, and tickets for Apple &amp; Google Wallet.
           </p>
         </div>
         <Button onClick={openCreate}>
@@ -1077,16 +1196,12 @@ export default function WalletPage() {
             return (
               <Card key={p.id} className="p-4 hover:shadow-sm transition-shadow">
                 <div className="flex items-center gap-4">
-                  {/* Icon with optional brand color tint */}
-                  <div
-                    className="flex h-10 w-10 items-center justify-center rounded-xl text-xl shrink-0"
+                  <div className="flex h-10 w-10 items-center justify-center rounded-xl text-xl shrink-0"
                     style={brandColor
                       ? { backgroundColor: brandColor + "22", border: `1px solid ${brandColor}44` }
-                      : { backgroundColor: "hsl(var(--muted))" }}
-                  >
+                      : { backgroundColor: "hsl(var(--muted))" }}>
                     {pt?.icon ?? "🪪"}
                   </div>
-
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2">
                       <p className="font-medium truncate">{p.name}</p>
@@ -1094,16 +1209,26 @@ export default function WalletPage() {
                         p.status === "active" ? "bg-green-100 text-green-700" : "bg-muted text-muted-foreground"}`}>
                         {p.status}
                       </span>
-                      {brandColor && (
-                        <div className="shrink-0 w-3 h-3 rounded-full border border-border/50"
-                          style={{ backgroundColor: brandColor }} title={`Brand color: ${brandColor}`} />
+                      {p.device_count > 0 && (
+                        <span className="shrink-0 text-xs bg-blue-50 text-blue-600 px-2 py-0.5 rounded-full">
+                          {p.device_count} device{p.device_count !== 1 ? "s" : ""}
+                        </span>
+                      )}
+                      {Boolean(p.receipt_scanning_config?.enabled) && (
+                        <span className="shrink-0 text-xs bg-emerald-50 text-emerald-700 px-2 py-0.5 rounded-full flex items-center gap-0.5">
+                          <Camera className="h-2.5 w-2.5" /> Receipt scan
+                        </span>
                       )}
                     </div>
                     <p className="text-sm text-muted-foreground truncate">
                       {pt?.label}{p.description ? ` · ${p.description}` : ""}
                     </p>
+                    {p.join_url && (
+                      <div className="flex items-center gap-2 mt-1">
+                        <CopyButton value={p.join_url} label="Copy join link" />
+                      </div>
+                    )}
                   </div>
-
                   <div className="flex items-center gap-0.5 shrink-0">
                     <Button variant="ghost" size="sm" onClick={() => loadCards(p)} title="View issued cards">
                       <Users className="h-4 w-4" />
@@ -1112,8 +1237,7 @@ export default function WalletPage() {
                       <Pencil className="h-4 w-4" />
                     </Button>
                     <Button variant="ghost" size="sm" onClick={() => deleteProgram(p.id)}
-                      title="Delete program"
-                      className="text-destructive hover:text-destructive">
+                      title="Delete program" className="text-destructive hover:text-destructive">
                       <Trash2 className="h-4 w-4" />
                     </Button>
                   </div>
@@ -1128,8 +1252,6 @@ export default function WalletPage() {
       {showModal && (
         <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/50 p-4">
           <div className="bg-background rounded-xl shadow-2xl w-full max-w-3xl max-h-[92vh] sm:max-h-[88vh] flex flex-col">
-
-            {/* Header */}
             <div className="flex items-center justify-between px-5 py-4 border-b shrink-0">
               <h2 className="font-semibold text-base">
                 {editingProgram ? `Edit "${editingProgram.name}"` : "Create wallet program"}
@@ -1139,64 +1261,41 @@ export default function WalletPage() {
                 <X className="h-5 w-5" />
               </button>
             </div>
-
             <StepIndicator current={modalStep} onGoBack={() => setModalStep("setup")} />
-
-            {/* Split: form + live preview */}
             <div className="flex flex-1 overflow-hidden">
-              {/* Form */}
               <div className="flex-1 overflow-y-auto px-5 py-5">
                 {modalStep === "setup" ? renderSetup() : renderAppearance()}
               </div>
-
-              {/* Live preview — desktop only */}
               {progType && (
                 <div className="hidden lg:flex w-72 shrink-0 border-l flex-col items-center justify-center gap-4 p-6 bg-muted/10">
-                  <WalletCardPreview
-                    type={progType}
-                    name={progName}
-                    config={progConfig}
-                    brand={progBrand}
-                    programTypes={programTypes}
-                  />
+                  <WalletCardPreview type={progType} name={progName} config={progConfig}
+                    brand={progBrand} programTypes={programTypes} />
                   <div className="text-center">
-                    <p className="text-sm font-medium text-muted-foreground">
-                      {typeInfo?.icon} {typeInfo?.label}
-                    </p>
+                    <p className="text-sm font-medium text-muted-foreground">{typeInfo?.icon} {typeInfo?.label}</p>
                     {progBrand.background_color && (
-                      <p className="text-xs font-mono text-muted-foreground/70 mt-0.5">
-                        {progBrand.background_color}
-                      </p>
+                      <p className="text-xs font-mono text-muted-foreground/70 mt-0.5">{progBrand.background_color}</p>
                     )}
                   </div>
                 </div>
               )}
             </div>
-
-            {/* Footer */}
             <div className="flex items-center justify-between gap-3 px-5 py-4 border-t shrink-0">
-              {/* Inline summary on step 2 */}
               {modalStep === "appearance" && progName ? (
                 <div className="flex items-center gap-2 min-w-0">
                   <span className="text-lg shrink-0">{typeInfo?.icon}</span>
                   <span className="text-sm font-medium truncate">{progName}</span>
                   {progBrand.background_color && (
-                    <div className="w-3.5 h-3.5 rounded-full border shrink-0"
-                      style={{ backgroundColor: progBrand.background_color }} />
+                    <div className="w-3.5 h-3.5 rounded-full border shrink-0" style={{ backgroundColor: progBrand.background_color }} />
                   )}
                 </div>
               ) : <div />}
-
               <div className="flex gap-2 shrink-0">
                 {modalStep === "appearance" && (
                   <Button variant="outline" onClick={() => setModalStep("setup")}>← Back</Button>
                 )}
                 {modalStep === "setup" ? (
-                  <Button
-                    onClick={() => { setNameTouched(true); if (setupCanAdvance) setModalStep("appearance"); }}
-                    disabled={!progType}
-                    title={!progType ? "Select a program type first" : !progName.trim() ? "Enter a program name" : undefined}
-                  >
+                  <Button onClick={() => { setNameTouched(true); if (setupCanAdvance) setModalStep("appearance"); }}
+                    disabled={!progType} title={!progType ? "Select a program type first" : !progName.trim() ? "Enter a program name" : undefined}>
                     Next: Appearance →
                   </Button>
                 ) : (
