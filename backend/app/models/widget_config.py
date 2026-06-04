@@ -44,6 +44,14 @@ class WidgetConfig(TimestampMixin, Base):
     # Each item: {"type": "url"|"phone"|"flow"|"postback", "label": str, "value": str}
     persistent_menu: Mapped[list | None] = mapped_column(JSONB, nullable=True, default=None)
 
+    # Optional embedded storefront — widget shows a "Shop" tab with this store's products
+    embedded_store_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("commerce_stores.id", ondelete="SET NULL"),
+        nullable=True,
+        default=None,
+    )
+
     # Relationships
     chatbot: Mapped["ChatbotConfig"] = relationship(  # type: ignore[name-defined]
         "ChatbotConfig", back_populates="widget_config"

@@ -32,6 +32,13 @@ TRIGGER_TYPES = {
     "pipeline_stage_changed",
     "payment_received",
     "form_submitted",
+    # Wallet pass triggers
+    "wallet_card_issued",
+    "wallet_punch_added",
+    "wallet_points_added",
+    "wallet_reward_unlocked",
+    "wallet_reward_redeemed",
+    "wallet_coupon_claimed",
 }
 
 ACTION_TYPES = {

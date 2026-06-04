@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Loader2, Smartphone } from "lucide-react";
+import { Loader2, Smartphone, Camera } from "lucide-react";
+import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 
@@ -14,10 +15,13 @@ interface CardInfo {
     name: string;
     type: string;
     description?: string;
+    config?: Record<string, unknown>;
+    brand_overrides?: Record<string, string>;
   };
   state: Record<string, unknown>;
   pkpass_url: string;
   google_url: string;
+  receipt_scan_enabled?: boolean;
 }
 
 export default function PassPageClient({ serial }: { serial: string }) {
@@ -156,6 +160,16 @@ export default function PassPageClient({ serial }: { serial: string }) {
             </Button>
           </a>
         </div>
+
+        {/* Receipt scan link */}
+        {card.receipt_scan_enabled && (
+          <Link href={`/pass/${serial}/scan-receipt`}>
+            <Button variant="outline" className="w-full h-11 border-white/20 text-white/70 hover:text-white hover:bg-white/10 gap-2">
+              <Camera className="h-4 w-4" />
+              Scan Receipt for Points
+            </Button>
+          </Link>
+        )}
 
         <p className="text-center text-xs text-white/30">
           Card #{card.serial}

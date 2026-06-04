@@ -51,6 +51,15 @@ class Agent(TimestampMixin, Base):
         Boolean, nullable=False, default=True, server_default="true"
     )
 
+    # Public sharing
+    share_enabled: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default="false"
+    )
+    share_token: Mapped[str | None] = mapped_column(String(64), nullable=True, unique=True)
+
+    # Webhook — POST to this URL after every completed agent run
+    webhook_url: Mapped[str | None] = mapped_column(String(2048), nullable=True)
+
     # Relationships
     user: Mapped["User"] = relationship("User")  # type: ignore[name-defined]
     chatbot: Mapped["ChatbotConfig | None"] = relationship("ChatbotConfig")  # type: ignore[name-defined]

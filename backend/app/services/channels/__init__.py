@@ -7,11 +7,13 @@ from app.services.channels.facebook import FacebookSender
 from app.services.channels.instagram import InstagramSender
 from app.services.channels.sms import SMSSender
 from app.services.channels.discord import DiscordSender
+from app.services.channels.twitter import TwitterSender
+from app.services.channels.tiktok import TikTokSender
 
 __all__ = [
     "ChannelSender", "TelegramSender", "WhatsAppSender",
     "FacebookSender", "InstagramSender", "SMSSender", "DiscordSender",
-    "get_sender", "is_within_meta_window", "META_WINDOW_CHANNELS",
+    "TwitterSender", "TikTokSender", "get_sender", "is_within_meta_window", "META_WINDOW_CHANNELS",
 ]
 
 # Channels that enforce a 24-hour messaging window
@@ -52,5 +54,9 @@ def get_sender(channel: str, config: dict) -> "ChannelSender":
             return SMSSender(config)
         case "discord":
             return DiscordSender(config)
+        case "twitter":
+            return TwitterSender(config)
+        case "tiktok":
+            return TikTokSender(config)
         case _:
             raise ValueError(f"No sender for channel: {channel}")

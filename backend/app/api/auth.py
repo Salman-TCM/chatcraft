@@ -107,6 +107,12 @@ async def login(
     # Successful login — clear attempt counter
     await redis.delete(attempt_key)
 
+    if user.is_suspended:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={"success": False, "error": "Account suspended. Contact support.", "code": "ACCOUNT_SUSPENDED"},
+        )
+
     access_token = create_access_token(user.id, user.role.value)
     refresh_token, jti = create_refresh_token(user.id)
 
@@ -217,7 +223,7 @@ async def refresh(
         raise _INVALID_REFRESH
 
     user = await db.get(User, user_id)
-    if not user:
+    if not user or user.is_suspended:
         raise _INVALID_REFRESH
 
     access_token = create_access_token(user.id, user.role.value)
@@ -563,6 +569,12 @@ async def google_sync(
         db.add(user)
         await db.commit()
         await db.refresh(user)
+
+    if user.is_suspended:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={"success": False, "error": "Account suspended. Contact support.", "code": "ACCOUNT_SUSPENDED"},
+        )
 
     access_token = create_access_token(user.id, user.role.value)
     refresh_token, jti = create_refresh_token(user.id)

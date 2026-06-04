@@ -11,6 +11,9 @@ class AgentToolsConfig(BaseModel):
     http: bool = False
     sheets: bool = False
     email: bool = False
+    sms: bool = False
+    verification: bool = False
+    agent_builder: bool = False
 
 
 class AgentCreateRequest(BaseModel):
@@ -22,6 +25,7 @@ class AgentCreateRequest(BaseModel):
     tools: AgentToolsConfig = Field(default_factory=AgentToolsConfig)
     memory_enabled: bool = False
     max_steps: int = Field(10, ge=1, le=30)
+    webhook_url: str | None = Field(None, max_length=2048)
 
 
 class AgentUpdateRequest(BaseModel):
@@ -35,6 +39,7 @@ class AgentUpdateRequest(BaseModel):
     max_steps: int | None = Field(None, ge=1, le=30)
     is_published: bool | None = None
     is_active: bool | None = None
+    webhook_url: str | None = Field(None, max_length=2048)
 
 
 class AgentResponse(BaseModel):
@@ -51,5 +56,8 @@ class AgentResponse(BaseModel):
     max_steps: int
     is_published: bool
     is_active: bool
+    share_enabled: bool = False
+    share_token: str | None = None
+    webhook_url: str | None = None
     created_at: datetime
     updated_at: datetime

@@ -46,6 +46,7 @@ from app.models.crm import (  # noqa: F401
 )
 from app.models.api_token import ApiToken  # noqa: F401
 from app.models.user_api_key import UserApiKey  # noqa: F401
+from app.models.user_communication_setting import UserCommunicationSetting  # noqa: F401
 from app.models.white_label import (  # noqa: F401
     PlatformConfig,
     Agency,
@@ -56,3 +57,4 @@ from app.models.white_label import (  # noqa: F401
 from app.models.usage_log import UsageLog  # noqa: F401
 from app.models.analytics_daily import AnalyticsDaily  # noqa: F401
 from app.models.widget_license import WidgetLicense  # noqa: F401
+from app.models.admin_log import AdminActionLog  # noqa: F401

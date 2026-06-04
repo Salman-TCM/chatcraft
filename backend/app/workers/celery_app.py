@@ -42,6 +42,7 @@ TASK_ROUTES = {
     "workers.send_usage_alerts":             {"queue": "analytics", "routing_key": "analytics"},
     "workers.expire_trials":                 {"queue": "priority",  "routing_key": "priority"},
     "workers.expire_payment_grace_periods":  {"queue": "priority",  "routing_key": "priority"},
+    "workers.sync_docs_system_prompts":      {"queue": "default",   "routing_key": "default"},
 }
 
 # ---------------------------------------------------------------------------
@@ -57,6 +58,7 @@ celery_app = Celery(
         "app.workers.analytics_worker",
         "app.workers.billing_worker",
         "app.workers.debug_worker",
+        "app.workers.sync_worker",
     ],
 )
 
@@ -114,6 +116,12 @@ celery_app.conf.update(
             "task": "workers.expire_payment_grace_periods",
             "schedule": _cron(minute=0),           # every hour on the hour
             "options": {"queue": "priority"},
+        },
+        # Sync Google Docs → system prompt for linked chatbots
+        "sync-docs-system-prompts": {
+            "task": "workers.sync_docs_system_prompts",
+            "schedule": 600,                       # every 10 minutes
+            "options": {"queue": "default"},
         },
     },
     # Broker connection retry on startup

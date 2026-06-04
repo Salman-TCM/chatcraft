@@ -60,6 +60,7 @@ const NODE_DEFS: NodeDef[] = [
   { type: "notes",        label: "Notes",          icon: "📝", color: "#94a3b8", category: "Core" },
   // Messaging
   { type: "send_message", label: "Send Message",   icon: "💬", color: "#6366f1", category: "Messages" },
+  { type: "carousel",     label: "Carousel",       icon: "🎠", color: "#6366f1", category: "Messages" },
   { type: "ai_response",  label: "AI Response",    icon: "🤖", color: "#8b5cf6", category: "Messages" },
   // Logic
   { type: "condition",    label: "Condition",      icon: "🔀", color: "#f59e0b", category: "Logic" },
@@ -327,6 +328,62 @@ function NodeConfigPanel({
           </div>
         )}
 
+        {nodeType === "carousel" && (
+          <div className="space-y-3">
+            <div className="space-y-1">
+              <Label className="text-xs">Channel</Label>
+              <select className="w-full rounded-md border text-xs px-2 py-1.5" value={local.channel ?? "omni"} onChange={e => set("channel", e.target.value)}>
+                {[["omni","Omni"],["web_widget","Web Widget"],["messenger","Messenger"],["instagram","Instagram"],["whatsapp","WhatsApp"],["telegram","Telegram"]].map(([v,l]) => (
+                  <option key={v} value={v}>{l}</option>
+                ))}
+              </select>
+            </div>
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <Label className="text-xs">Cards ({(local.cards ?? []).length}/10)</Label>
+                <button
+                  className="text-xs text-primary underline"
+                  onClick={() => {
+                    const cards = [...(local.cards ?? [])];
+                    if (cards.length >= 10) return;
+                    cards.push({ title: "", subtitle: "", image_url: "", buttons: [{ type: "url", label: "Learn more", value: "" }] });
+                    set("cards", cards);
+                  }}
+                >
+                  + Add card
+                </button>
+              </div>
+              {(local.cards ?? []).map((card: any, ci: number) => (
+                <div key={ci} className="rounded-md border p-2 space-y-2 bg-muted/30">
+                  <div className="flex items-center justify-between">
+                    <p className="text-[10px] font-semibold text-muted-foreground">Card {ci + 1}</p>
+                    <button className="text-[10px] text-destructive" onClick={() => set("cards", (local.cards ?? []).filter((_: any, i: number) => i !== ci))}>Remove</button>
+                  </div>
+                  <Input className="h-7 text-xs" placeholder="Title" value={card.title ?? ""} onChange={e => { const c = [...(local.cards ?? [])]; c[ci] = { ...c[ci], title: e.target.value }; set("cards", c); }} />
+                  <Input className="h-7 text-xs" placeholder="Subtitle (optional)" value={card.subtitle ?? ""} onChange={e => { const c = [...(local.cards ?? [])]; c[ci] = { ...c[ci], subtitle: e.target.value }; set("cards", c); }} />
+                  <Input className="h-7 text-xs" placeholder="Image URL (optional)" value={card.image_url ?? ""} onChange={e => { const c = [...(local.cards ?? [])]; c[ci] = { ...c[ci], image_url: e.target.value }; set("cards", c); }} />
+                  {(card.buttons ?? []).map((btn: any, bi: number) => (
+                    <div key={bi} className="flex gap-1 items-center">
+                      <select className="h-7 rounded border text-[10px] px-1" value={btn.type ?? "url"} onChange={e => { const c = [...(local.cards ?? [])]; c[ci].buttons[bi] = { ...c[ci].buttons[bi], type: e.target.value }; set("cards", c); }}>
+                        {[["url","URL"],["phone","Phone"],["postback","Postback"],["flow","Flow"]].map(([v,l]) => <option key={v} value={v}>{l}</option>)}
+                      </select>
+                      <Input className="h-7 text-[10px] flex-1" placeholder="Label" value={btn.label ?? ""} onChange={e => { const c = [...(local.cards ?? [])]; c[ci].buttons[bi] = { ...c[ci].buttons[bi], label: e.target.value }; set("cards", c); }} />
+                      <Input className="h-7 text-[10px] flex-1" placeholder="Value/URL" value={btn.value ?? ""} onChange={e => { const c = [...(local.cards ?? [])]; c[ci].buttons[bi] = { ...c[ci].buttons[bi], value: e.target.value }; set("cards", c); }} />
+                      <button className="text-[10px] text-destructive shrink-0" onClick={() => { const c = [...(local.cards ?? [])]; c[ci].buttons = c[ci].buttons.filter((_: any, i: number) => i !== bi); set("cards", c); }}>✕</button>
+                    </div>
+                  ))}
+                  {(card.buttons ?? []).length < 3 && (
+                    <button className="text-[10px] text-primary underline" onClick={() => { const c = [...(local.cards ?? [])]; c[ci].buttons = [...(c[ci].buttons ?? []), { type: "url", label: "", value: "" }]; set("cards", c); }}>+ Add button</button>
+                  )}
+                </div>
+              ))}
+              {(local.cards ?? []).length === 0 && (
+                <p className="text-xs text-muted-foreground">No cards yet. Click "+ Add card" to start.</p>
+              )}
+            </div>
+          </div>
+        )}
+
         {nodeType === "user_input" && (
           <>
             <div className="space-y-1">
@@ -448,7 +505,25 @@ function NodeConfigPanel({
             <div className="space-y-1">
               <Label className="text-xs">Action type</Label>
               <select className="w-full rounded-md border text-xs px-2 py-1.5" value={local.action ?? "set_field"} onChange={e => set("action", e.target.value)}>
-                {[["set_field","Set Custom Field"],["add_tag","Add Tag"],["remove_tag","Remove Tag"],["close_conversation","Close Conversation"],["send_webhook","Send Webhook"],["assign_conversation","Assign Conversation"]].map(([v,l]) => (
+                {[
+                  ["set_field","Set Custom Field"],
+                  ["add_tag","Add Tag"],
+                  ["remove_tag","Remove Tag"],
+                  ["close_conversation","Close Conversation"],
+                  ["assign_conversation","Assign Conversation"],
+                  ["send_sms","Send SMS"],
+                  ["send_email","Send Email"],
+                  ["outbound_call","Outbound Call"],
+                  ["transfer_call","Transfer Call"],
+                  ["end_call","End Call"],
+                  ["google_sheets","Google Sheets"],
+                  ["google_docs","Google Docs"],
+                  ["comment_on_post","Comment on Post (Instagram)"],
+                  ["ai_web","AI Web (Browse / Research)"],
+                  ["send_webhook","Send Webhook"],
+                  ["wallet_action","Wallet: Card Action"],
+                  ["wallet_push","Wallet: Send Push Notification"],
+                ].map(([v,l]) => (
                   <option key={v} value={v}>{l}</option>
                 ))}
               </select>
@@ -471,11 +546,277 @@ function NodeConfigPanel({
                 <Input className="h-8 text-xs" value={local.tag ?? ""} onChange={e => set("tag", e.target.value)} placeholder="VIP" />
               </div>
             )}
+            {local.action === "send_sms" && (
+              <>
+                <div className="space-y-1">
+                  <Label className="text-xs">To (phone number)</Label>
+                  <Input className="h-8 text-xs" value={local.to ?? ""} onChange={e => set("to", e.target.value)} placeholder="{{contact.phone}}" />
+                </div>
+                <div className="space-y-1">
+                  <Label className="text-xs">Message</Label>
+                  <textarea className="w-full rounded-md border text-xs px-3 py-2 min-h-[60px] resize-y focus:outline-none focus:ring-1 focus:ring-primary" value={local.body ?? ""} onChange={e => set("body", e.target.value)} placeholder="Your message text..." />
+                </div>
+              </>
+            )}
+            {local.action === "send_email" && (
+              <>
+                <div className="space-y-1">
+                  <Label className="text-xs">To (email)</Label>
+                  <Input className="h-8 text-xs" value={local.to ?? ""} onChange={e => set("to", e.target.value)} placeholder="{{contact.email}}" />
+                </div>
+                <div className="space-y-1">
+                  <Label className="text-xs">Subject</Label>
+                  <Input className="h-8 text-xs" value={local.subject ?? ""} onChange={e => set("subject", e.target.value)} placeholder="Hello {{contact.first_name}}" />
+                </div>
+                <div className="space-y-1">
+                  <Label className="text-xs">Body</Label>
+                  <textarea className="w-full rounded-md border text-xs px-3 py-2 min-h-[80px] resize-y focus:outline-none focus:ring-1 focus:ring-primary" value={local.body ?? ""} onChange={e => set("body", e.target.value)} placeholder="Email body..." />
+                </div>
+              </>
+            )}
+            {local.action === "outbound_call" && (
+              <>
+                <div className="space-y-1">
+                  <Label className="text-xs">To (phone number)</Label>
+                  <Input className="h-8 text-xs" value={local.to ?? ""} onChange={e => set("to", e.target.value)} placeholder="{{contact.phone}}" />
+                </div>
+                <div className="space-y-1">
+                  <Label className="text-xs">TwiML URL (optional)</Label>
+                  <Input className="h-8 text-xs" value={local.twiml_url ?? ""} onChange={e => set("twiml_url", e.target.value)} placeholder="Leave blank for default AI handler" />
+                </div>
+              </>
+            )}
+            {local.action === "transfer_call" && (
+              <>
+                <div className="space-y-1">
+                  <Label className="text-xs">Transfer to (phone number)</Label>
+                  <Input className="h-8 text-xs" value={local.to ?? ""} onChange={e => set("to", e.target.value)} placeholder="+15551234567" />
+                </div>
+                <div className="space-y-1">
+                  <Label className="text-xs">Hold message</Label>
+                  <Input className="h-8 text-xs" value={local.message ?? ""} onChange={e => set("message", e.target.value)} placeholder="Transferring you now. Please hold." />
+                </div>
+              </>
+            )}
+            {local.action === "end_call" && (
+              <div className="space-y-1">
+                <Label className="text-xs">Goodbye message (optional)</Label>
+                <Input className="h-8 text-xs" value={local.message ?? ""} onChange={e => set("message", e.target.value)} placeholder="Thank you for calling. Goodbye!" />
+              </div>
+            )}
+            {local.action === "google_sheets" && (
+              <>
+                <div className="space-y-1">
+                  <Label className="text-xs">Spreadsheet ID</Label>
+                  <Input className="h-8 text-xs font-mono" value={local.sheet_id ?? ""} onChange={e => set("sheet_id", e.target.value)} placeholder="1BxiMVs0XRA5nFMdKvBdBZjgmUUqptlbs74OgVE2upms" />
+                  <p className="text-[10px] text-muted-foreground">From the spreadsheet URL: /spreadsheets/d/<strong>ID</strong>/edit</p>
+                </div>
+                <div className="space-y-1">
+                  <Label className="text-xs">Tab name</Label>
+                  <Input className="h-8 text-xs" value={local.tab ?? "Sheet1"} onChange={e => set("tab", e.target.value)} placeholder="Sheet1" />
+                </div>
+                <div className="space-y-1">
+                  <Label className="text-xs">Operation</Label>
+                  <select className="w-full rounded-md border text-xs px-2 py-1.5" value={local.operation ?? "append_row"} onChange={e => set("operation", e.target.value)}>
+                    <option value="append_row">Append row</option>
+                    <option value="get_row">Get row by number</option>
+                    <option value="get_multiple_rows">Get multiple rows</option>
+                    <option value="get_random_row">Get random row</option>
+                    <option value="search_rows">Search rows</option>
+                    <option value="update_row">Update row</option>
+                    <option value="clear_row">Clear row</option>
+                  </select>
+                </div>
+                {(local.operation === "append_row" || local.operation === "update_row") && (
+                  <div className="space-y-1">
+                    <Label className="text-xs">Row data (comma-separated values)</Label>
+                    <Input className="h-8 text-xs" value={local.row_text ?? ""} onChange={e => set("row_text", e.target.value)} placeholder="{{contact.name}}, {{contact.email}}, {{input}}" />
+                    <p className="text-[10px] text-muted-foreground">Values will be split on commas and written to columns A, B, C…</p>
+                  </div>
+                )}
+                {(local.operation === "get_row" || local.operation === "update_row" || local.operation === "clear_row") && (
+                  <div className="space-y-1">
+                    <Label className="text-xs">Row number</Label>
+                    <Input className="h-8 text-xs" type="number" min={1} value={local.row_number ?? 1} onChange={e => set("row_number", parseInt(e.target.value) || 1)} />
+                  </div>
+                )}
+                {local.operation === "get_multiple_rows" && (
+                  <div className="flex gap-2">
+                    <div className="flex-1 space-y-1">
+                      <Label className="text-xs">Start row</Label>
+                      <Input className="h-8 text-xs" type="number" min={1} value={local.start_row ?? 1} onChange={e => set("start_row", parseInt(e.target.value) || 1)} />
+                    </div>
+                    <div className="flex-1 space-y-1">
+                      <Label className="text-xs">End row</Label>
+                      <Input className="h-8 text-xs" type="number" min={1} value={local.end_row ?? 10} onChange={e => set("end_row", parseInt(e.target.value) || 10)} />
+                    </div>
+                  </div>
+                )}
+                {local.operation === "search_rows" && (
+                  <div className="space-y-1">
+                    <Label className="text-xs">Search query</Label>
+                    <Input className="h-8 text-xs" value={local.query ?? ""} onChange={e => set("query", e.target.value)} placeholder="{{input}}" />
+                  </div>
+                )}
+                <div className="space-y-1">
+                  <Label className="text-xs">Save result to variable</Label>
+                  <Input className="h-8 text-xs font-mono" value={local.save_to ?? "sheets_result"} onChange={e => set("save_to", e.target.value)} />
+                </div>
+              </>
+            )}
+            {local.action === "google_docs" && (
+              <>
+                <div className="space-y-1">
+                  <Label className="text-xs">Operation</Label>
+                  <select className="w-full rounded-md border text-xs px-2 py-1.5" value={local.operation ?? "create"} onChange={e => set("operation", e.target.value)}>
+                    <option value="create">Create document</option>
+                    <option value="update">Append to document</option>
+                  </select>
+                </div>
+                {(local.operation ?? "create") === "create" && (
+                  <div className="space-y-1">
+                    <Label className="text-xs">Document title</Label>
+                    <Input className="h-8 text-xs" value={local.title ?? ""} onChange={e => set("title", e.target.value)} placeholder="My Document" />
+                  </div>
+                )}
+                {(local.operation ?? "create") === "update" && (
+                  <div className="space-y-1">
+                    <Label className="text-xs">Document ID</Label>
+                    <Input className="h-8 text-xs font-mono" value={local.doc_id ?? ""} onChange={e => set("doc_id", e.target.value)} placeholder="1BxiMVs0XRA5nFMdKvBdBZjgmUUqptlbs74OgVE2upms" />
+                  </div>
+                )}
+                <div className="space-y-1">
+                  <Label className="text-xs">Content</Label>
+                  <textarea className="w-full rounded-md border text-xs px-3 py-2 min-h-[80px] resize-y focus:outline-none focus:ring-1 focus:ring-primary" value={local.content ?? ""} onChange={e => set("content", e.target.value)} placeholder="Text to write into the document..." />
+                </div>
+                <div className="space-y-1">
+                  <Label className="text-xs">Save result to variable</Label>
+                  <Input className="h-8 text-xs font-mono" value={local.save_to ?? "doc_result"} onChange={e => set("save_to", e.target.value)} />
+                </div>
+              </>
+            )}
+            {local.action === "comment_on_post" && (
+              <>
+                <div className="space-y-1">
+                  <Label className="text-xs">Instagram Media ID</Label>
+                  <Input className="h-8 text-xs font-mono" value={local.media_id ?? ""} onChange={e => set("media_id", e.target.value)} placeholder="{{trigger.media_id}}" />
+                </div>
+                <div className="space-y-1">
+                  <Label className="text-xs">Comment text</Label>
+                  <textarea className="w-full rounded-md border text-xs px-3 py-2 min-h-[60px] resize-y focus:outline-none focus:ring-1 focus:ring-primary" value={local.message ?? ""} onChange={e => set("message", e.target.value)} placeholder="Great post! Check out our offer..." />
+                </div>
+              </>
+            )}
+            {local.action === "ai_web" && (
+              <>
+                <div className="space-y-1">
+                  <Label className="text-xs">Mode</Label>
+                  <select className="w-full rounded-md border text-xs px-2 py-1.5" value={local.mode ?? "browse"} onChange={e => set("mode", e.target.value)}>
+                    <option value="browse">Browse — visit a URL and extract content</option>
+                    <option value="research">Research — autonomous multi-page search</option>
+                    <option value="search">Search — quick web query (Perplexity/DDG)</option>
+                    <option value="fetch">Fetch — raw HTTP GET and parse text</option>
+                  </select>
+                </div>
+                {(local.mode === "browse" || local.mode === "fetch") && (
+                  <div className="space-y-1">
+                    <Label className="text-xs">URL</Label>
+                    <Input className="h-8 text-xs" value={local.url ?? ""} onChange={e => set("url", e.target.value)} placeholder="https://example.com/page" />
+                  </div>
+                )}
+                {(local.mode === "search" || local.mode === "research" || !local.mode) && (
+                  <div className="space-y-1">
+                    <Label className="text-xs">Search query</Label>
+                    <Input className="h-8 text-xs" value={local.query ?? ""} onChange={e => set("query", e.target.value)} placeholder="latest AI news {{contact.interest}}" />
+                  </div>
+                )}
+                {local.mode === "research" && (
+                  <div className="space-y-1">
+                    <Label className="text-xs">Max pages (1–10)</Label>
+                    <Input className="h-8 text-xs" type="number" min={1} max={10} value={local.max_pages ?? 5} onChange={e => set("max_pages", parseInt(e.target.value) || 5)} />
+                  </div>
+                )}
+                <div className="space-y-1">
+                  <Label className="text-xs">Save result to variable</Label>
+                  <Input className="h-8 text-xs font-mono" value={local.save_to ?? "web_result"} onChange={e => set("save_to", e.target.value)} />
+                </div>
+                <div className="flex items-center justify-between">
+                  <Label className="text-xs">Send summary as reply</Label>
+                  <input type="checkbox" checked={!!local.send_reply} onChange={e => set("send_reply", e.target.checked)} className="h-4 w-4" />
+                </div>
+              </>
+            )}
             {local.action === "send_webhook" && (
               <div className="space-y-1">
                 <Label className="text-xs">Webhook URL</Label>
                 <Input className="h-8 text-xs" value={local.url ?? ""} onChange={e => set("url", e.target.value)} placeholder="https://hooks.zapier.com/..." />
               </div>
+            )}
+            {local.action === "wallet_action" && (
+              <>
+                <div className="space-y-1">
+                  <Label className="text-xs">Card serial (variable)</Label>
+                  <Input className="h-8 text-xs font-mono" value={local.serial ?? ""} onChange={e => set("serial", e.target.value)} placeholder="{{wallet_serial}} or {{contact.wallet_serial}}" />
+                </div>
+                <div className="space-y-1">
+                  <Label className="text-xs">Wallet action</Label>
+                  <select className="w-full rounded-md border text-xs px-2 py-1.5" value={local.wallet_action ?? "add_punch"} onChange={e => set("wallet_action", e.target.value)}>
+                    <optgroup label="Punch Card">
+                      <option value="add_punch">Add Punch</option>
+                      <option value="remove_punch">Remove Punch</option>
+                      <option value="redeem">Redeem Reward</option>
+                    </optgroup>
+                    <optgroup label="Points">
+                      <option value="add_points">Add Points</option>
+                      <option value="remove_points">Remove Points</option>
+                      <option value="redeem_points_reward">Redeem Points Reward</option>
+                    </optgroup>
+                    <optgroup label="Membership">
+                      <option value="set_tier">Set Tier</option>
+                    </optgroup>
+                    <optgroup label="Coupon">
+                      <option value="redeem_coupon">Redeem Coupon</option>
+                    </optgroup>
+                    <optgroup label="Prepaid Balance">
+                      <option value="load_balance">Load Balance</option>
+                      <option value="deduct_balance">Deduct Balance</option>
+                    </optgroup>
+                    <optgroup label="Event Ticket">
+                      <option value="check_in">Check In</option>
+                      <option value="un_check_in">Un-Check In</option>
+                    </optgroup>
+                  </select>
+                </div>
+                {["add_punch","remove_punch","add_points","remove_points","redeem_points_reward","set_tier","load_balance","deduct_balance"].includes(local.wallet_action ?? "") && (
+                  <div className="space-y-1">
+                    <Label className="text-xs">Value (amount / tier name)</Label>
+                    <Input className="h-8 text-xs" value={local.value ?? ""} onChange={e => set("value", e.target.value)} placeholder="e.g. 10 or Gold" />
+                  </div>
+                )}
+                <div className="space-y-1">
+                  <Label className="text-xs">Custom push message <span className="text-muted-foreground font-normal">(optional)</span></Label>
+                  <Input className="h-8 text-xs" value={local.message ?? ""} onChange={e => set("message", e.target.value)} placeholder="You just earned {{wallet_punches}} punches!" />
+                </div>
+                <div className="flex items-center justify-between">
+                  <Label className="text-xs">Silent (skip push notification)</Label>
+                  <input type="checkbox" checked={!!local.silent} onChange={e => set("silent", e.target.checked)} className="h-4 w-4" />
+                </div>
+              </>
+            )}
+            {local.action === "wallet_push" && (
+              <>
+                <div className="space-y-1">
+                  <Label className="text-xs">Card serial (variable)</Label>
+                  <Input className="h-8 text-xs font-mono" value={local.serial ?? ""} onChange={e => set("serial", e.target.value)} placeholder="{{wallet_serial}}" />
+                </div>
+                <div className="space-y-1">
+                  <Label className="text-xs">Message</Label>
+                  <textarea className="w-full rounded-md border text-xs px-3 py-2 min-h-[60px] resize-y focus:outline-none focus:ring-1 focus:ring-primary"
+                    value={local.message ?? ""} onChange={e => set("message", e.target.value)}
+                    placeholder="You have {{wallet_punches}} of {{wallet_max_punches}} punches!" />
+                  <p className="text-[10px] text-muted-foreground">Variables: {'{{wallet_punches}}'}, {'{{wallet_points}}'}, {'{{customerName}}'}, {'{{wallet_program_name}}'}</p>
+                </div>
+              </>
             )}
           </>
         )}

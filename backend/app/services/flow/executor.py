@@ -113,6 +113,8 @@ class FlowExecutor:
                 return {"status": "continue"}
             case "send_message":
                 return await self._exec_send_message(data)
+            case "carousel":
+                return await self._exec_carousel(data)
             case "user_input":
                 return await self._exec_user_input(data)
             case "condition":
@@ -144,6 +146,34 @@ class FlowExecutor:
         channel_override = data.get("channel")  # "omni" means use conversation's channel
         if text and self.run.conversation_id:
             await self._send_to_conversation(text, channel_override=channel_override)
+        return {"status": "continue"}
+
+    async def _exec_carousel(self, data: dict) -> dict:
+        """Emit a <<<RICH>>> carousel block to the conversation."""
+        import json as _json
+        cards = data.get("cards", [])
+        if not cards or not self.run.conversation_id:
+            return {"status": "continue"}
+        # Resolve template variables in card text fields
+        resolved_cards = []
+        for card in cards:
+            resolved_cards.append({
+                "title": self._resolve(card.get("title", "")),
+                "subtitle": self._resolve(card.get("subtitle", "")),
+                "image_url": self._resolve(card.get("image_url", "")),
+                "buttons": [
+                    {
+                        "type": btn.get("type", "url"),
+                        "label": self._resolve(btn.get("label", "")),
+                        "value": self._resolve(btn.get("value", "")),
+                    }
+                    for btn in card.get("buttons", [])
+                ],
+            })
+        rich_json = _json.dumps({"type": "carousel", "items": resolved_cards})
+        rich_block = f"<<<RICH>>>{rich_json}<<<END>>>"
+        channel_override = data.get("channel")
+        await self._send_to_conversation(rich_block, channel_override=channel_override)
         return {"status": "continue"}
 
     async def _exec_user_input(self, data: dict) -> dict:
@@ -327,6 +357,10 @@ class FlowExecutor:
                 await self._action_send_team_notification(data)
             case "outbound_call":
                 await self._action_outbound_call(data)
+            case "transfer_call":
+                await self._action_transfer_call(data)
+            case "end_call":
+                await self._action_end_call(data)
             # ── Web ───────────────────────────────────────────────────────────
             case "send_webhook":
                 await self._action_send_webhook(data)
@@ -345,9 +379,14 @@ class FlowExecutor:
             # ── Wallet ────────────────────────────────────────────────────────
             case "wallet_action":
                 await self._action_wallet(data)
+            case "wallet_push":
+                await self._action_wallet_push(data)
             # ── Google Sheets ─────────────────────────────────────────────────
             case "google_sheets":
                 await self._action_google_sheets(data)
+            # ── Google Docs ───────────────────────────────────────────────────
+            case "google_docs":
+                await self._action_google_docs(data)
             # ── WhatsApp Template ─────────────────────────────────────────────
             case "whatsapp_template":
                 await self._action_whatsapp_template(data)
@@ -366,6 +405,8 @@ class FlowExecutor:
             # ── Social ────────────────────────────────────────────────────────
             case "social_post":
                 await self._action_social_post(data)
+            case "comment_on_post":
+                await self._action_comment_on_post(data)
         return {"status": "continue"}
 
     async def _exec_jump_to(self, data: dict) -> dict:
@@ -470,10 +511,17 @@ class FlowExecutor:
                         result_text = data_json.get("AbstractText") or data_json.get("Answer") or ""
 
             elif mode == "browse":
-                # Delegate to browser service
+                # Direct URL visit via browser service
                 from app.services.browser import BrowserService
                 bs = BrowserService()
                 result_text = await bs.fetch_content(query_or_url)
+
+            elif mode == "research":
+                # Autonomous multi-page research: search + visit top results
+                from app.services.browser import BrowserService
+                max_pages = int(data.get("max_pages", 5))
+                bs = BrowserService()
+                result_text = await bs.research(query_or_url, max_pages=max(1, min(max_pages, 10)))
 
         except Exception as exc:
             result_text = f"[web error: {exc}]"
@@ -848,6 +896,72 @@ class FlowExecutor:
         except Exception:
             pass
 
+    async def _action_transfer_call(self, data: dict) -> None:
+        """Redirect an active Twilio call to a new phone number using Twilio REST API."""
+        to = self._resolve(data.get("to", ""))
+        message = self._resolve(data.get("message", "Transferring you now. Please hold."))
+        if not to or not self.run.conversation_id:
+            return
+        from app.core.config import settings
+        if not settings.twilio_account_sid:
+            return
+        try:
+            from app.models.conversation import Conversation
+            conv = await self.db.get(Conversation, self.run.conversation_id)
+            if not conv or conv.channel != "phone" or not conv.guest_id:
+                return
+            call_sid = conv.guest_id
+            safe_msg = message.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+            safe_to = to.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+            twiml = (
+                '<?xml version="1.0" encoding="UTF-8"?>'
+                f"<Response><Say voice=\"Polly.Joanna\">{safe_msg}</Say>"
+                f"<Dial>{safe_to}</Dial></Response>"
+            )
+            async with httpx.AsyncClient(timeout=10) as client:
+                await client.post(
+                    f"https://api.twilio.com/2010-04-01/Accounts/{settings.twilio_account_sid}/Calls/{call_sid}.json",
+                    auth=(settings.twilio_account_sid, settings.twilio_auth_token),
+                    data={"Twiml": twiml},
+                )
+        except Exception:
+            pass
+
+    async def _action_end_call(self, data: dict) -> None:
+        """Terminate an active Twilio call, optionally playing a goodbye message first."""
+        message = self._resolve(data.get("message", ""))
+        if not self.run.conversation_id:
+            return
+        from app.core.config import settings
+        if not settings.twilio_account_sid:
+            return
+        try:
+            from app.models.conversation import Conversation
+            conv = await self.db.get(Conversation, self.run.conversation_id)
+            if not conv or conv.channel != "phone" or not conv.guest_id:
+                return
+            call_sid = conv.guest_id
+            async with httpx.AsyncClient(timeout=10) as client:
+                if message:
+                    safe_msg = message.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+                    twiml = (
+                        '<?xml version="1.0" encoding="UTF-8"?>'
+                        f"<Response><Say voice=\"Polly.Joanna\">{safe_msg}</Say><Hangup/></Response>"
+                    )
+                    await client.post(
+                        f"https://api.twilio.com/2010-04-01/Accounts/{settings.twilio_account_sid}/Calls/{call_sid}.json",
+                        auth=(settings.twilio_account_sid, settings.twilio_auth_token),
+                        data={"Twiml": twiml},
+                    )
+                else:
+                    await client.post(
+                        f"https://api.twilio.com/2010-04-01/Accounts/{settings.twilio_account_sid}/Calls/{call_sid}.json",
+                        auth=(settings.twilio_account_sid, settings.twilio_auth_token),
+                        data={"Status": "completed"},
+                    )
+        except Exception:
+            pass
+
     async def _action_web_fetch(self, data: dict) -> None:
         url = self._resolve(data.get("url", ""))
         save_to = data.get("save_to", "fetch_result")
@@ -945,12 +1059,38 @@ class FlowExecutor:
         try:
             from app.services.wallet.service import WalletService
             ws = WalletService(db=self.db)
+            message = self._resolve(data.get("message", "")) or None
+            silent = bool(data.get("silent", False))
             await ws.perform_action(
                 serial=serial,
                 action=action,
                 value=data.get("value"),
                 user_id=self.flow.user_id,
+                source="flow",
+                message=message,
+                silent=silent,
             )
+        except Exception:
+            pass
+
+    async def _action_wallet_push(self, data: dict) -> None:
+        serial = self._resolve(data.get("serial", ""))
+        message = self._resolve(data.get("message", "Your pass has been updated."))
+        if not serial:
+            return
+        try:
+            from sqlalchemy import select
+            from app.models.wallet import WalletCard, WalletProgram, WalletPushSubscription
+            result = await self.db.execute(select(WalletCard).where(WalletCard.serial == serial))
+            card = result.scalar_one_or_none()
+            if not card:
+                return
+            program = await self.db.get(WalletProgram, card.program_id)
+            if not program or program.user_id != self.flow.user_id:
+                return
+            from app.api.wallet import _render_message, _push_card_devices
+            rendered = _render_message(message, card, program)
+            await _push_card_devices(card, program, rendered, self.db)
         except Exception:
             pass
 
@@ -981,7 +1121,9 @@ class FlowExecutor:
 
             ctx = dict(self.run.context or {})
             if op == "append_row":
-                row_data: list = data.get("row_data", [])
+                # Support both list row_data and comma-separated row_text
+                row_text = self._resolve(data.get("row_text", ""))
+                row_data: list = [v.strip() for v in row_text.split(",")] if row_text else data.get("row_data", [])
                 resolved = [self._resolve(str(v)) for v in row_data]
                 ws.append_row(resolved)
                 ctx[save_to] = {"appended": resolved}
@@ -996,10 +1138,86 @@ class FlowExecutor:
                 ctx[save_to] = matches[:10]
             elif op == "update_row":
                 row_num = int(self._resolve(str(data.get("row_number", 1))))
-                row_data = data.get("row_data", [])
+                row_text = self._resolve(data.get("row_text", ""))
+                row_data = [v.strip() for v in row_text.split(",")] if row_text else data.get("row_data", [])
                 resolved = [self._resolve(str(v)) for v in row_data]
                 ws.update(f"A{row_num}", [resolved])
                 ctx[save_to] = {"updated_row": row_num}
+            elif op == "get_multiple_rows":
+                start_row = int(self._resolve(str(data.get("start_row", 1))))
+                end_row = int(self._resolve(str(data.get("end_row", 10))))
+                rows = [ws.row_values(r) for r in range(start_row, end_row + 1)]
+                ctx[save_to] = rows
+            elif op == "get_random_row":
+                all_rows = ws.get_all_values()
+                import random as _random
+                skip_header = data.get("skip_header", True)
+                eligible = all_rows[1:] if skip_header and len(all_rows) > 1 else all_rows
+                ctx[save_to] = _random.choice(eligible) if eligible else []
+            elif op == "clear_row":
+                row_num = int(self._resolve(str(data.get("row_number", 1))))
+                num_cols = int(data.get("num_columns", 10))
+                cell_range = f"A{row_num}:{chr(ord('A') + num_cols - 1)}{row_num}"
+                ws.batch_clear([cell_range])
+                ctx[save_to] = {"cleared_row": row_num}
+            self.run.context = ctx
+        except Exception as exc:
+            ctx = dict(self.run.context or {})
+            ctx[f"{save_to}_error"] = str(exc)
+            self.run.context = ctx
+
+    async def _action_google_docs(self, data: dict) -> None:
+        """Google Docs action: create a new doc or update (append to) an existing doc."""
+        op = data.get("operation", "create")
+        title = self._resolve(data.get("title", "Untitled Document"))
+        content = self._resolve(data.get("content", ""))
+        doc_id = self._resolve(data.get("doc_id", ""))
+        save_to = data.get("save_to", "doc_result")
+        try:
+            import json as _json
+            from google.oauth2.service_account import Credentials
+            from googleapiclient.discovery import build
+            from app.core.config import settings
+
+            creds_json = getattr(settings, "google_service_account_json", None)
+            if not creds_json:
+                return
+            creds = Credentials.from_service_account_info(
+                _json.loads(creds_json),
+                scopes=["https://www.googleapis.com/auth/documents"],
+            )
+            service = build("docs", "v1", credentials=creds, cache_discovery=False)
+            ctx = dict(self.run.context or {})
+
+            if op == "create":
+                doc = service.documents().create(body={"title": title}).execute()
+                created_id = doc.get("documentId", "")
+                if content and created_id:
+                    service.documents().batchUpdate(
+                        documentId=created_id,
+                        body={"requests": [{"insertText": {"location": {"index": 1}, "text": content}}]},
+                    ).execute()
+                ctx[save_to] = {
+                    "doc_id": created_id,
+                    "title": title,
+                    "url": f"https://docs.google.com/document/d/{created_id}/edit",
+                }
+
+            elif op == "update" and doc_id:
+                doc = service.documents().get(documentId=doc_id).execute()
+                body_content = doc.get("body", {}).get("content", [])
+                end_index = max(1, (body_content[-1].get("endIndex", 2) - 1) if body_content else 1)
+                if content:
+                    service.documents().batchUpdate(
+                        documentId=doc_id,
+                        body={"requests": [{"insertText": {"location": {"index": end_index}, "text": content}}]},
+                    ).execute()
+                ctx[save_to] = {
+                    "doc_id": doc_id,
+                    "updated": True,
+                    "url": f"https://docs.google.com/document/d/{doc_id}/edit",
+                }
+
             self.run.context = ctx
         except Exception as exc:
             ctx = dict(self.run.context or {})
@@ -1201,6 +1419,38 @@ class FlowExecutor:
                         if cid:
                             await client.post(f"{_GRAPH}/{account.page_id}/media_publish",
                                 params={"creation_id": cid, "access_token": token})
+        except Exception:
+            pass
+
+    async def _action_comment_on_post(self, data: dict) -> None:
+        """Post a comment on an Instagram media object via the Graph API."""
+        media_id = self._resolve(data.get("media_id", ""))
+        message = self._resolve(data.get("message", ""))
+        if not media_id or not message:
+            return
+        try:
+            from app.models.channel_integration import ChannelIntegration
+            from sqlalchemy import select as _sel
+            r = await self.db.execute(
+                _sel(ChannelIntegration).where(
+                    ChannelIntegration.chatbot_id == self.flow.chatbot_id,
+                    ChannelIntegration.channel == "instagram",
+                    ChannelIntegration.is_active.is_(True),
+                )
+            )
+            integ = r.scalar_one_or_none()
+            if not integ:
+                return
+            token = integ.config.get("page_access_token", "")
+            if not token:
+                return
+            _GRAPH = "https://graph.facebook.com/v19.0"
+            async with httpx.AsyncClient(timeout=15) as client:
+                await client.post(
+                    f"{_GRAPH}/{media_id}/comments",
+                    json={"message": message},
+                    params={"access_token": token},
+                )
         except Exception:
             pass
 

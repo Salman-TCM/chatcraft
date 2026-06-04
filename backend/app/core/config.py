@@ -25,6 +25,7 @@ class Settings(BaseSettings):
     google_oauth_client_secret: str = ""
     google_oauth_redirect_uri: str = "http://localhost:8000/api/auth/google/callback"
     frontend_url: str = "http://localhost:3000"
+    api_url: str = "http://localhost:8000"
 
     anthropic_api_key: str = ""
     openai_api_key: str = ""
@@ -84,12 +85,18 @@ class Settings(BaseSettings):
 
     # Public API base URL (used in pass callbacks, QR links, etc.)
     api_base_url: str = "http://localhost:8000"
+    # Public frontend base URL (used in join/scanner links on passes)
+    frontend_base_url: str = "http://localhost:3000"
 
     # Additional LLM providers
     groq_api_key: str = ""
     deepseek_api_key: str = ""
     perplexity_api_key: str = ""
     xai_api_key: str = ""
+
+    # Web search (set one of these — Tavily recommended, free tier 1000/month at app.tavily.com)
+    tavily_api_key: str = ""
+    brave_search_api_key: str = ""  # optional paid upgrade
 
     # Cloud browser (Browserbase)
     browserbase_api_key: str = ""
