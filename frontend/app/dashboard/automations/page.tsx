@@ -33,15 +33,22 @@ interface AutomationRun {
   executed_at: string;
 }
 
-const TRIGGERS: { value: string; label: string }[] = [
-  { value: "new_contact",           label: "New Contact" },
-  { value: "tag_added",             label: "Tag Added" },
-  { value: "field_updated",         label: "Field Updated" },
-  { value: "conversation_opened",   label: "Conversation Opened" },
-  { value: "conversation_closed",   label: "Conversation Closed" },
-  { value: "pipeline_stage_changed",label: "Pipeline Stage Changed" },
-  { value: "payment_received",      label: "Payment Received" },
-  { value: "form_submitted",        label: "Form Submitted" },
+const TRIGGERS: { value: string; label: string; group?: string }[] = [
+  { value: "new_contact",            label: "New Contact" },
+  { value: "tag_added",              label: "Tag Added" },
+  { value: "field_updated",          label: "Field Updated" },
+  { value: "conversation_opened",    label: "Conversation Opened" },
+  { value: "conversation_closed",    label: "Conversation Closed" },
+  { value: "pipeline_stage_changed", label: "Pipeline Stage Changed" },
+  { value: "payment_received",       label: "Payment Received" },
+  { value: "form_submitted",         label: "Form Submitted" },
+  // Wallet pass triggers
+  { value: "wallet_card_issued",     label: "Wallet Pass — Card Issued",         group: "wallet" },
+  { value: "wallet_punch_added",     label: "Wallet Pass — Punch Added",         group: "wallet" },
+  { value: "wallet_points_added",    label: "Wallet Pass — Points Added",        group: "wallet" },
+  { value: "wallet_reward_unlocked", label: "Wallet Pass — Reward Unlocked",     group: "wallet" },
+  { value: "wallet_reward_redeemed", label: "Wallet Pass — Reward Redeemed",     group: "wallet" },
+  { value: "wallet_coupon_claimed",  label: "Wallet Pass — Coupon Claimed",      group: "wallet" },
 ];
 
 const ACTIONS: { value: string; label: string }[] = [
@@ -62,6 +69,12 @@ const TRIGGER_COLORS: Record<string, string> = {
   pipeline_stage_changed: "bg-orange-100 text-orange-700",
   payment_received: "bg-emerald-100 text-emerald-700",
   form_submitted: "bg-pink-100 text-pink-700",
+  wallet_card_issued: "bg-indigo-100 text-indigo-700",
+  wallet_punch_added: "bg-indigo-100 text-indigo-700",
+  wallet_points_added: "bg-indigo-100 text-indigo-700",
+  wallet_reward_unlocked: "bg-amber-100 text-amber-700",
+  wallet_reward_redeemed: "bg-amber-100 text-amber-700",
+  wallet_coupon_claimed: "bg-amber-100 text-amber-700",
 };
 
 const ACTION_COLORS: Record<string, string> = {
@@ -295,7 +308,12 @@ export default function AutomationsPage() {
                 <div className="space-y-1.5">
                   <Label className="text-xs">When this happens</Label>
                   <select className="w-full rounded-md border text-sm px-3 py-2" value={modal.trigger_type ?? "new_contact"} onChange={e => setField("trigger_type", e.target.value)}>
-                    {TRIGGERS.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
+                    <optgroup label="General">
+                      {TRIGGERS.filter(t => !t.group).map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
+                    </optgroup>
+                    <optgroup label="Wallet Passes">
+                      {TRIGGERS.filter(t => t.group === "wallet").map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
+                    </optgroup>
                   </select>
                 </div>
                 {modal.trigger_type === "tag_added" && (
@@ -308,6 +326,13 @@ export default function AutomationsPage() {
                   <div className="space-y-1.5">
                     <Label className="text-xs">Field key (leave blank for any field)</Label>
                     <Input className="h-8 text-sm font-mono" value={(modal.trigger_config as any)?.field_key ?? ""} onChange={e => setField("trigger_config", { ...modal.trigger_config, field_key: e.target.value })} placeholder="email" />
+                  </div>
+                )}
+                {(modal.trigger_type ?? "").startsWith("wallet_") && (
+                  <div className="space-y-1.5">
+                    <Label className="text-xs">Wallet Program ID <span className="text-muted-foreground font-normal">(leave blank for any program)</span></Label>
+                    <Input className="h-8 text-sm font-mono" value={(modal.trigger_config as any)?.program_id ?? ""} onChange={e => setField("trigger_config", { ...modal.trigger_config, program_id: e.target.value })} placeholder="program UUID from Wallet dashboard" />
+                    <p className="text-[11px] text-muted-foreground">Find the program ID in the Wallet Programs page URL.</p>
                   </div>
                 )}
               </div>
