@@ -85,6 +85,8 @@ class Settings(BaseSettings):
 
     # Public API base URL (used in pass callbacks, QR links, etc.)
     api_base_url: str = "http://localhost:8000"
+    # Public frontend base URL (used in join/scanner links on passes)
+    frontend_base_url: str = "http://localhost:3000"
 
     # Additional LLM providers
     groq_api_key: str = ""

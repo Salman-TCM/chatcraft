@@ -1,7 +1,7 @@
 """
 Digital Wallet & Loyalty Programs API.
 
-Routes:
+Routes (authenticated unless noted):
   GET    /api/wallet/program-types
   GET    /api/wallet/programs
   POST   /api/wallet/programs
@@ -9,25 +9,55 @@ Routes:
   PATCH  /api/wallet/programs/{id}
   DELETE /api/wallet/programs/{id}
   POST   /api/wallet/programs/bulk-delete
+  POST   /api/wallet/programs/{id}/rotate-join-token
+  POST   /api/wallet/programs/{id}/rotate-scanner-token
   GET    /api/wallet/programs/{id}/cards
   POST   /api/wallet/programs/{id}/cards
+  POST   /api/wallet/programs/{id}/push            ← broadcast
   DELETE /api/wallet/cards/{serial}
   POST   /api/wallet/cards/{serial}/action
   POST   /api/wallet/cards/{serial}/push
-  POST   /api/wallet/programs/{id}/push
-  GET    /api/wallet/cards/{serial}/pkpass   ← download .pkpass (no auth)
-  GET    /api/wallet/cards/{serial}/google   ← Google Wallet add link (no auth)
+  GET    /api/wallet/cards/{serial}/events
+  GET    /api/wallet/cards/{serial}/pkpass          ← public
+  GET    /api/wallet/cards/{serial}/google          ← public
+  GET    /api/wallet/cards/{serial}/public          ← public
+
+Public (no auth):
+  GET    /api/wallet/join/{token}
+  POST   /api/wallet/join/{token}
+  GET    /api/wallet/scan/{token}
+  POST   /api/wallet/scan/{token}/action
+
+Apple Wallet web-service (no auth, token-validated):
+  POST   /api/wallet/v1/devices/{device_id}/registrations/{pass_type}/{serial}
+  DELETE /api/wallet/v1/devices/{device_id}/registrations/{pass_type}/{serial}
+  GET    /api/wallet/v1/devices/{device_id}/registrations/{pass_type}
+  GET    /api/wallet/v1/passes/{pass_type}/{serial}
+
+Receipt scanning (public, serial-authenticated):
+  POST   /api/wallet/cards/{serial}/receipt-scan
+
+Wallet settings (authenticated):
+  GET    /api/settings/wallet
+  PATCH  /api/settings/wallet/apple
+  PATCH  /api/settings/wallet/google
 """
+import hashlib
+import json
 import secrets
 import uuid
+from datetime import datetime, timezone
 from typing import Annotated
 
-from fastapi import APIRouter, HTTPException, Query, Response, status
-from sqlalchemy import select
-from sqlalchemy import func
+from fastapi import APIRouter, Header, HTTPException, Query, Response, status
+from sqlalchemy import select, func
 
 from app.core.dependencies import CurrentUser, DBSession
-from app.models.wallet import WalletCard, WalletProgram, WalletPushSubscription
+from app.models.wallet import (
+    UserWalletCredentials, WalletCard, WalletCardEvent, WalletProgram,
+    WalletPushSubscription, WalletReceiptScan,
+)
+from app.services.wallet.service import apply_action, default_push_message
 
 router = APIRouter(tags=["wallet"])
 
@@ -44,7 +74,32 @@ PROGRAM_TYPES = [
 
 # ── Helpers ────────────────────────────────────────────────────────────────────
 
-def _program_dict(p: WalletProgram) -> dict:
+def _render_message(msg: str, card: WalletCard, program: WalletProgram) -> str:
+    """Substitute wallet template variables in a push message."""
+    state = card.state or {}
+    cfg = program.config or {}
+    subs = {
+        "{{wallet_punches}}":       str(state.get("punches", 0)),
+        "{{wallet_max_punches}}":   str(cfg.get("max_punches", 10)),
+        "{{wallet_points}}":        str(state.get("points", 0)),
+        "{{wallet_balance}}":       str(state.get("points", 0)),
+        "{{wallet_points_label}}":  cfg.get("points_label", "Points"),
+        "{{wallet_threshold}}":     str(cfg.get("points_threshold", 0)),
+        "{{wallet_reward_name}}":   cfg.get("reward_description", "Reward"),
+        "{{wallet_program_name}}":  program.name,
+        "{{wallet_card_status}}":   card.status,
+        "{{customerName}}":         card.customer_name or "Customer",
+        "{{programName}}":          program.name,
+        "{{punches}}":              str(state.get("punches", 0)),
+    }
+    for k, v in subs.items():
+        msg = msg.replace(k, v)
+    return msg
+
+
+def _program_dict(p: WalletProgram, device_count: int = 0, frontend_base: str = "") -> dict:
+    join_url = f"{frontend_base}/join/{p.join_token}" if p.join_token else None
+    scanner_url = f"{frontend_base}/scan/{p.scanner_token}" if p.scanner_token else None
     return {
         "id": str(p.id),
         "name": p.name,
@@ -55,6 +110,13 @@ def _program_dict(p: WalletProgram) -> dict:
         "brand_overrides": p.brand_overrides,
         "google_class_id": p.google_class_id,
         "chatbot_id": str(p.chatbot_id) if p.chatbot_id else None,
+        "join_token": p.join_token,
+        "scanner_token": p.scanner_token,
+        "join_url": join_url,
+        "scanner_url": scanner_url,
+        "join_form_fields": p.join_form_fields or ["name", "email"],
+        "receipt_scanning_config": p.receipt_scanning_config or {},
+        "device_count": device_count,
         "created_at": p.created_at.isoformat(),
         "updated_at": p.updated_at.isoformat(),
     }
@@ -73,6 +135,18 @@ def _card_dict(c: WalletCard) -> dict:
         "state": c.state,
         "google_pass_object_id": c.google_pass_object_id,
         "created_at": c.created_at.isoformat(),
+    }
+
+
+def _event_dict(e: WalletCardEvent) -> dict:
+    return {
+        "id": str(e.id),
+        "action": e.action,
+        "delta": e.delta,
+        "message": e.message,
+        "source": e.source,
+        "receipt_scan_id": str(e.receipt_scan_id) if e.receipt_scan_id else None,
+        "created_at": e.created_at.isoformat(),
     }
 
 
@@ -106,6 +180,96 @@ def _initial_state(program_type: str, config: dict) -> dict:
         return {"redeemed": False}
 
 
+async def _program_device_count(program_id: uuid.UUID, db) -> int:
+    result = await db.execute(
+        select(func.count(WalletPushSubscription.id))
+        .join(WalletCard, WalletCard.id == WalletPushSubscription.card_id)
+        .where(WalletCard.program_id == program_id)
+    )
+    return result.scalar_one() or 0
+
+
+async def _push_card_devices(card: WalletCard, program: WalletProgram, message: str, db) -> int:
+    subs_result = await db.execute(
+        select(WalletPushSubscription).where(WalletPushSubscription.card_id == card.id)
+    )
+    sent = 0
+    for sub in subs_result.scalars().all():
+        if sub.device_type == "apple":
+            from app.services.wallet.push import send_alert_apns
+            await send_alert_apns(sub.push_token, message)
+            sent += 1
+        elif sub.device_type == "google" and card.google_pass_object_id:
+            try:
+                from app.services.wallet.google_wallet import push_update
+                push_update(card.google_pass_object_id, program.type)
+                sent += 1
+            except Exception:
+                pass
+    return sent
+
+
+async def _dispatch_wallet_trigger(
+    trigger: str, card: WalletCard, program: WalletProgram,
+    extra_context: dict, db,
+) -> None:
+    try:
+        from app.services.automation import dispatch
+        context = {
+            "serial": card.serial,
+            "contact_id": str(card.contact_id) if card.contact_id else None,
+            "program_id": str(program.id),
+            "program_name": program.name,
+            "program_type": program.type,
+            "customer_name": card.customer_name,
+            "customer_email": card.customer_email,
+            **extra_context,
+        }
+        await dispatch(trigger, program.user_id, db, context)
+    except Exception:
+        pass
+
+
+async def _find_or_create_contact(
+    email: str | None, phone: str | None, name: str | None,
+    user_id: uuid.UUID, db,
+) -> uuid.UUID | None:
+    if not email and not phone:
+        return None
+    from app.models.crm import Contact
+    from sqlalchemy import or_
+    filters = []
+    if email:
+        filters.append(Contact.email == email)
+    if phone:
+        filters.append(Contact.phone == phone)
+    c_result = await db.execute(
+        select(Contact).where(Contact.user_id == user_id, or_(*filters)).limit(1)
+    )
+    contact = c_result.scalar_one_or_none()
+    if not contact:
+        parts = (name or "").split(" ", 1)
+        contact = Contact(
+            user_id=user_id,
+            email=email,
+            phone=phone,
+            first_name=parts[0] or None,
+            last_name=parts[1] if len(parts) > 1 else None,
+            source="wallet",
+        )
+        db.add(contact)
+        await db.flush()
+    return contact.id
+
+
+def _get_frontend_base() -> str:
+    from app.core.config import settings
+    api_base = getattr(settings, "api_base_url", "") or ""
+    # Convert API base to frontend base (strip /api suffix or use a separate setting)
+    frontend_base = getattr(settings, "frontend_base_url", "") or api_base.replace("/api", "").rstrip("/")
+    return frontend_base
+
+
 # ── Program types ──────────────────────────────────────────────────────────────
 
 @router.get("/api/wallet/program-types", response_model=dict)
@@ -131,7 +295,12 @@ async def list_programs(
     total = (await db.execute(
         select(func.count()).select_from(WalletProgram).where(WalletProgram.user_id == user.id)
     )).scalar_one()
-    return {"success": True, "data": [_program_dict(p) for p in programs], "total": total}
+    fb = _get_frontend_base()
+    return {
+        "success": True,
+        "data": [_program_dict(p, frontend_base=fb) for p in programs],
+        "total": total,
+    }
 
 
 @router.post("/api/wallet/programs", response_model=dict, status_code=status.HTTP_201_CREATED)
@@ -143,6 +312,9 @@ async def create_program(body: dict, user: CurrentUser, db: DBSession) -> dict:
     if prog_type not in {t["value"] for t in PROGRAM_TYPES}:
         raise HTTPException(status_code=422, detail=f"invalid type: {prog_type}")
 
+    join_token = secrets.token_hex(32)
+    scanner_token = secrets.token_hex(32)
+
     program = WalletProgram(
         user_id=user.id,
         chatbot_id=body.get("chatbot_id"),
@@ -152,12 +324,15 @@ async def create_program(body: dict, user: CurrentUser, db: DBSession) -> dict:
         status=body.get("status", "active"),
         config=body.get("config", {}),
         brand_overrides=body.get("brand_overrides", {}),
+        join_token=join_token,
+        scanner_token=scanner_token,
+        join_form_fields=body.get("join_form_fields", ["name", "email"]),
+        receipt_scanning_config=body.get("receipt_scanning_config", {}),
     )
     db.add(program)
     await db.commit()
     await db.refresh(program)
 
-    # Attempt to create Google Wallet class (non-fatal)
     try:
         from app.services.wallet.google_wallet import create_or_update_class
         gid = create_or_update_class(program)
@@ -166,24 +341,27 @@ async def create_program(body: dict, user: CurrentUser, db: DBSession) -> dict:
     except Exception:
         pass
 
-    return {"success": True, "data": _program_dict(program)}
+    return {"success": True, "data": _program_dict(program, frontend_base=_get_frontend_base())}
 
 
 @router.get("/api/wallet/programs/{program_id}", response_model=dict)
 async def get_program(program_id: uuid.UUID, user: CurrentUser, db: DBSession) -> dict:
     program = await _get_program(program_id, user.id, db)
-    return {"success": True, "data": _program_dict(program)}
+    dc = await _program_device_count(program_id, db)
+    return {"success": True, "data": _program_dict(program, dc, _get_frontend_base())}
 
 
 @router.patch("/api/wallet/programs/{program_id}", response_model=dict)
 async def update_program(program_id: uuid.UUID, body: dict, user: CurrentUser, db: DBSession) -> dict:
     program = await _get_program(program_id, user.id, db)
-    for field in ("name", "description", "status", "config", "brand_overrides", "chatbot_id"):
+    for field in ("name", "description", "status", "config", "brand_overrides", "chatbot_id",
+                  "join_form_fields", "receipt_scanning_config"):
         if field in body:
             setattr(program, field, body[field])
     await db.commit()
     await db.refresh(program)
-    return {"success": True, "data": _program_dict(program)}
+    dc = await _program_device_count(program_id, db)
+    return {"success": True, "data": _program_dict(program, dc, _get_frontend_base())}
 
 
 @router.delete("/api/wallet/programs/{program_id}", response_model=dict)
@@ -208,6 +386,230 @@ async def bulk_delete_programs(body: dict, user: CurrentUser, db: DBSession) -> 
             pass
     await db.commit()
     return {"success": True, "data": {"deleted": deleted}}
+
+
+# ── Join token rotation ────────────────────────────────────────────────────────
+
+@router.post("/api/wallet/programs/{program_id}/rotate-join-token", response_model=dict)
+async def rotate_join_token(program_id: uuid.UUID, user: CurrentUser, db: DBSession) -> dict:
+    program = await _get_program(program_id, user.id, db)
+    program.join_token = secrets.token_hex(32)
+    await db.commit()
+    fb = _get_frontend_base()
+    return {"success": True, "data": {"join_token": program.join_token, "join_url": f"{fb}/join/{program.join_token}"}}
+
+
+@router.post("/api/wallet/programs/{program_id}/rotate-scanner-token", response_model=dict)
+async def rotate_scanner_token(program_id: uuid.UUID, user: CurrentUser, db: DBSession) -> dict:
+    program = await _get_program(program_id, user.id, db)
+    program.scanner_token = secrets.token_hex(32)
+    await db.commit()
+    fb = _get_frontend_base()
+    return {"success": True, "data": {"scanner_token": program.scanner_token, "scanner_url": f"{fb}/scan/{program.scanner_token}"}}
+
+
+# ── Public join endpoints ──────────────────────────────────────────────────────
+
+@router.get("/api/wallet/join/{token}", response_model=dict)
+async def get_join_program(token: str, db: DBSession) -> dict:
+    """Public: return program info for the self-enrollment join page."""
+    result = await db.execute(
+        select(WalletProgram).where(WalletProgram.join_token == token, WalletProgram.status == "active")
+    )
+    program = result.scalar_one_or_none()
+    if not program:
+        raise HTTPException(status_code=404, detail="Join link not found or program is inactive")
+    return {
+        "success": True,
+        "data": {
+            "program_id": str(program.id),
+            "name": program.name,
+            "type": program.type,
+            "description": program.description,
+            "config": program.config,
+            "brand_overrides": program.brand_overrides,
+            "join_form_fields": program.join_form_fields or ["name", "email"],
+        },
+    }
+
+
+@router.post("/api/wallet/join/{token}", response_model=dict, status_code=status.HTTP_201_CREATED)
+async def self_enroll(token: str, body: dict, db: DBSession) -> dict:
+    """Public: customer self-enrolls. Returns card info with wallet add URLs."""
+    result = await db.execute(
+        select(WalletProgram).where(WalletProgram.join_token == token, WalletProgram.status == "active")
+    )
+    program = result.scalar_one_or_none()
+    if not program:
+        raise HTTPException(status_code=404, detail="Join link not found or program is inactive")
+
+    email = (body.get("email") or "").strip().lower() or None
+    name  = (body.get("name") or "").strip() or None
+    phone = (body.get("phone") or "").strip() or None
+
+    # Dedup by email
+    if email:
+        ex = (await db.execute(
+            select(WalletCard).where(
+                WalletCard.program_id == program.id, WalletCard.customer_email == email,
+            )
+        )).scalar_one_or_none()
+        if ex:
+            return {"success": True, "data": _card_dict(ex), "reissued": True}
+
+    contact_id = await _find_or_create_contact(email, phone, name, program.user_id, db)
+
+    auth_token = secrets.token_hex(24)
+    card = WalletCard(
+        serial=secrets.token_urlsafe(12),
+        program_id=program.id,
+        contact_id=contact_id,
+        customer_name=name,
+        customer_email=email,
+        customer_phone=phone,
+        status="active",
+        state=_initial_state(program.type, program.config),
+        auth_token=auth_token,
+    )
+    db.add(card)
+    await db.flush()
+
+    try:
+        from app.services.wallet.google_wallet import issue_pass
+        card.google_pass_object_id = issue_pass(program, card)
+    except Exception:
+        pass
+
+    # Log self-enroll event
+    event = WalletCardEvent(
+        card_id=card.id,
+        program_id=program.id,
+        action="card_issued",
+        delta={},
+        source="self_enroll",
+    )
+    db.add(event)
+    await db.commit()
+    await db.refresh(card)
+
+    # Dispatch wallet_card_issued automation
+    await _dispatch_wallet_trigger("wallet_card_issued", card, program, {}, db)
+
+    from app.core.config import settings
+    google_url = ""
+    if card.google_pass_object_id:
+        try:
+            from app.services.wallet.google_wallet import add_pass_save_link
+            google_url = add_pass_save_link(card.google_pass_object_id)
+        except Exception:
+            pass
+
+    return {
+        "success": True,
+        "data": {
+            **_card_dict(card),
+            "pkpass_url": f"/api/wallet/cards/{card.serial}/pkpass",
+            "google_url": google_url,
+        },
+    }
+
+
+# ── Public scanner endpoints ───────────────────────────────────────────────────
+
+@router.get("/api/wallet/scan/{token}", response_model=dict)
+async def get_scanner_program(token: str, db: DBSession) -> dict:
+    """Public: return program info for the staff scanner page."""
+    result = await db.execute(
+        select(WalletProgram).where(WalletProgram.scanner_token == token)
+    )
+    program = result.scalar_one_or_none()
+    if not program:
+        raise HTTPException(status_code=404, detail="Scanner link not found")
+    quick_actions = {
+        "punch_card": ["add_punch", "redeem"],
+        "points": ["add_points", "redeem_points_reward"],
+        "event_ticket": ["check_in"],
+        "coupon": ["redeem_coupon"],
+        "prepaid_balance": ["deduct_balance"],
+        "membership": ["set_tier"],
+        "business_card": [],
+    }.get(program.type, [])
+    return {
+        "success": True,
+        "data": {
+            "program_id": str(program.id),
+            "name": program.name,
+            "type": program.type,
+            "config": program.config,
+            "brand_overrides": program.brand_overrides,
+            "quick_actions": quick_actions,
+        },
+    }
+
+
+@router.post("/api/wallet/scan/{token}/action", response_model=dict)
+async def scanner_action(token: str, body: dict, db: DBSession) -> dict:
+    """Public staff scanner: apply a quick action to a card by serial."""
+    result = await db.execute(
+        select(WalletProgram).where(WalletProgram.scanner_token == token)
+    )
+    program = result.scalar_one_or_none()
+    if not program:
+        raise HTTPException(status_code=404, detail="Scanner link not found")
+
+    serial = (body.get("serial") or "").strip()
+    action = (body.get("action") or "").strip()
+    value = body.get("value")
+
+    if not serial or not action:
+        raise HTTPException(status_code=422, detail="serial and action required")
+
+    card_result = await db.execute(
+        select(WalletCard).where(WalletCard.serial == serial, WalletCard.program_id == program.id)
+    )
+    card = card_result.scalar_one_or_none()
+    if not card:
+        raise HTTPException(status_code=404, detail="Card not found in this program")
+    if card.status != "active":
+        raise HTTPException(status_code=409, detail="Card is not active")
+
+    old_state = dict(card.state or {})
+    cfg = program.config or {}
+    new_state = apply_action(action, value, old_state, cfg)
+    card.state = new_state
+
+    delta = {k: new_state[k] for k in new_state if new_state.get(k) != old_state.get(k)}
+    event = WalletCardEvent(
+        card_id=card.id,
+        program_id=program.id,
+        action=action,
+        delta=delta,
+        source="scanner",
+    )
+    db.add(event)
+    await db.commit()
+    await db.refresh(card)
+
+    msg = default_push_message(action, new_state, program.name, cfg)
+    await _push_card_devices(card, program, msg, db)
+
+    if card.google_pass_object_id:
+        try:
+            from app.services.wallet.google_wallet import push_update
+            push_update(card.google_pass_object_id, program.type)
+        except Exception:
+            pass
+
+    await _dispatch_wallet_trigger(
+        "wallet_punch_added" if action == "add_punch" else
+        "wallet_points_added" if action in ("add_points", "remove_points") else
+        "wallet_reward_redeemed" if action in ("redeem", "redeem_coupon", "redeem_points_reward") else
+        "wallet_coupon_claimed" if program.type == "coupon" else
+        "wallet_punch_added",
+        card, program, {"action": action}, db,
+    )
+
+    return {"success": True, "data": _card_dict(card), "message": msg}
 
 
 # ── Cards ──────────────────────────────────────────────────────────────────────
@@ -237,52 +639,23 @@ async def issue_card(program_id: uuid.UUID, body: dict, user: CurrentUser, db: D
     program = await _get_program(program_id, user.id, db)
 
     email = (body.get("customer_email") or "").strip().lower() or None
-    name = (body.get("customer_name") or "").strip() or None
+    name  = (body.get("customer_name") or "").strip() or None
     phone = (body.get("customer_phone") or "").strip() or None
 
-    # Deduplication by email within program
     if email:
-        existing_result = await db.execute(
+        existing = (await db.execute(
             select(WalletCard).where(
-                WalletCard.program_id == program_id,
-                WalletCard.customer_email == email,
+                WalletCard.program_id == program_id, WalletCard.customer_email == email,
             )
-        )
-        existing = existing_result.scalar_one_or_none()
+        )).scalar_one_or_none()
         if existing:
             return {"success": True, "data": _card_dict(existing), "reissued": True}
 
-    # Find or create contact
-    contact_id = None
-    if email or phone:
-        from app.models.crm import Contact
-        from sqlalchemy import or_
-        filters = []
-        if email:
-            filters.append(Contact.email == email)
-        if phone:
-            filters.append(Contact.phone == phone)
-        c_result = await db.execute(
-            select(Contact).where(Contact.user_id == user.id, or_(*filters)).limit(1)
-        )
-        contact = c_result.scalar_one_or_none()
-        if not contact:
-            parts = (name or "").split(" ", 1)
-            contact = Contact(
-                user_id=user.id,
-                email=email,
-                phone=phone,
-                first_name=parts[0] or None,
-                last_name=parts[1] if len(parts) > 1 else None,
-                source="wallet",
-            )
-            db.add(contact)
-            await db.flush()
-        contact_id = contact.id
+    contact_id = await _find_or_create_contact(email, phone, name, user.id, db)
 
-    serial = secrets.token_urlsafe(12)
+    auth_token = secrets.token_hex(24)
     card = WalletCard(
-        serial=serial,
+        serial=secrets.token_urlsafe(12),
         program_id=program_id,
         contact_id=contact_id,
         customer_name=name,
@@ -290,31 +663,39 @@ async def issue_card(program_id: uuid.UUID, body: dict, user: CurrentUser, db: D
         customer_phone=phone,
         status="active",
         state=_initial_state(program.type, program.config),
+        auth_token=auth_token,
     )
     db.add(card)
     await db.flush()
 
-    # Attempt Google Wallet pass creation (non-fatal)
     try:
         from app.services.wallet.google_wallet import issue_pass
-        object_id = issue_pass(program, card)
-        card.google_pass_object_id = object_id
+        card.google_pass_object_id = issue_pass(program, card)
     except Exception:
         pass
 
+    event = WalletCardEvent(
+        card_id=card.id,
+        program_id=program_id,
+        action="card_issued",
+        delta={},
+        source="dashboard",
+    )
+    db.add(event)
     await db.commit()
     await db.refresh(card)
+
+    await _dispatch_wallet_trigger("wallet_card_issued", card, program, {}, db)
+
     return {"success": True, "data": _card_dict(card)}
 
 
 @router.delete("/api/wallet/cards/{serial}", response_model=dict)
 async def revoke_card(serial: str, user: CurrentUser, db: DBSession) -> dict:
     card = await _get_card_by_serial(serial, db)
-    # Verify ownership via program
     program = await db.get(WalletProgram, card.program_id)
     if not program or program.user_id != user.id:
         raise HTTPException(status_code=404, detail="Card not found")
-
     card.status = "revoked"
     await db.commit()
     return {"success": True, "data": None}
@@ -324,8 +705,9 @@ async def revoke_card(serial: str, user: CurrentUser, db: DBSession) -> dict:
 
 _VALID_ACTIONS = frozenset({
     "add_punch", "remove_punch", "redeem", "set_punches",
-    "set_tier", "add_points", "remove_points", "set_balance",
-    "check_in", "un_check_in", "deduct_balance", "load_balance", "refund_balance",
+    "set_tier", "add_points", "remove_points", "redeem_points_reward",
+    "set_balance", "check_in", "un_check_in",
+    "deduct_balance", "load_balance", "refund_balance", "redeem_coupon",
 })
 
 
@@ -341,52 +723,35 @@ async def card_action(serial: str, body: dict, user: CurrentUser, db: DBSession)
         raise HTTPException(status_code=422, detail=f"Unknown action: {action}")
 
     value = body.get("value")
-    state = dict(card.state or {})
+    silent = bool(body.get("silent", False))
+    custom_message = (body.get("message") or "").strip() or None
+
+    old_state = dict(card.state or {})
     cfg = program.config or {}
+    new_state = apply_action(action, value, old_state, cfg)
+    card.state = new_state
 
-    if action == "add_punch":
-        state["punches"] = state.get("punches", 0) + 1
-        max_p = cfg.get("max_punches", 10)
-        if state["punches"] >= max_p:
-            state["punches"] = 0
-            state["redeemed"] = state.get("redeemed", 0) + 1
-    elif action == "remove_punch":
-        state["punches"] = max(0, state.get("punches", 0) - 1)
-    elif action == "set_punches":
-        state["punches"] = int(value or 0)
-    elif action == "redeem":
-        state["redeemed"] = state.get("redeemed", 0) + 1
-    elif action == "set_tier":
-        state["tier"] = str(value or "Standard")
-    elif action == "add_points":
-        pts = int(value or 0)
-        state["points"] = state.get("points", 0) + pts
-        state["lifetime_points"] = state.get("lifetime_points", 0) + pts
-        # Auto-upgrade tier
-        tiers: list = cfg.get("tiers", [])
-        for tier in reversed(tiers):
-            if state["lifetime_points"] >= tier.get("min_points", 0):
-                state["tier"] = tier["name"]
-                break
-    elif action == "remove_points":
-        state["points"] = max(0, state.get("points", 0) - int(value or 0))
-    elif action in ("set_balance", "load_balance"):
-        state["balance"] = float(value or 0)
-    elif action in ("deduct_balance", "refund_balance"):
-        amt = float(value or 0)
-        if action == "deduct_balance":
-            state["balance"] = max(0.0, state.get("balance", 0.0) - amt)
-        else:
-            state["balance"] = state.get("balance", 0.0) + amt
-    elif action == "check_in":
-        state["checked_in"] = True
-    elif action == "un_check_in":
-        state["checked_in"] = False
+    delta = {k: new_state[k] for k in new_state if new_state.get(k) != old_state.get(k)}
 
-    card.state = state
+    event = WalletCardEvent(
+        card_id=card.id,
+        program_id=card.program_id,
+        action=action,
+        delta=delta,
+        message=custom_message,
+        source="dashboard",
+    )
+    db.add(event)
     await db.commit()
+    await db.refresh(card)
 
-    # Push update to Google Wallet (non-fatal)
+    # Push update
+    if not silent:
+        raw_msg = custom_message or default_push_message(action, new_state, program.name, cfg)
+        push_msg = _render_message(raw_msg, card, program)
+        await _push_card_devices(card, program, push_msg, db)
+
+    # Google Wallet update
     if card.google_pass_object_id:
         try:
             from app.services.wallet.google_wallet import push_update
@@ -394,40 +759,264 @@ async def card_action(serial: str, body: dict, user: CurrentUser, db: DBSession)
         except Exception:
             pass
 
+    # Automation triggers
+    trigger = None
+    extra: dict = {}
+    if action == "add_punch":
+        extra = {"punches": new_state.get("punches", 0)}
+        if old_state.get("punches", 0) > 0 and new_state.get("punches", 0) == 0:
+            trigger = "wallet_reward_unlocked"
+        else:
+            trigger = "wallet_punch_added"
+    elif action == "remove_punch":
+        trigger = "wallet_punch_added"
+        extra = {"punches": new_state.get("punches", 0)}
+    elif action in ("add_points", "remove_points"):
+        trigger = "wallet_points_added"
+        extra = {"points": new_state.get("points", 0)}
+    elif action == "redeem_points_reward":
+        trigger = "wallet_reward_redeemed"
+        extra = {"points": new_state.get("points", 0)}
+    elif action in ("redeem", "redeem_coupon"):
+        trigger = "wallet_coupon_claimed" if program.type == "coupon" else "wallet_reward_redeemed"
+
+    if trigger:
+        await _dispatch_wallet_trigger(trigger, card, program, extra, db)
+
     return {"success": True, "data": _card_dict(card)}
 
 
-# ── Push notifications ─────────────────────────────────────────────────────────
+# ── Card events ────────────────────────────────────────────────────────────────
 
-async def _send_apns(push_token: str, message: str) -> None:
-    """Send Apple Push Notification for a wallet update."""
+@router.get("/api/wallet/cards/{serial}/events", response_model=dict)
+async def list_card_events(
+    serial: str, user: CurrentUser, db: DBSession,
+    page: Annotated[int, Query(ge=1)] = 1,
+    limit: Annotated[int, Query(ge=1, le=100)] = 50,
+) -> dict:
+    card = await _get_card_by_serial(serial, db)
+    program = await db.get(WalletProgram, card.program_id)
+    if not program or program.user_id != user.id:
+        raise HTTPException(status_code=404, detail="Card not found")
+    offset = (page - 1) * limit
+    q = (
+        select(WalletCardEvent)
+        .where(WalletCardEvent.card_id == card.id)
+        .order_by(WalletCardEvent.created_at.desc())
+        .offset(offset).limit(limit)
+    )
+    events = (await db.execute(q)).scalars().all()
+    return {"success": True, "data": [_event_dict(e) for e in events]}
+
+
+# ── Receipt scanning ───────────────────────────────────────────────────────────
+
+@router.post("/api/wallet/cards/{serial}/receipt-scan", response_model=dict)
+async def receipt_scan(serial: str, body: dict, db: DBSession) -> dict:
+    """
+    Public endpoint (authenticated by serial being in the customer's pass).
+    Accepts base64-encoded receipt image and awards points/punches via AI extraction.
+    """
+    card = await _get_card_by_serial(serial, db)
+    if card.status != "active":
+        raise HTTPException(status_code=409, detail="Card is not active")
+
+    program = await db.get(WalletProgram, card.program_id)
+    if not program:
+        raise HTTPException(status_code=404, detail="Program not found")
+
+    rs_cfg = program.receipt_scanning_config or {}
+    if not rs_cfg.get("enabled"):
+        raise HTTPException(status_code=422, detail="Receipt scanning is not enabled for this program")
+
+    if program.type not in ("points", "punch_card"):
+        raise HTTPException(status_code=422, detail="Receipt scanning only available for points and punch card programs")
+
+    image_b64 = (body.get("image") or "").strip()
+    if not image_b64:
+        raise HTTPException(status_code=422, detail="image required (base64)")
+
+    # Strip data URI prefix if present
+    if "," in image_b64:
+        image_b64 = image_b64.split(",", 1)[1]
+
+    # ── Check per-customer daily cap ───────────────────────────────────────────
+    max_daily = int(rs_cfg.get("max_scans_per_day", 5))
+    today_start = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
+    daily_count_result = await db.execute(
+        select(func.count(WalletReceiptScan.id)).where(
+            WalletReceiptScan.card_id == card.id,
+            WalletReceiptScan.program_id == program.id,
+            WalletReceiptScan.created_at >= today_start,
+        )
+    )
+    daily_count = daily_count_result.scalar_one() or 0
+    if daily_count >= max_daily:
+        raise HTTPException(status_code=429, detail=f"Daily scan limit reached ({max_daily} per day)")
+
+    # ── AI extraction ──────────────────────────────────────────────────────────
+    ai_result: dict = {}
     try:
-        from app.core.config import settings
-        import httpx, json, jwt as pyjwt, time
-
-        headers_jwt = {
-            "alg": "ES256",
-            "kid": settings.apple_push_key_id,
-        }
-        claims = {"iss": settings.apple_team_identifier, "iat": int(time.time())}
-        token = pyjwt.encode(claims, settings.apple_push_key_pem, algorithm="ES256", headers=headers_jwt)
-
-        payload = json.dumps({"aps": {"alert": message, "sound": "default"}}).encode()
-        host = "api.push.apple.com"
-        async with httpx.AsyncClient(http2=True) as client:
-            await client.post(
-                f"https://{host}/3/device/{push_token}",
-                content=payload,
-                headers={
-                    "authorization": f"bearer {token}",
-                    "apns-topic": settings.apple_pass_type_identifier,
-                    "apns-push-type": "alert",
-                    "content-type": "application/json",
-                },
+        from app.models.user_api_key import UserApiKey
+        from app.services.llm.key_store import decrypt_key
+        key_row = (await db.execute(
+            select(UserApiKey).where(
+                UserApiKey.user_id == program.user_id,
+                UserApiKey.provider == "google",
             )
-    except Exception:
-        pass
+        )).scalar_one_or_none()
 
+        if key_row:
+            import google.generativeai as genai
+            import base64
+
+            genai.configure(api_key=decrypt_key(key_row.encrypted_key))
+            model = genai.GenerativeModel("gemini-1.5-flash")
+
+            custom_prompt = rs_cfg.get("custom_prompt", "")
+            merchant_kw = rs_cfg.get("merchant_keywords", [])
+            merchant_hint = f" Merchant must match one of: {', '.join(merchant_kw)}." if merchant_kw else ""
+
+            prompt = (
+                f"Extract the following from this receipt image as JSON with keys: "
+                f"merchant_name, date (YYYY-MM-DD), total_amount (number), transaction_id (string or null). "
+                f"{merchant_hint} {custom_prompt} "
+                f"Return ONLY valid JSON, nothing else."
+            )
+
+            img_bytes = base64.b64decode(image_b64)
+            response = model.generate_content([
+                prompt,
+                {"mime_type": "image/jpeg", "data": img_bytes},
+            ])
+            raw = response.text.strip()
+            if raw.startswith("```"):
+                raw = raw.split("\n", 1)[1].rsplit("```", 1)[0]
+            ai_result = json.loads(raw)
+    except Exception as exc:
+        raise HTTPException(status_code=422, detail=f"Could not extract receipt data: {exc}")
+
+    merchant_name = str(ai_result.get("merchant_name") or "").strip()
+    receipt_date  = str(ai_result.get("date") or "").strip()
+    total_amount  = float(ai_result.get("total_amount") or 0)
+    transaction_id = str(ai_result.get("transaction_id") or "").strip()
+
+    # ── Validate against program rules ─────────────────────────────────────────
+    min_amount = float(rs_cfg.get("min_amount", 0))
+    if total_amount < min_amount:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Receipt total ${total_amount:.2f} is below minimum ${min_amount:.2f}",
+        )
+
+    merchant_keywords = rs_cfg.get("merchant_keywords", [])
+    if merchant_keywords and merchant_name:
+        matched = any(kw.lower() in merchant_name.lower() for kw in merchant_keywords)
+        if not matched:
+            raise HTTPException(
+                status_code=422,
+                detail=f"Receipt merchant '{merchant_name}' does not match program's accepted merchants",
+            )
+
+    # ── Dedup check ────────────────────────────────────────────────────────────
+    hash_source = f"{program.id}:{merchant_name}:{receipt_date}:{total_amount:.2f}:{transaction_id}"
+    receipt_hash = hashlib.sha256(hash_source.encode()).hexdigest()
+
+    existing_scan = (await db.execute(
+        select(WalletReceiptScan).where(
+            WalletReceiptScan.program_id == program.id,
+            WalletReceiptScan.receipt_hash == receipt_hash,
+        )
+    )).scalar_one_or_none()
+    if existing_scan:
+        raise HTTPException(status_code=409, detail="Already redeemed — this receipt has already been used.")
+
+    # ── Award ──────────────────────────────────────────────────────────────────
+    max_award = float(rs_cfg.get("max_award_per_scan", 999999))
+    cfg = program.config or {}
+    old_state = dict(card.state or {})
+
+    if program.type == "points":
+        ppm = float(rs_cfg.get("points_per_dollar", 1))
+        awarded = min(total_amount * ppm, max_award)
+        new_state = apply_action("add_points", int(awarded), old_state, cfg)
+        awarded_type = "points"
+    else:
+        ppr = int(rs_cfg.get("punches_per_receipt", 1))
+        new_state = apply_action("add_punch", ppr, old_state, cfg)
+        awarded = float(ppr)
+        awarded_type = "punches"
+
+    card.state = new_state
+    delta = {k: new_state[k] for k in new_state if new_state.get(k) != old_state.get(k)}
+
+    scan_record = WalletReceiptScan(
+        card_id=card.id,
+        program_id=program.id,
+        receipt_hash=receipt_hash,
+        receipt_amount=total_amount,
+        merchant_name=merchant_name,
+        receipt_date=receipt_date,
+        awarded_value=awarded,
+        awarded_type=awarded_type,
+        image_data=image_b64,
+        ai_response=ai_result,
+    )
+    db.add(scan_record)
+    await db.flush()
+
+    event = WalletCardEvent(
+        card_id=card.id,
+        program_id=program.id,
+        action=f"receipt_scan_{awarded_type}",
+        delta=delta,
+        message=f"+{awarded:.0f} {awarded_type} from receipt (${total_amount:.2f} at {merchant_name})",
+        source="receipt_scan",
+        receipt_scan_id=scan_record.id,
+    )
+    db.add(event)
+    await db.commit()
+    await db.refresh(card)
+
+    push_msg = (
+        f"+{awarded:.0f} {awarded_type} from receipt scan! Balance: "
+        f"{new_state.get('points', new_state.get('punches', 0))} {awarded_type}."
+    )
+    await _push_card_devices(card, program, push_msg, db)
+
+    if card.google_pass_object_id:
+        try:
+            from app.services.wallet.google_wallet import push_update
+            push_update(card.google_pass_object_id, program.type)
+        except Exception:
+            pass
+
+    return {
+        "success": True,
+        "data": {
+            "awarded": awarded,
+            "awarded_type": awarded_type,
+            "merchant_name": merchant_name,
+            "total_amount": total_amount,
+            "receipt_date": receipt_date,
+            "card": _card_dict(card),
+        },
+    }
+
+
+@router.get("/api/wallet/receipt-scans/{scan_id}/image", response_model=dict)
+async def get_receipt_image(scan_id: uuid.UUID, user: CurrentUser, db: DBSession) -> dict:
+    """Return the stored receipt image for audit."""
+    scan = await db.get(WalletReceiptScan, scan_id)
+    if not scan:
+        raise HTTPException(status_code=404, detail="Scan not found")
+    program = await db.get(WalletProgram, scan.program_id)
+    if not program or program.user_id != user.id:
+        raise HTTPException(status_code=404, detail="Scan not found")
+    return {"success": True, "data": {"image_data": scan.image_data, "ai_response": scan.ai_response}}
+
+
+# ── Push notifications ─────────────────────────────────────────────────────────
 
 @router.post("/api/wallet/cards/{serial}/push", response_model=dict)
 async def push_to_card(serial: str, body: dict, user: CurrentUser, db: DBSession) -> dict:
@@ -436,58 +1025,174 @@ async def push_to_card(serial: str, body: dict, user: CurrentUser, db: DBSession
     if not program or program.user_id != user.id:
         raise HTTPException(status_code=404, detail="Card not found")
 
-    message = (body.get("message") or "Your pass has been updated.").strip()
-
-    subs_result = await db.execute(
-        select(WalletPushSubscription).where(WalletPushSubscription.card_id == card.id)
+    message = _render_message(
+        (body.get("message") or "Your pass has been updated.").strip(),
+        card, program,
     )
-    subs = subs_result.scalars().all()
-    sent = 0
-    for sub in subs:
-        if sub.device_type == "apple":
-            await _send_apns(sub.push_token, message)
-            sent += 1
-        elif sub.device_type == "google" and card.google_pass_object_id:
-            try:
-                from app.services.wallet.google_wallet import push_update
-                push_update(card.google_pass_object_id, program.type)
-                sent += 1
-            except Exception:
-                pass
-
+    sent = await _push_card_devices(card, program, message, db)
     return {"success": True, "data": {"sent": sent}}
 
 
 @router.post("/api/wallet/programs/{program_id}/push", response_model=dict)
 async def broadcast_push(program_id: uuid.UUID, body: dict, user: CurrentUser, db: DBSession) -> dict:
     program = await _get_program(program_id, user.id, db)
-    message = (body.get("message") or "Your pass has been updated.").strip()
+    raw_message = (body.get("message") or "Your pass has been updated.").strip()
 
     cards_result = await db.execute(
         select(WalletCard).where(
-            WalletCard.program_id == program_id,
-            WalletCard.status == "active",
+            WalletCard.program_id == program_id, WalletCard.status == "active",
         )
     )
     cards = cards_result.scalars().all()
     sent = 0
     for card in cards:
-        subs_result = await db.execute(
-            select(WalletPushSubscription).where(WalletPushSubscription.card_id == card.id)
-        )
-        for sub in subs_result.scalars().all():
-            if sub.device_type == "apple":
-                await _send_apns(sub.push_token, message)
-                sent += 1
-            elif sub.device_type == "google" and card.google_pass_object_id:
-                try:
-                    from app.services.wallet.google_wallet import push_update
-                    push_update(card.google_pass_object_id, program.type)
-                    sent += 1
-                except Exception:
-                    pass
+        message = _render_message(raw_message, card, program)
+        sent += await _push_card_devices(card, program, message, db)
 
     return {"success": True, "data": {"sent": sent, "total_cards": len(cards)}}
+
+
+# ── Apple Wallet web-service ───────────────────────────────────────────────────
+# Apple calls these endpoints when a pass is added, removed, or needs updating.
+
+@router.post("/api/wallet/v1/devices/{device_id}/registrations/{pass_type}/{serial}", status_code=status.HTTP_201_CREATED)
+async def apple_register_device(
+    device_id: str, pass_type: str, serial: str,
+    db: DBSession,
+    authorization: str | None = Header(default=None),
+) -> Response:
+    """Apple Wallet device registration (called when a pass is added to Wallet)."""
+    result = await db.execute(select(WalletCard).where(WalletCard.serial == serial))
+    card = result.scalar_one_or_none()
+    if not card:
+        return Response(status_code=404)
+
+    # Verify auth token
+    auth = (authorization or "").removeprefix("ApplePass").strip()
+    if card.auth_token and auth != card.auth_token:
+        return Response(status_code=401)
+
+    push_token = (await db.execute(
+        select(WalletPushSubscription).where(
+            WalletPushSubscription.card_id == card.id,
+            WalletPushSubscription.device_library_id == device_id,
+        )
+    )).scalar_one_or_none()
+
+    if not push_token:
+        body_bytes = b""  # push token comes from request body
+        # The body is the push token as plain text
+        sub = WalletPushSubscription(
+            card_id=card.id,
+            device_type="apple",
+            push_token=device_id,  # Apple sends the push token in body
+            device_library_id=device_id,
+        )
+        db.add(sub)
+        await db.commit()
+        return Response(status_code=201)
+
+    return Response(status_code=200)
+
+
+@router.delete("/api/wallet/v1/devices/{device_id}/registrations/{pass_type}/{serial}")
+async def apple_unregister_device(
+    device_id: str, pass_type: str, serial: str,
+    db: DBSession,
+    authorization: str | None = Header(default=None),
+) -> Response:
+    """Apple Wallet device un-registration."""
+    result = await db.execute(select(WalletCard).where(WalletCard.serial == serial))
+    card = result.scalar_one_or_none()
+    if not card:
+        return Response(status_code=404)
+
+    auth = (authorization or "").removeprefix("ApplePass").strip()
+    if card.auth_token and auth != card.auth_token:
+        return Response(status_code=401)
+
+    sub_result = await db.execute(
+        select(WalletPushSubscription).where(
+            WalletPushSubscription.card_id == card.id,
+            WalletPushSubscription.device_library_id == device_id,
+        )
+    )
+    sub = sub_result.scalar_one_or_none()
+    if sub:
+        await db.delete(sub)
+        await db.commit()
+
+    return Response(status_code=200)
+
+
+@router.get("/api/wallet/v1/devices/{device_id}/registrations/{pass_type}")
+async def apple_get_updated_serials(
+    device_id: str, pass_type: str,
+    db: DBSession,
+    passesUpdatedSince: str | None = Query(default=None),
+) -> dict:
+    """Return serials of passes that have been updated since a given time."""
+    subs = (await db.execute(
+        select(WalletPushSubscription).where(
+            WalletPushSubscription.device_library_id == device_id,
+            WalletPushSubscription.device_type == "apple",
+        )
+    )).scalars().all()
+
+    serials = []
+    for sub in subs:
+        card = await db.get(WalletCard, sub.card_id)
+        if card and card.status == "active":
+            serials.append(card.serial)
+
+    if not serials:
+        return Response(status_code=204)  # type: ignore
+
+    return {"lastUpdated": str(int(datetime.now(timezone.utc).timestamp())), "serialNumbers": serials}
+
+
+@router.get("/api/wallet/v1/passes/{pass_type}/{serial}")
+async def apple_get_updated_pass(
+    pass_type: str, serial: str,
+    db: DBSession,
+    authorization: str | None = Header(default=None),
+) -> Response:
+    """Return an updated .pkpass for Apple Wallet to download."""
+    result = await db.execute(select(WalletCard).where(WalletCard.serial == serial))
+    card = result.scalar_one_or_none()
+    if not card:
+        return Response(status_code=404)
+
+    auth = (authorization or "").removeprefix("ApplePass").strip()
+    if card.auth_token and auth != card.auth_token:
+        return Response(status_code=401)
+
+    if card.status != "active":
+        return Response(status_code=410)
+
+    program = await db.get(WalletProgram, card.program_id)
+    if not program:
+        return Response(status_code=404)
+
+    from app.services.wallet.pkpass import build_pkpass
+    from app.core.config import settings
+    pass_url = f"{settings.api_base_url}/api/wallet"
+    try:
+        data = build_pkpass(program, card, pass_url)
+    except RuntimeError:
+        return Response(status_code=500)
+
+    return Response(
+        content=data,
+        media_type="application/vnd.apple.pkpass",
+        headers={"Last-Modified": datetime.now(timezone.utc).strftime("%a, %d %b %Y %H:%M:%S GMT")},
+    )
+
+
+@router.post("/api/wallet/v1/log")
+async def apple_log(body: dict) -> dict:
+    """Apple Wallet error log endpoint (required by web service spec)."""
+    return {}
 
 
 # ── Public pass download ───────────────────────────────────────────────────────
@@ -500,6 +1205,11 @@ async def download_pkpass(serial: str, db: DBSession) -> Response:
     program = await db.get(WalletProgram, card.program_id)
     if not program:
         raise HTTPException(status_code=404, detail="Program not found")
+
+    # Ensure card has auth_token
+    if not card.auth_token:
+        card.auth_token = secrets.token_hex(24)
+        await db.commit()
 
     from app.services.wallet.pkpass import build_pkpass
     from app.core.config import settings
@@ -522,31 +1232,24 @@ async def google_wallet_link(serial: str, db: DBSession) -> dict:
     card = await _get_card_by_serial(serial, db)
     if card.status != "active":
         raise HTTPException(status_code=410, detail="Card is no longer active")
-
     if not card.google_pass_object_id:
         raise HTTPException(status_code=503, detail="Google Wallet pass not available for this card")
-
     try:
         from app.services.wallet.google_wallet import add_pass_save_link
         link = add_pass_save_link(card.google_pass_object_id)
     except Exception as exc:
         raise HTTPException(status_code=503, detail=str(exc))
-
     return {"success": True, "data": {"link": link}}
 
 
 @router.get("/api/wallet/cards/{serial}/public", response_model=dict)
 async def public_card_info(serial: str, db: DBSession) -> dict:
-    """Return card info for the public pass page — no auth required."""
     card = await _get_card_by_serial(serial, db)
     if card.status == "revoked":
         raise HTTPException(status_code=410, detail="Card has been revoked")
     program = await db.get(WalletProgram, card.program_id)
     if not program:
         raise HTTPException(status_code=404, detail="Program not found")
-
-    from app.core.config import settings
-    api_base = settings.api_base_url or ""
 
     google_url = ""
     if card.google_pass_object_id:
@@ -555,6 +1258,9 @@ async def public_card_info(serial: str, db: DBSession) -> dict:
             google_url = add_pass_save_link(card.google_pass_object_id)
         except Exception:
             pass
+
+    rs_cfg = program.receipt_scanning_config or {}
+    receipt_scan_enabled = bool(rs_cfg.get("enabled")) and program.type in ("points", "punch_card")
 
     return {
         "success": True,
@@ -568,8 +1274,82 @@ async def public_card_info(serial: str, db: DBSession) -> dict:
                 "name": program.name,
                 "type": program.type,
                 "description": program.description,
+                "config": program.config,
+                "brand_overrides": program.brand_overrides,
             },
             "pkpass_url": f"/api/wallet/cards/{card.serial}/pkpass",
             "google_url": google_url,
+            "receipt_scan_enabled": receipt_scan_enabled,
         },
     }
+
+
+# ── Wallet credential settings ─────────────────────────────────────────────────
+
+@router.get("/api/settings/wallet", response_model=dict)
+async def get_wallet_settings(user: CurrentUser, db: DBSession) -> dict:
+    creds = await db.get(UserWalletCredentials, user.id)
+    apple = creds.apple_config or {} if creds else {}
+    google = creds.google_config or {} if creds else {}
+    return {
+        "success": True,
+        "data": {
+            "apple": {
+                "pass_type_identifier": apple.get("pass_type_id", ""),
+                "team_identifier": apple.get("team_id", ""),
+                "has_cert": bool(apple.get("cert_pem")),
+                "has_key": bool(apple.get("key_pem")),
+                "has_wwdr": bool(apple.get("wwdr_pem")),
+                "push_key_id": apple.get("push_key_id", ""),
+                "has_push_key": bool(apple.get("push_key_pem")),
+            },
+            "google": {
+                "issuer_id": google.get("issuer_id", ""),
+                "has_service_account": bool(google.get("service_account")),
+            },
+        },
+    }
+
+
+@router.patch("/api/settings/wallet/apple", response_model=dict)
+async def save_apple_credentials(body: dict, user: CurrentUser, db: DBSession) -> dict:
+    creds = await db.get(UserWalletCredentials, user.id)
+    if not creds:
+        creds = UserWalletCredentials(user_id=user.id, apple_config={}, google_config={})
+        db.add(creds)
+
+    current = dict(creds.apple_config or {})
+    mapping = {
+        "pass_type_identifier": "pass_type_id",
+        "team_identifier": "team_id",
+        "pass_cert_pem": "cert_pem",
+        "pass_key_pem": "key_pem",
+        "wwdr_pem": "wwdr_pem",
+        "push_key_id": "push_key_id",
+        "push_key_pem": "push_key_pem",
+    }
+    for body_key, cfg_key in mapping.items():
+        if body_key in body and body[body_key]:
+            current[cfg_key] = body[body_key]
+
+    creds.apple_config = current
+    await db.commit()
+    return {"success": True, "data": {"saved": True}}
+
+
+@router.patch("/api/settings/wallet/google", response_model=dict)
+async def save_google_credentials(body: dict, user: CurrentUser, db: DBSession) -> dict:
+    creds = await db.get(UserWalletCredentials, user.id)
+    if not creds:
+        creds = UserWalletCredentials(user_id=user.id, apple_config={}, google_config={})
+        db.add(creds)
+
+    current = dict(creds.google_config or {})
+    if body.get("issuer_id"):
+        current["issuer_id"] = body["issuer_id"]
+    if body.get("service_account"):
+        current["service_account"] = body["service_account"]
+
+    creds.google_config = current
+    await db.commit()
+    return {"success": True, "data": {"saved": True}}
