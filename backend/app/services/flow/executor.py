@@ -379,6 +379,8 @@ class FlowExecutor:
             # ── Wallet ────────────────────────────────────────────────────────
             case "wallet_action":
                 await self._action_wallet(data)
+            case "wallet_push":
+                await self._action_wallet_push(data)
             # ── Google Sheets ─────────────────────────────────────────────────
             case "google_sheets":
                 await self._action_google_sheets(data)
@@ -1057,12 +1059,38 @@ class FlowExecutor:
         try:
             from app.services.wallet.service import WalletService
             ws = WalletService(db=self.db)
+            message = self._resolve(data.get("message", "")) or None
+            silent = bool(data.get("silent", False))
             await ws.perform_action(
                 serial=serial,
                 action=action,
                 value=data.get("value"),
                 user_id=self.flow.user_id,
+                source="flow",
+                message=message,
+                silent=silent,
             )
+        except Exception:
+            pass
+
+    async def _action_wallet_push(self, data: dict) -> None:
+        serial = self._resolve(data.get("serial", ""))
+        message = self._resolve(data.get("message", "Your pass has been updated."))
+        if not serial:
+            return
+        try:
+            from sqlalchemy import select
+            from app.models.wallet import WalletCard, WalletProgram, WalletPushSubscription
+            result = await self.db.execute(select(WalletCard).where(WalletCard.serial == serial))
+            card = result.scalar_one_or_none()
+            if not card:
+                return
+            program = await self.db.get(WalletProgram, card.program_id)
+            if not program or program.user_id != self.flow.user_id:
+                return
+            from app.api.wallet import _render_message, _push_card_devices
+            rendered = _render_message(message, card, program)
+            await _push_card_devices(card, program, rendered, self.db)
         except Exception:
             pass
 
