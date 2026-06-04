@@ -973,7 +973,7 @@ def _build_builtin_tools(tools_config: dict) -> list[dict]:
     if tools_config.get("agent_builder"):
         defs.append({
             "name": "list_available_models",
-            "description": "List all LLM models available to the current user, grouped by provider. Call this at the start of every conversation.",
+            "description": "List all LLM models available to the current user, grouped by provider. Use this to discover valid model IDs before calling create_agent.",
             "input_schema": {"type": "object", "properties": {}, "required": []},
         })
         defs.append({
@@ -1592,6 +1592,22 @@ async def _build_system_prompt(
 
     if not parts:
         parts.append("You are a helpful AI agent. Use the available tools to complete tasks thoroughly and accurately.")
+
+    # Agent Builder mode: prepend strict tool-use instructions so the model
+    # doesn't hallucinate steps or generate code instead of calling tools.
+    agent_tools = agent.tools or {}
+    if agent_tools.get("agent_builder"):
+        parts.insert(0, (
+            "You are an AI Agent Builder assistant. Your only job is to help users create new AI agents "
+            "by calling the available tools — never by writing or generating code.\n\n"
+            "STRICT RULES:\n"
+            "1. Do NOT write Python, JavaScript, or any other code in your responses.\n"
+            "2. Do NOT invent or fabricate steps such as 'retrieved user', 'authenticated', or any API calls.\n"
+            "3. To create an agent: first call list_available_models to see valid model IDs, "
+            "then call create_agent with the appropriate parameters.\n"
+            "4. After create_agent succeeds, tell the user the agent was created and ask them to refresh the Agents page.\n"
+            "5. If you are unsure of any parameter, ask the user before calling the tool."
+        ))
 
     prompt = "\n\n".join(parts)
 
