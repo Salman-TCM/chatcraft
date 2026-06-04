@@ -12,6 +12,9 @@ Endpoints (no auth — public, verified via channel-specific secrets):
   POST /webhooks/sms/{chatbot_id}        ← Twilio
   POST /webhooks/discord/{chatbot_id}    ← Discord interactions/gateway
   POST /webhooks/email/{chatbot_id}      ← AWS SES via SNS
+  GET  /webhooks/twitter/{chatbot_id}    ← Twitter CRC verification
+  POST /webhooks/twitter/{chatbot_id}    ← Twitter mention/DM events
+  POST /webhooks/tiktok/{chatbot_id}     ← TikTok DM events
 """
 import hashlib
 import hmac
@@ -622,3 +625,126 @@ async def _process_inbound_email(chatbot_id: uuid.UUID, ses_payload: dict) -> No
     except Exception as exc:
         from loguru import logger
         logger.error(f"Failed to process inbound email for chatbot {chatbot_id}: {exc}")
+
+
+# ── Twitter/X ─────────────────────────────────────────────────────────────────
+
+@router.get("/twitter/{chatbot_id}", response_class=PlainTextResponse)
+async def twitter_crc(
+    chatbot_id: uuid.UUID,
+    db: DBSession,
+    crc_token: str = Query(default="", alias="crc_token"),
+) -> PlainTextResponse:
+    """Respond to Twitter's CRC (challenge-response check) for webhook verification."""
+    integration = await _get_integration(db, chatbot_id, "twitter")
+    consumer_secret = integration.config.get("api_secret", "")
+    if not consumer_secret or not crc_token:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST)
+    import base64
+    digest = hmac.new(
+        consumer_secret.encode(),
+        crc_token.encode(),
+        hashlib.sha256,
+    ).digest()
+    response_token = base64.b64encode(digest).decode()
+    return PlainTextResponse(
+        f'{{"response_token": "sha256={response_token}"}}',
+        media_type="application/json",
+    )
+
+
+@router.post("/twitter/{chatbot_id}", status_code=status.HTTP_200_OK)
+async def twitter_webhook(
+    chatbot_id: uuid.UUID,
+    request: Request,
+    background_tasks: BackgroundTasks,
+    db: DBSession,
+) -> dict:
+    """Handle Twitter Account Activity API events — tweet_create_events (mentions/replies)."""
+    integration = await _get_integration(db, chatbot_id, "twitter")
+
+    # Verify Twitter signature
+    consumer_secret = integration.config.get("api_secret", "")
+    sig_header = request.headers.get("x-twitter-webhooks-signature", "")
+    body = await request.body()
+    if consumer_secret and sig_header.startswith("sha256="):
+        import base64
+        expected = base64.b64encode(
+            hmac.new(consumer_secret.encode(), body, hashlib.sha256).digest()
+        ).decode()
+        if not hmac.compare_digest(sig_header[7:], expected):
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Invalid signature")
+
+    payload = await request.json()
+
+    # Process tweet_create_events (mentions + DM replies)
+    for tweet in payload.get("tweet_create_events", []):
+        sender_id = tweet.get("user", {}).get("id_str", "")
+        tweet_id = tweet.get("id_str", "")
+        text = tweet.get("text", "")
+        sender_name = tweet.get("user", {}).get("screen_name", "")
+
+        # Ignore tweets from the bot account itself
+        bot_user_id = integration.config.get("twitter_user_id", "")
+        if sender_id == bot_user_id:
+            continue
+
+        if text and tweet_id:
+            background_tasks.add_task(
+                process_incoming,
+                chatbot_id=chatbot_id,
+                channel="twitter",
+                sender_id=tweet_id,  # reply to the tweet_id
+                text=text,
+                sender_name=sender_name,
+            )
+
+    return {"ok": True}
+
+
+# ── TikTok DM ─────────────────────────────────────────────────────────────────
+
+@router.post("/tiktok/{chatbot_id}", status_code=status.HTTP_200_OK)
+async def tiktok_webhook(
+    chatbot_id: uuid.UUID,
+    request: Request,
+    background_tasks: BackgroundTasks,
+    db: DBSession,
+) -> dict:
+    """Handle TikTok Business API webhook events — direct messages."""
+    integration = await _get_integration(db, chatbot_id, "tiktok")
+
+    # TikTok signs payloads with HMAC-SHA256 using the client_secret
+    client_secret = integration.config.get("client_secret", "")
+    sig_header = request.headers.get("x-tiktok-signature", "")
+    body = await request.body()
+    if client_secret and sig_header:
+        import base64
+        expected = base64.b64encode(
+            hmac.new(client_secret.encode(), body, hashlib.sha256).digest()
+        ).decode()
+        if not hmac.compare_digest(sig_header, expected):
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Invalid signature")
+
+    payload = await request.json()
+
+    # Process direct message events
+    for event in payload.get("data", []):
+        if event.get("event") != "dm_message":
+            continue
+        sender_id = event.get("from", {}).get("open_id", "")
+        sender_name = event.get("from", {}).get("display_name", "")
+        message_data = event.get("message", {})
+        text = message_data.get("content", {}).get("text", "")
+
+        if sender_id and text:
+            background_tasks.add_task(
+                process_incoming,
+                chatbot_id=chatbot_id,
+                channel="tiktok",
+                sender_id=sender_id,
+                text=text,
+                sender_name=sender_name,
+            )
+
+    return {"ok": True}

@@ -19,6 +19,8 @@ interface AdminUser {
   name: string | null;
   role: string;
   email_verified: boolean;
+  is_suspended: boolean;
+  suspended_reason: string | null;
   stripe_customer_id: string | null;
   subscription: {
     plan: string | null;
@@ -54,8 +56,9 @@ export default function AdminUserDetailPage() {
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [deleting, setDeleting] = useState(false);
 
-  const [impersonateToken, setImpersonateToken] = useState<string | null>(null);
   const [impersonating, setImpersonating] = useState(false);
+  const [suspending, setSuspending] = useState(false);
+  const [suspendReason, setSuspendReason] = useState("");
 
   async function load() {
     setLoading(true);
@@ -99,11 +102,38 @@ export default function AdminUserDetailPage() {
     }
   }
 
+  async function handleSuspend() {
+    if (!confirm(`Suspend ${user?.email}? They will be locked out immediately.`)) return;
+    setSuspending(true);
+    try {
+      await apiClient.post(`/api/admin/users/${id}/suspend`, null, { params: { reason: suspendReason || undefined } });
+      await load();
+    } finally {
+      setSuspending(false);
+    }
+  }
+
+  async function handleUnsuspend() {
+    setSuspending(true);
+    try {
+      await apiClient.post(`/api/admin/users/${id}/unsuspend`);
+      await load();
+    } finally {
+      setSuspending(false);
+    }
+  }
+
   async function handleImpersonate() {
     setImpersonating(true);
     try {
       const res = await apiClient.post(`/api/admin/users/${id}/impersonate`);
-      setImpersonateToken(res.data.data.access_token);
+      const token = res.data.data.access_token;
+      localStorage.setItem("impersonation_session", JSON.stringify({
+        token,
+        userName: user?.name ?? user?.email ?? id,
+        expiresAt: Date.now() + 5 * 60 * 1000,
+      }));
+      window.open("/dashboard", "_blank");
     } finally {
       setImpersonating(false);
     }
@@ -136,6 +166,15 @@ export default function AdminUserDetailPage() {
           <Button size="sm" variant="outline" onClick={handleImpersonate} disabled={impersonating}>
             <Eye className="h-4 w-4" /> {impersonating ? "…" : "Impersonate"}
           </Button>
+          {user.is_suspended ? (
+            <Button size="sm" variant="outline" onClick={handleUnsuspend} disabled={suspending} className="border-green-300 text-green-700 hover:bg-green-50">
+              {suspending ? "…" : "Unsuspend"}
+            </Button>
+          ) : (
+            <Button size="sm" variant="outline" onClick={handleSuspend} disabled={suspending} className="border-amber-300 text-amber-700 hover:bg-amber-50">
+              {suspending ? "…" : "Suspend"}
+            </Button>
+          )}
           <Button
             size="sm"
             variant="destructive"
@@ -146,17 +185,6 @@ export default function AdminUserDetailPage() {
         </div>
       </div>
 
-      {/* Impersonation token */}
-      {impersonateToken && (
-        <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 dark:bg-amber-950/20">
-          <p className="text-xs font-semibold text-amber-800 mb-2">Impersonation Token (5 min expiry)</p>
-          <p className="font-mono text-xs break-all text-amber-700">{impersonateToken}</p>
-          <p className="mt-2 text-xs text-amber-700">Copy this token and paste it as the Bearer token in API calls or use it with <code>Authorization: Bearer &lt;token&gt;</code></p>
-          <Button size="sm" variant="outline" className="mt-2" onClick={() => { navigator.clipboard.writeText(impersonateToken); }}>
-            Copy Token
-          </Button>
-        </div>
-      )}
 
       <div className="grid gap-6 lg:grid-cols-3">
         <div className="space-y-5 lg:col-span-2">
@@ -180,6 +208,12 @@ export default function AdminUserDetailPage() {
               <div>
                 <dt className="text-xs text-muted-foreground">Role</dt>
                 <dd className={`font-semibold capitalize ${roleColor[user.role]}`}>{user.role}</dd>
+              </div>
+              <div>
+                <dt className="text-xs text-muted-foreground">Account Status</dt>
+                <dd className={`font-semibold text-xs ${user.is_suspended ? "text-red-600" : "text-green-600"}`}>
+                  {user.is_suspended ? `Suspended${user.suspended_reason ? ` — ${user.suspended_reason}` : ""}` : "Active"}
+                </dd>
               </div>
               <div>
                 <dt className="text-xs text-muted-foreground">Stripe Customer</dt>

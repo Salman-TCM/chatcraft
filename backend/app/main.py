@@ -41,8 +41,12 @@ from app.api.manage import router as manage_router
 from app.api.white_label import router as white_label_router
 from app.api.push import router as push_router
 from app.api.model_keys import router as model_keys_router
-from app.api.agents import router as agents_router
+from app.api.search_keys import router as search_keys_router
+from app.api.agents import router as agents_router, public_router as agents_public_router
 from app.api.voice_calls import router as voice_calls_router
+from app.api.settings_comms import router as settings_comms_router
+from app.api.google_sheets import router as google_sheets_router
+from app.api.models import router as models_router
 from app.core.security_headers import SecurityHeadersMiddleware
 from app.core.ip_abuse import IPAbuseMiddleware
 from app.core.config import settings
@@ -95,6 +99,7 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+    allow_private_network=True,
 )
 
 app.include_router(health_router)
@@ -130,8 +135,13 @@ app.include_router(manage_router)
 app.include_router(white_label_router)
 app.include_router(push_router)
 app.include_router(model_keys_router)
+app.include_router(search_keys_router)
+app.include_router(settings_comms_router)
 app.include_router(agents_router)
+app.include_router(agents_public_router)
 app.include_router(voice_calls_router)
+app.include_router(google_sheets_router)
+app.include_router(models_router)
 
 
 @app.get("/", tags=["health"])

@@ -12,9 +12,20 @@ export const apiClient: AxiosInstance = axios.create({
   },
 });
 
-// Attach the backend JWT on every request so the server can identify the user
+// Attach the backend JWT on every request — prefer an active impersonation token
 apiClient.interceptors.request.use(async (config) => {
   if (typeof window !== "undefined") {
+    const imp = localStorage.getItem("impersonation_session");
+    if (imp) {
+      try {
+        const parsed = JSON.parse(imp);
+        if (parsed.token && parsed.expiresAt && Date.now() < parsed.expiresAt) {
+          config.headers.Authorization = `Bearer ${parsed.token}`;
+          return config;
+        }
+        localStorage.removeItem("impersonation_session");
+      } catch { /* corrupt entry — fall through */ }
+    }
     const session = await getSession();
     const token = (session?.user as any)?.accessToken;
     if (token) {

@@ -8,6 +8,7 @@ DELETE /api/tokens/{id}   — revoke token
 import hashlib
 import secrets
 import uuid
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, HTTPException, status
 from sqlalchemy import select
@@ -19,10 +20,16 @@ router = APIRouter(prefix="/api/tokens", tags=["tokens"])
 
 
 def _token_dict(t: ApiToken, full_token: str | None = None) -> dict:
+    now = datetime.now(timezone.utc)
+    expires_at = t.expires_at
+    is_expired = expires_at is not None and expires_at < now
+
     d = {
         "id": str(t.id),
         "name": t.name,
         "token_prefix": t.token_prefix,
+        "expires_at": expires_at.isoformat() if expires_at else None,
+        "is_expired": is_expired,
         "last_used_at": t.last_used_at.isoformat() if t.last_used_at else None,
         "created_at": t.created_at.isoformat(),
     }
@@ -48,16 +55,28 @@ async def create_token(body: dict, user: CurrentUser, db: DBSession) -> dict:
     if not name:
         raise HTTPException(status_code=422, detail="name required")
 
-    # Generate token: cc_ + 32 random bytes hex (cc_ = ChatCraft)
+    expires_at: datetime | None = None
+    expires_in_days = body.get("expires_in_days")
+    if expires_in_days is not None:
+        try:
+            days = int(expires_in_days)
+            if days <= 0:
+                raise ValueError
+        except (ValueError, TypeError):
+            raise HTTPException(status_code=422, detail="expires_in_days must be a positive integer")
+        from datetime import timedelta
+        expires_at = datetime.now(timezone.utc) + timedelta(days=days)
+
     raw = "cc_" + secrets.token_hex(32)
     token_hash = hashlib.sha256(raw.encode()).hexdigest()
-    token_prefix = raw[:12]  # show first 12 chars for identification
+    token_prefix = raw[:12]
 
     token = ApiToken(
         user_id=user.id,
         name=name,
         token_hash=token_hash,
         token_prefix=token_prefix,
+        expires_at=expires_at,
     )
     db.add(token)
     await db.commit()

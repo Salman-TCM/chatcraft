@@ -57,6 +57,7 @@ export default function LandingPagesPage() {
   const [theme, setTheme] = useState<"light" | "dark">("light");
   const [seoTitle, setSeoTitle] = useState("");
   const [seoDesc, setSeoDesc] = useState("");
+  const [ogImage, setOgImage] = useState("");
   const [aiPrompt, setAiPrompt] = useState("");
   const [aiGenerating, setAiGenerating] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -100,6 +101,7 @@ export default function LandingPagesPage() {
       setTheme(full.theme);
       setSeoTitle(full.seo_meta?.title ?? "");
       setSeoDesc(full.seo_meta?.description ?? "");
+      setOgImage(full.seo_meta?.og_image ?? "");
       setEditorTab("code");
     } catch {}
   }
@@ -117,6 +119,7 @@ export default function LandingPagesPage() {
         seo_meta: {
           title: seoTitle || undefined,
           description: seoDesc || undefined,
+          og_image: ogImage || undefined,
         },
       });
       setEditing(null);
@@ -307,6 +310,27 @@ export default function LandingPagesPage() {
                 <div className="space-y-1">
                   <Label>SEO Description</Label>
                   <Input value={seoDesc} onChange={(e) => setSeoDesc(e.target.value)} placeholder={pageDesc} />
+                </div>
+                <div className="space-y-1">
+                  <Label>Social Sharing Image URL (OG Image)</Label>
+                  <Input value={ogImage} onChange={(e) => setOgImage(e.target.value)} placeholder="https://example.com/image.png (recommended: 1200×630px)" />
+                </div>
+                {/* Social sharing preview card */}
+                <div className="space-y-2">
+                  <Label>Social Sharing Preview</Label>
+                  <div className="rounded-xl border overflow-hidden bg-muted/40 max-w-sm shadow-sm">
+                    {ogImage ? (
+                      <img src={ogImage} alt="OG preview" className="w-full h-40 object-cover" onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }} />
+                    ) : (
+                      <div className="w-full h-40 bg-gradient-to-br from-muted to-muted-foreground/20 flex items-center justify-center text-xs text-muted-foreground">No image set</div>
+                    )}
+                    <div className="p-3 space-y-0.5">
+                      <p className="text-[10px] text-muted-foreground uppercase tracking-wide">{typeof window !== "undefined" ? window.location.hostname : "yoursite.com"}</p>
+                      <p className="text-sm font-semibold line-clamp-1">{seoTitle || pageTitle || "Page title"}</p>
+                      <p className="text-xs text-muted-foreground line-clamp-2">{seoDesc || pageDesc || "Page description will appear here."}</p>
+                    </div>
+                  </div>
+                  <p className="text-[11px] text-muted-foreground">This is how your page will appear when shared on Facebook, LinkedIn, Slack, and similar platforms.</p>
                 </div>
                 <div className="grid grid-cols-2 gap-4">
                   <div className="space-y-1">

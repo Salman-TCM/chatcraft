@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   Search, X, Send, StickyNote, UserCheck, UserX, CheckCheck,
-  RotateCcw, ChevronDown, Inbox, Bot, User, Clock, Filter, Shuffle, Contact2,
+  RotateCcw, ChevronDown, Inbox, Bot, User, Clock, Filter, Shuffle, Contact2, Paperclip,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -74,6 +74,8 @@ export default function InboxPage() {
   const [loadingDetail, setLoadingDetail] = useState(false);
 
   const [replyText, setReplyText] = useState("");
+  const [attachments, setAttachments] = useState<File[]>([]);
+  const attachInputRef = useRef<HTMLInputElement>(null);
   const [noteText, setNoteText] = useState("");
   const [showNotes, setShowNotes] = useState(false);
   const [sending, setSending] = useState(false);
@@ -169,10 +171,20 @@ export default function InboxPage() {
     if (!selected || !replyText.trim()) return;
     setSending(true);
     try {
-      await apiClient.post(`/api/v1/conversations/${selected.id}/messages`, {
-        content: replyText.trim(),
-        role: "assistant",
-      });
+      if (selected.channel === "email" && attachments.length > 0) {
+        const form = new FormData();
+        form.append("content", replyText.trim());
+        attachments.forEach((f) => form.append("files", f));
+        await apiClient.post(`/api/v1/conversations/${selected.id}/send-with-attachments`, form, {
+          headers: { "Content-Type": "multipart/form-data" },
+        });
+        setAttachments([]);
+      } else {
+        await apiClient.post(`/api/v1/conversations/${selected.id}/messages`, {
+          content: replyText.trim(),
+          role: "assistant",
+        });
+      }
       setReplyText("");
       const res = await apiClient.get(`/api/v1/conversations/${selected.id}`);
       setSelected(res.data.data);
@@ -543,18 +555,57 @@ export default function InboxPage() {
               {selected.status !== "closed" && (
                 <div className="border-t p-3">
                   <div className="flex gap-2 items-end max-w-3xl mx-auto">
-                    <Textarea
-                      className="min-h-[60px] resize-none text-sm flex-1"
-                      placeholder="Type a reply… (Shift+Enter for new line)"
-                      value={replyText}
-                      onChange={(e) => setReplyText(e.target.value)}
-                      onKeyDown={(e) => {
-                        if (e.key === "Enter" && !e.shiftKey) {
-                          e.preventDefault();
-                          sendReply();
-                        }
-                      }}
-                    />
+                    <div className="flex-1 space-y-1">
+                      <Textarea
+                        className="min-h-[60px] resize-none text-sm"
+                        placeholder="Type a reply… (Shift+Enter for new line)"
+                        value={replyText}
+                        onChange={(e) => setReplyText(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter" && !e.shiftKey) {
+                            e.preventDefault();
+                            sendReply();
+                          }
+                        }}
+                      />
+                      {selected.channel === "email" && attachments.length > 0 && (
+                        <div className="flex flex-wrap gap-1">
+                          {attachments.map((f, i) => (
+                            <span key={i} className="inline-flex items-center gap-1 text-xs bg-muted rounded px-2 py-0.5">
+                              <Paperclip className="h-3 w-3" />{f.name}
+                              <button onClick={() => setAttachments((p) => p.filter((_, j) => j !== i))} className="ml-1 text-muted-foreground hover:text-destructive">×</button>
+                            </span>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                    {selected.channel === "email" && (
+                      <>
+                        <input
+                          ref={attachInputRef}
+                          type="file"
+                          multiple
+                          className="hidden"
+                          onChange={(e) => {
+                            const newFiles = Array.from(e.target.files ?? []);
+                            setAttachments((prev) => {
+                              const combined = [...prev, ...newFiles].slice(0, 5);
+                              return combined;
+                            });
+                            e.target.value = "";
+                          }}
+                        />
+                        <Button
+                          size="icon"
+                          variant="outline"
+                          className="h-10 w-10 shrink-0"
+                          onClick={() => attachInputRef.current?.click()}
+                          title="Attach files (max 5, 25 MB)"
+                        >
+                          <Paperclip className="h-4 w-4" />
+                        </Button>
+                      </>
+                    )}
                     <Button
                       size="icon"
                       className="h-10 w-10 shrink-0"

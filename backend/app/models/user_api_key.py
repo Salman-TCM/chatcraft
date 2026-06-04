@@ -6,7 +6,12 @@ from sqlalchemy.orm import Mapped, mapped_column
 
 from app.models.base import Base, TimestampMixin
 
-PROVIDERS = ("anthropic", "openai", "google", "deepseek", "groq", "perplexity", "xai")
+PROVIDERS = (
+    # LLM providers
+    "anthropic", "openai", "google", "deepseek", "groq", "perplexity", "xai",
+    # Search providers
+    "tavily", "brave_search", "serper", "serpapi", "bing", "you", "exa",
+)
 
 
 class UserApiKey(TimestampMixin, Base):

@@ -52,6 +52,13 @@ async def get_current_user(
         if not api_token:
             raise exc
 
+        if api_token.expires_at and api_token.expires_at < datetime.now(timezone.utc):
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail={"success": False, "error": "API token has expired", "code": "TOKEN_EXPIRED"},
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+
         user = await db.get(User, api_token.user_id)
         if not user:
             raise exc

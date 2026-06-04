@@ -169,22 +169,35 @@ async def list_agencies(db: DBSession) -> dict:
 async def create_agency(body: dict, db: DBSession) -> dict:
     slug = (body.get("slug") or "").strip().lower().replace(" ", "-")
     if not slug:
-        raise HTTPException(status_code=422, detail="slug required")
-    owner_user_id = body.get("owner_user_id")
-    if not owner_user_id:
-        raise HTTPException(status_code=422, detail="owner_user_id required")
+        raise HTTPException(status_code=422, detail={"success": False, "error": "slug required", "code": "VALIDATION_ERROR"})
+    owner_user_id_raw = body.get("owner_user_id")
+    if not owner_user_id_raw:
+        raise HTTPException(status_code=422, detail={"success": False, "error": "owner_user_id required", "code": "VALIDATION_ERROR"})
+
+    try:
+        owner_uuid = uuid.UUID(str(owner_user_id_raw))
+    except ValueError:
+        raise HTTPException(status_code=422, detail={"success": False, "error": "owner_user_id is not a valid UUID", "code": "VALIDATION_ERROR"})
+
+    owner = await db.get(User, owner_uuid)
+    if not owner:
+        raise HTTPException(status_code=404, detail={"success": False, "error": "Owner user not found", "code": "NOT_FOUND"})
 
     a = Agency(
         slug=slug,
         primary_colour=body.get("primary_colour", "#6366f1"),
         plan=body.get("plan", "starter"),
         status=body.get("status", "active"),
-        owner_user_id=uuid.UUID(str(owner_user_id)),
+        owner_user_id=owner_uuid,
         support_email=body.get("support_email"),
         from_email=body.get("from_email"),
     )
     db.add(a)
-    await db.commit()
+    try:
+        await db.commit()
+    except Exception:
+        await db.rollback()
+        raise HTTPException(status_code=409, detail={"success": False, "error": "Slug already exists", "code": "SLUG_TAKEN"})
     await db.refresh(a)
     return {"success": True, "data": _agency_dict(a)}
 

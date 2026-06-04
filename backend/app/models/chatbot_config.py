@@ -1,6 +1,7 @@
 import uuid
 
-from sqlalchemy import Boolean, Float, ForeignKey, Integer, String, Text
+from datetime import datetime
+from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Integer, String, Text
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -93,6 +94,12 @@ class ChatbotConfig(TimestampMixin, Base):
     )
     voice_similarity_boost: Mapped[float] = mapped_column(
         nullable=False, default=0.75, server_default="0.75"
+    )
+
+    # Google Docs system prompt sync — link a Google Doc to use as system prompt
+    docs_system_prompt_doc_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    docs_system_prompt_synced_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
     )
 
     # A2A authentication — if a2a_auth_required is True, callers must supply a Bearer token

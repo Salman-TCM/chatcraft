@@ -528,11 +528,11 @@
   - [x] Send Email (AWS SES/SMTP)
   - [x] Send Push Notification
   - [x] Outbound Call (OpenAI Realtime / xAI / ElevenLabs)
-  - [ ] Transfer Call / End Call
+  - [x] Transfer Call / End Call
   - [x] Send Team Notification / Internal Note
   - [x] Send Webhook (HTTP POST to external URL)
   - [x] Google Sheets (append_row / get_row / search_rows / update_row via gspread)
-  - [ ] Google Docs (create/update)
+  - [x] Google Docs (create/update)
   - [x] WhatsApp Template message (send_rich type=template)
   - [x] Set/Delete Persistent Menu (Messenger/Instagram) via flow action
   - [x] Set/Delete Telegram Commands via flow action
@@ -540,7 +540,7 @@
   - [x] Social Post (Facebook, Instagram) via flow action
   - [x] Web Fetch (Claude — fetch and extract URL content)
   - [x] Wallet: add/remove punch, add/remove points, redeem, send push
-  - [ ] Comment on Post (Instagram)
+  - [x] Comment on Post (Instagram)
 
 ### Flow Builder UI — Frontend
 - [x] Flow Builder page (`/dashboard/flows/{id}/edit`) with ReactFlow canvas
@@ -685,15 +685,15 @@
 - [x] Phone channel in inbox — phone badge already in inbox channel filter
 
 ### X (Twitter)
-- [ ] Twitter/X OAuth integration
-- [ ] @Mention webhook monitor
-- [ ] Auto-reply to mentions using AI agent
-- [ ] X channel in inbox (mentions + replies)
+- [x] Twitter/X OAuth integration
+- [x] @Mention webhook monitor
+- [x] Auto-reply to mentions using AI agent
+- [x] X channel in inbox (mentions + replies)
 
 ### TikTok DM
-- [ ] TikTok Business API integration
-- [ ] TikTok DM webhook handler
-- [ ] TikTok channel in inbox
+- [x] TikTok Business API integration
+- [x] TikTok DM webhook handler
+- [x] TikTok channel in inbox
 
 ### Email (Inbox)
 - [x] AWS SES or SMTP configuration per account/agent (via ChannelIntegration config)
@@ -701,7 +701,7 @@
 - [x] Email channel in inbox — inbound via `POST /webhooks/email/{chatbot_id}` (SES SNS)
 - [x] `POST /api/v1/chatbots/{id}/integrations/email/test` — send test email via SMTP
 - [x] AI email body generator — `POST /api/v1/conversations/{id}/ai-compose` (tone + instruction)
-- [ ] Attachment support (up to 5 files, 25MB total)
+- [x] Attachment support (up to 5 files, 25MB total)
 
 ---
 
@@ -746,7 +746,7 @@
 - [x] AI content generation for landing page sections
 - [x] SEO settings panel (title, description, OG tags, canonical, robots)
 - [x] QR code generator (PNG/SVG download, custom colors)
-- [ ] Social sharing preview
+- [x] Social sharing preview
 - [x] Published page (`/p/{slug}`) — public URL with embedded widget option
 
 ---
@@ -770,8 +770,8 @@
 - [x] Telegram broadcast: bulk message to all Telegram subscribers
 - [x] Push broadcast: VAPID bulk push to PWA subscribers
 - [x] WhatsApp broadcast: Meta-approved template messages (24h compliance)
-- [ ] Messenger broadcast: Facebook marketing messages
-- [ ] Phone broadcast: ElevenLabs outbound call campaigns
+- [x] Messenger broadcast: Facebook marketing messages
+- [x] Phone broadcast: ElevenLabs outbound call campaigns
 
 ### Social Poster API — Backend
 - [x] `GET /api/v1/social/accounts` — list connected social accounts
@@ -781,7 +781,7 @@
 - [x] `DELETE /api/v1/social/posts/{id}` — delete post
 - [x] Facebook Page post via Graph API
 - [x] Instagram post (requires image) via Graph API
-- [ ] X/Twitter post via Twitter API v2 (publish-only, no scheduling)
+- [x] X/Twitter post via Twitter API v2 (publish-only, no scheduling)
 - [x] AI caption generator using agent's LLM
 
 ### Comment Automation API — Backend
@@ -799,7 +799,7 @@
 - [x] Test send modal (`POST /api/v1/broadcasts/{id}/test`) — email and SMS
 - [x] Campaign schedule picker (datetime-local input)
 - [x] Delivery analytics modal (sent/failed/total/delivery rate)
-- [ ] Email campaign composer (drag-and-drop HTML template builder)
+- [x] Email campaign composer (drag-and-drop HTML template builder)
 - [x] Social Poster page (`/dashboard/social`)
 - [x] Post composer (multi-platform select, caption, image upload)
 - [x] AI caption generator button
@@ -849,7 +849,7 @@
 - [x] Stripe checkout integration on storefront
 - [x] Order confirmation page
 - [x] Purchase history page (store owner view)
-- [ ] Embed storefront in widget (chatbot can show products)
+- [x] Embed storefront in widget (chatbot can show products)
 
 ---
 
@@ -904,7 +904,7 @@
 - [x] ElevenLabs voice cloning API integration (create voice + conversational agent)
 - [x] Voice preview playback
 - [x] Copy generated Agent ID to use in widget voice settings
-- [ ] Voice agent ElevenLabs setup checklist (security overrides, client events)
+- [x] Voice agent ElevenLabs setup checklist (security overrides, client events)
 
 ### OpenAI Realtime API for Voice Calls
 - [x] OpenAI Realtime API WebSocket proxy (server-side)
@@ -912,7 +912,7 @@
 - [x] xAI Grok Realtime API WebSocket proxy (5 voices: Eve, Ara, Leo, Rex, Sal)
 - [x] Full function calling in voice mode (OpenAI + xAI)
 - [x] MCP tool support in voice mode (OpenAI + xAI)
-- [ ] Web search in voice mode (built-in Grok, tool for OpenAI)
+- [x] Web search in voice mode (built-in Grok, tool for OpenAI)
 - [x] Conversation history resume in voice (last 40 messages injected)
 
 ### Browser Agent (Cloud Browser)
@@ -929,7 +929,7 @@
 - [x] Auto-close on inactivity (4 min)
 - [x] Block private IP ranges (SSRF protection)
 - [x] Monthly session limit per account (free:50, trial:100, premium:500, creator:2000)
-- [ ] Flow Builder AI Web node (Browse mode + Research mode)
+- [x] Flow Builder AI Web node (Browse mode + Research mode)
 - [x] Browser Agent toggle in agent settings
 
 ### MCP Servers (Model Context Protocol)
@@ -953,9 +953,9 @@
 - [x] Rich content JSON renderer in `ChatWindow` (carousels, cards, quick replies, buttons)
 - [x] `<<<RICH>>> ... <<<END>>>` dynamic content parser in AI response pipeline
 - [x] Dynamic content instruction builder in agent settings
-- [ ] AI-generated carousel/card/button template generator
+- [x] AI-generated carousel/card/button template generator
 - [x] YouTube URL auto-embed in chat messages
-- [ ] Carousel node in Flow Builder (swipeable cards)
+- [x] Carousel node in Flow Builder (swipeable cards)
 - [x] Quick replies node (disappear after selection, up to 13)
 - [x] Button types: URL, phone, email, postback, landing page
 
@@ -968,11 +968,11 @@
 - [x] AI Tasks works across all 11 channels
 
 ### Google Sheets Integration
-- [ ] Google OAuth for Sheets access
-- [ ] `GET /api/integrations/google/sheets` — list accessible spreadsheets
-- [ ] Flow Action: Google Sheets — Send Data, Get Row, Get Multiple Rows, Get Random Row, Update Row, Clear Row
-- [ ] Google Docs integration for system prompts (collaborative editing, 10-min sync)
-- [ ] Google Docs: create/update docs from flows
+- [x] Google OAuth for Sheets access
+- [x] `GET /api/integrations/google/sheets` — list accessible spreadsheets
+- [x] Flow Action: Google Sheets — Send Data, Get Row, Get Multiple Rows, Get Random Row, Update Row, Clear Row
+- [x] Google Docs integration for system prompts (collaborative editing, 10-min sync)
+- [x] Google Docs: create/update docs from flows
 
 ### Additional AI Models
 - [x] DeepSeek provider integration

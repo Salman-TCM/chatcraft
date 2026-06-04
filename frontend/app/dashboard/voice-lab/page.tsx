@@ -32,6 +32,14 @@ import {
   Check,
   Bot,
   Volume2,
+  Shield,
+  ChevronDown,
+  ChevronUp,
+  Settings2,
+  History,
+  Clock,
+  MessageSquare,
+  X,
 } from "lucide-react";
 import { apiClient } from "@/lib/api";
 
@@ -49,6 +57,27 @@ interface Agent {
   voice_id?: string;
   created_at?: number;
 }
+
+interface AgentDetail {
+  agent_id: string;
+  name: string;
+  system_prompt: string;
+  first_message: string;
+  language: string;
+  voice_id?: string;
+  auth_enabled: boolean;
+  allowed_origins: string[];
+  client_events: string[];
+}
+
+const AVAILABLE_CLIENT_EVENTS = [
+  { id: "user_transcript", label: "User transcript", description: "Receive each user utterance as text" },
+  { id: "agent_response", label: "Agent response", description: "Receive each agent text response" },
+  { id: "audio", label: "Audio chunks", description: "Receive raw audio from the agent" },
+  { id: "interruption", label: "Interruption", description: "Notified when user interrupts agent" },
+  { id: "ping", label: "Ping / latency", description: "Periodic ping events for latency measurement" },
+  { id: "internal_tentative_agent_response", label: "Tentative response (debug)", description: "Partial responses before final output" },
+];
 
 export default function VoiceLabPage() {
   const [voices, setVoices] = useState<Voice[]>([]);
@@ -72,6 +101,18 @@ export default function VoiceLabPage() {
     language: "en",
   });
   const [creatingAgent, setCreatingAgent] = useState(false);
+  const [expandedAgentId, setExpandedAgentId] = useState<string | null>(null);
+  const [agentDetails, setAgentDetails] = useState<Record<string, AgentDetail>>({});
+  const [loadingDetail, setLoadingDetail] = useState<string | null>(null);
+  const [savingDetail, setSavingDetail] = useState<string | null>(null);
+
+  // Conversation history
+  const [historyAgentId, setHistoryAgentId] = useState<string | null>(null);
+  const [conversations, setConversations] = useState<Record<string, any[]>>({});
+  const [loadingHistory, setLoadingHistory] = useState<string | null>(null);
+  const [selectedConv, setSelectedConv] = useState<any | null>(null);
+  const [convTranscript, setConvTranscript] = useState<any | null>(null);
+  const [loadingTranscript, setLoadingTranscript] = useState(false);
 
   const [previewForm, setPreviewForm] = useState({ voice_id: "", text: "Hello, this is a preview of my voice." });
   const [previewing, setPreviewing] = useState(false);
@@ -154,10 +195,65 @@ export default function VoiceLabPage() {
     await loadData();
   }
 
+  async function toggleAgentDetail(agentId: string) {
+    if (expandedAgentId === agentId) {
+      setExpandedAgentId(null);
+      return;
+    }
+    setExpandedAgentId(agentId);
+    if (agentDetails[agentId]) return;
+    setLoadingDetail(agentId);
+    try {
+      const { data } = await apiClient.get(`/api/v1/voice-lab/agents/${agentId}`);
+      setAgentDetails((prev) => ({ ...prev, [agentId]: data.data }));
+    } catch {}
+    setLoadingDetail(null);
+  }
+
+  function updateDetail(agentId: string, patch: Partial<AgentDetail>) {
+    setAgentDetails((prev) => ({ ...prev, [agentId]: { ...prev[agentId], ...patch } }));
+  }
+
+  async function saveAgentDetail(agentId: string) {
+    const detail = agentDetails[agentId];
+    if (!detail) return;
+    setSavingDetail(agentId);
+    try {
+      await apiClient.patch(`/api/v1/voice-lab/agents/${agentId}`, {
+        auth_enabled: detail.auth_enabled,
+        allowed_origins: detail.allowed_origins,
+        client_events: detail.client_events,
+      });
+    } catch {}
+    setSavingDetail(null);
+  }
+
   function copyId(id: string) {
     navigator.clipboard.writeText(id);
     setCopiedId(id);
     setTimeout(() => setCopiedId(null), 2000);
+  }
+
+  async function toggleHistory(agentId: string) {
+    if (historyAgentId === agentId) { setHistoryAgentId(null); return; }
+    setHistoryAgentId(agentId);
+    if (conversations[agentId]) return;
+    setLoadingHistory(agentId);
+    try {
+      const { data } = await apiClient.get(`/api/v1/voice-lab/agents/${agentId}/conversations`);
+      setConversations(prev => ({ ...prev, [agentId]: data.data ?? [] }));
+    } catch {}
+    setLoadingHistory(null);
+  }
+
+  async function openTranscript(agentId: string, conv: any) {
+    setSelectedConv(conv);
+    setLoadingTranscript(true);
+    try {
+      const { data } = await apiClient.get(`/api/v1/voice-lab/agents/${agentId}/conversations/${conv.id}`);
+      setConvTranscript(data.data);
+    } catch {}
+    setLoadingTranscript(false);
   }
 
   return (
@@ -403,52 +499,233 @@ export default function VoiceLabPage() {
             </CardContent>
           </Card>
         ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {agents.map((agent) => (
-              <Card key={agent.id}>
-                <CardHeader className="pb-2">
-                  <div className="flex items-start justify-between">
-                    <CardTitle className="text-base">{agent.name}</CardTitle>
-                    <Button
-                      size="icon"
-                      variant="ghost"
-                      className="h-7 w-7 text-destructive"
-                      onClick={() => handleDeleteAgent(agent.id)}
-                    >
-                      <Trash2 className="h-3 w-3" />
-                    </Button>
-                  </div>
-                </CardHeader>
-                <CardContent className="space-y-2">
-                  <div>
-                    <p className="text-xs text-muted-foreground mb-1">Agent ID (copy for widget settings)</p>
-                    <div className="flex items-center gap-1 bg-muted rounded px-2 py-1">
-                      <code className="text-xs flex-1 truncate">{agent.id}</code>
-                      <Button
-                        size="icon"
-                        variant="ghost"
-                        className="h-5 w-5"
-                        onClick={() => copyId(agent.id)}
-                      >
-                        {copiedId === agent.id ? (
-                          <Check className="h-3 w-3 text-green-500" />
-                        ) : (
-                          <Copy className="h-3 w-3" />
-                        )}
-                      </Button>
+          <div className="space-y-4">
+            {agents.map((agent) => {
+              const detail = agentDetails[agent.id];
+              const isExpanded = expandedAgentId === agent.id;
+              return (
+                <Card key={agent.id}>
+                  <CardHeader className="pb-2">
+                    <div className="flex items-start justify-between">
+                      <CardTitle className="text-base">{agent.name}</CardTitle>
+                      <div className="flex gap-1">
+                        <Button
+                          size="icon"
+                          variant="ghost"
+                          className="h-7 w-7"
+                          title="Conversation history"
+                          onClick={() => toggleHistory(agent.id)}
+                        >
+                          {loadingHistory === agent.id
+                            ? <Clock className="h-3.5 w-3.5 animate-spin" />
+                            : <History className={`h-3.5 w-3.5 ${historyAgentId === agent.id ? "text-primary" : ""}`} />}
+                        </Button>
+                        <Button
+                          size="icon"
+                          variant="ghost"
+                          className="h-7 w-7"
+                          title="Setup checklist"
+                          onClick={() => toggleAgentDetail(agent.id)}
+                        >
+                          <Settings2 className="h-3.5 w-3.5" />
+                        </Button>
+                        <Button
+                          size="icon"
+                          variant="ghost"
+                          className="h-7 w-7 text-destructive"
+                          onClick={() => handleDeleteAgent(agent.id)}
+                        >
+                          <Trash2 className="h-3 w-3" />
+                        </Button>
+                      </div>
                     </div>
-                  </div>
-                  {agent.voice_id && (
-                    <p className="text-xs text-muted-foreground">
-                      Voice: {voices.find((v) => v.id === agent.voice_id)?.name || agent.voice_id}
-                    </p>
-                  )}
-                </CardContent>
-              </Card>
-            ))}
+                  </CardHeader>
+                  <CardContent className="space-y-2">
+                    <div>
+                      <p className="text-xs text-muted-foreground mb-1">Agent ID (copy for widget settings)</p>
+                      <div className="flex items-center gap-1 bg-muted rounded px-2 py-1">
+                        <code className="text-xs flex-1 truncate">{agent.id}</code>
+                        <Button size="icon" variant="ghost" className="h-5 w-5" onClick={() => copyId(agent.id)}>
+                          {copiedId === agent.id ? <Check className="h-3 w-3 text-green-500" /> : <Copy className="h-3 w-3" />}
+                        </Button>
+                      </div>
+                    </div>
+                    {agent.voice_id && (
+                      <p className="text-xs text-muted-foreground">
+                        Voice: {voices.find((v) => v.id === agent.voice_id)?.name || agent.voice_id}
+                      </p>
+                    )}
+
+                    {/* Setup checklist */}
+                    {isExpanded && (
+                      <div className="mt-3 border-t pt-3 space-y-4">
+                        {loadingDetail === agent.id ? (
+                          <p className="text-xs text-muted-foreground">Loading configuration…</p>
+                        ) : detail ? (
+                          <>
+                            {/* Security overrides */}
+                            <div>
+                              <div className="flex items-center gap-1.5 mb-2">
+                                <Shield className="h-3.5 w-3.5 text-muted-foreground" />
+                                <p className="text-xs font-semibold">Security Overrides</p>
+                              </div>
+                              <div className="space-y-2">
+                                <label className="flex items-center justify-between">
+                                  <div>
+                                    <p className="text-xs font-medium">Require authentication</p>
+                                    <p className="text-[10px] text-muted-foreground">Force signed-URL auth — prevents unauthorized widget usage</p>
+                                  </div>
+                                  <button
+                                    role="switch"
+                                    aria-checked={detail.auth_enabled}
+                                    onClick={() => updateDetail(agent.id, { auth_enabled: !detail.auth_enabled })}
+                                    className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${detail.auth_enabled ? "bg-primary" : "bg-input"}`}
+                                  >
+                                    <span className={`inline-block h-3.5 w-3.5 rounded-full bg-white shadow transition-transform ${detail.auth_enabled ? "translate-x-4" : "translate-x-0.5"}`} />
+                                  </button>
+                                </label>
+                                <div>
+                                  <p className="text-xs font-medium mb-1">Allowed origins</p>
+                                  <input
+                                    value={detail.allowed_origins.join(", ")}
+                                    onChange={(e) =>
+                                      updateDetail(agent.id, {
+                                        allowed_origins: e.target.value.split(",").map((s) => s.trim()).filter(Boolean),
+                                      })
+                                    }
+                                    placeholder="example.com, app.example.com"
+                                    className="w-full h-8 rounded-md border bg-background px-2 text-xs font-mono focus:outline-none focus:ring-1 focus:ring-ring"
+                                  />
+                                  <p className="text-[10px] text-muted-foreground mt-1">Leave blank to allow all origins. Comma-separated hostnames.</p>
+                                </div>
+                              </div>
+                            </div>
+
+                            {/* Client events */}
+                            <div>
+                              <p className="text-xs font-semibold mb-2">Client Events</p>
+                              <p className="text-[10px] text-muted-foreground mb-2">
+                                Select which events the ElevenLabs widget sends to your page's JavaScript. Use these to build custom UI reactions.
+                              </p>
+                              <div className="space-y-1.5">
+                                {AVAILABLE_CLIENT_EVENTS.map((ev) => {
+                                  const active = detail.client_events.includes(ev.id);
+                                  return (
+                                    <label key={ev.id} className="flex items-start gap-2 cursor-pointer">
+                                      <input
+                                        type="checkbox"
+                                        checked={active}
+                                        onChange={() =>
+                                          updateDetail(agent.id, {
+                                            client_events: active
+                                              ? detail.client_events.filter((e) => e !== ev.id)
+                                              : [...detail.client_events, ev.id],
+                                          })
+                                        }
+                                        className="mt-0.5 h-3.5 w-3.5 rounded"
+                                      />
+                                      <div>
+                                        <p className="text-xs font-medium leading-none">{ev.label}</p>
+                                        <p className="text-[10px] text-muted-foreground">{ev.description}</p>
+                                      </div>
+                                    </label>
+                                  );
+                                })}
+                              </div>
+                            </div>
+
+                            <Button
+                              size="sm"
+                              className="w-full h-8 text-xs"
+                              disabled={savingDetail === agent.id}
+                              onClick={() => saveAgentDetail(agent.id)}
+                            >
+                              {savingDetail === agent.id ? "Saving…" : "Save Security & Events"}
+                            </Button>
+                          </>
+                        ) : null}
+                      </div>
+                    )}
+                    {/* Conversation history panel */}
+                    {historyAgentId === agent.id && (
+                      <div className="mt-3 border-t pt-3 space-y-2">
+                        <p className="text-xs font-semibold flex items-center gap-1.5">
+                          <History className="h-3.5 w-3.5" /> Conversation History
+                        </p>
+                        {(conversations[agent.id] ?? []).length === 0 ? (
+                          <p className="text-[11px] text-muted-foreground">No conversations recorded yet.</p>
+                        ) : (
+                          <div className="space-y-1.5 max-h-48 overflow-y-auto">
+                            {(conversations[agent.id] ?? []).map((conv: any) => (
+                              <button
+                                key={conv.id}
+                                onClick={() => openTranscript(agent.id, conv)}
+                                className="w-full text-left rounded-md border px-3 py-2 text-xs hover:bg-muted/50 flex items-center justify-between gap-2"
+                              >
+                                <div className="flex items-center gap-2 min-w-0">
+                                  <MessageSquare className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                                  <span className="truncate font-mono text-muted-foreground">{conv.id?.slice(0,8)}…</span>
+                                  <span className={`text-[10px] px-1.5 py-0.5 rounded-full ${conv.status === "done" ? "bg-green-100 text-green-700" : "bg-muted text-muted-foreground"}`}>
+                                    {conv.status}
+                                  </span>
+                                </div>
+                                <div className="text-[10px] text-muted-foreground shrink-0">
+                                  {conv.call_duration_secs ? `${conv.call_duration_secs}s` : "—"}
+                                  {conv.start_time ? ` · ${new Date(conv.start_time * 1000).toLocaleDateString()}` : ""}
+                                </div>
+                              </button>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </CardContent>
+                </Card>
+              );
+            })}
           </div>
         )}
       </div>
+
+      {/* Transcript modal */}
+      {selectedConv && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+          <div className="bg-background rounded-xl shadow-xl w-full max-w-lg max-h-[80vh] flex flex-col">
+            <div className="flex items-center justify-between p-4 border-b">
+              <div>
+                <p className="text-sm font-semibold">Conversation Transcript</p>
+                <p className="text-[11px] text-muted-foreground font-mono">{selectedConv.id}</p>
+              </div>
+              <button onClick={() => { setSelectedConv(null); setConvTranscript(null); }} className="text-muted-foreground hover:text-foreground">
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+            <div className="flex-1 overflow-y-auto p-4 space-y-2">
+              {loadingTranscript && <p className="text-sm text-muted-foreground text-center py-8">Loading…</p>}
+              {!loadingTranscript && convTranscript && convTranscript.transcript?.length === 0 && (
+                <p className="text-sm text-muted-foreground text-center py-8">No transcript available</p>
+              )}
+              {!loadingTranscript && convTranscript?.transcript?.map((t: any, i: number) => (
+                <div key={i} className={`flex ${t.role === "user" ? "justify-end" : "justify-start"}`}>
+                  <div className={`rounded-xl px-3 py-2 text-xs max-w-[80%] ${t.role === "user" ? "bg-primary text-primary-foreground rounded-br-sm" : "bg-muted rounded-bl-sm"}`}>
+                    <p className="font-medium capitalize text-[10px] opacity-60 mb-0.5">{t.role}</p>
+                    <p>{t.message}</p>
+                    {t.time_in_call_secs !== undefined && (
+                      <p className="text-[10px] opacity-50 mt-0.5">{t.time_in_call_secs}s</p>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+            {convTranscript && (
+              <div className="border-t px-4 py-2 flex items-center gap-4 text-[11px] text-muted-foreground">
+                <span>Status: <strong>{convTranscript.status}</strong></span>
+                {convTranscript.duration_secs && <span>Duration: <strong>{convTranscript.duration_secs}s</strong></span>}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

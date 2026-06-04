@@ -36,7 +36,7 @@ export default function AdminPaymentsPage() {
     setLoading(true);
     try {
       const res = await apiClient.get(`/api/admin/payments?page=${p}&limit=${LIMIT}`);
-      setPayments(p === 1 ? res.data.data : (prev) => [...prev, ...res.data.data]);
+      setPayments(prev => p === 1 ? res.data.data : [...prev, ...res.data.data]);
       setTotal(res.data.total);
     } finally {
       setLoading(false);

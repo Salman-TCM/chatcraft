@@ -18,32 +18,71 @@ interface Agency {
   created_at: string;
 }
 
+interface UserOption {
+  id: string;
+  email: string;
+  name: string | null;
+}
+
 export default function AdminAgenciesPage() {
   const [agencies, setAgencies] = useState<Agency[]>([]);
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
   const [slug, setSlug] = useState("");
   const [ownerUserId, setOwnerUserId] = useState("");
+  const [userSearch, setUserSearch] = useState("");
+  const [users, setUsers] = useState<UserOption[]>([]);
+  const [usersLoading, setUsersLoading] = useState(false);
   const [plan, setPlan] = useState("starter");
   const [saving, setSaving] = useState(false);
+  const [createError, setCreateError] = useState("");
   const [deletingId, setDeletingId] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
-    const { data } = await apiClient.get("/api/v1/agencies");
-    setAgencies(data.data ?? []);
-    setLoading(false);
+    try {
+      const { data } = await apiClient.get("/api/v1/agencies");
+      setAgencies(data.data ?? []);
+    } catch {
+      setAgencies([]);
+    } finally {
+      setLoading(false);
+    }
   }, []);
 
   useEffect(() => { load(); }, [load]);
 
+  async function searchUsers(q: string) {
+    setUserSearch(q);
+    if (q.length < 2) { setUsers([]); return; }
+    setUsersLoading(true);
+    try {
+      const { data } = await apiClient.get("/api/admin/users", { params: { q, limit: 10 } });
+      setUsers((data.data ?? []).map((u: any) => ({ id: u.id, email: u.email, name: u.name })));
+    } catch {
+      setUsers([]);
+    } finally {
+      setUsersLoading(false);
+    }
+  }
+
+  function selectUser(u: UserOption) {
+    setOwnerUserId(u.id);
+    setUserSearch(u.email);
+    setUsers([]);
+  }
+
   async function create() {
     if (!slug.trim() || !ownerUserId.trim()) return;
+    setCreateError("");
     setSaving(true);
     try {
       await apiClient.post("/api/v1/agencies", { slug: slug.trim(), owner_user_id: ownerUserId.trim(), plan });
-      setSlug(""); setOwnerUserId(""); setPlan("starter"); setShowForm(false);
+      setSlug(""); setOwnerUserId(""); setUserSearch(""); setPlan("starter"); setShowForm(false);
       await load();
+    } catch (err: any) {
+      const msg = err?.response?.data?.detail?.error ?? err?.response?.data?.detail ?? "Failed to create agency";
+      setCreateError(String(msg));
     } finally {
       setSaving(false);
     }
@@ -80,9 +119,35 @@ export default function AdminAgenciesPage() {
               <Label className="text-xs mb-1 block">Slug</Label>
               <Input value={slug} onChange={e => setSlug(e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, ""))} placeholder="my-agency" />
             </div>
-            <div>
-              <Label className="text-xs mb-1 block">Owner User ID</Label>
-              <Input value={ownerUserId} onChange={e => setOwnerUserId(e.target.value)} placeholder="UUID" />
+            <div className="relative">
+              <Label className="text-xs mb-1 block">Owner (search by email)</Label>
+              <Input
+                value={userSearch}
+                onChange={e => searchUsers(e.target.value)}
+                placeholder="Type email to search…"
+                autoComplete="off"
+              />
+              {ownerUserId && (
+                <p className="text-[10px] text-muted-foreground mt-0.5 font-mono truncate">{ownerUserId}</p>
+              )}
+              {(users.length > 0 || usersLoading) && (
+                <div className="absolute z-10 left-0 right-0 top-full mt-1 rounded-md border bg-background shadow-lg max-h-48 overflow-y-auto">
+                  {usersLoading ? (
+                    <div className="flex items-center gap-2 px-3 py-2 text-xs text-muted-foreground">
+                      <Loader2 className="h-3 w-3 animate-spin" /> Searching…
+                    </div>
+                  ) : users.map(u => (
+                    <button
+                      key={u.id}
+                      onClick={() => selectUser(u)}
+                      className="w-full text-left px-3 py-2 text-sm hover:bg-muted transition-colors"
+                    >
+                      <span className="font-medium">{u.email}</span>
+                      {u.name && <span className="text-muted-foreground ml-1.5 text-xs">({u.name})</span>}
+                    </button>
+                  ))}
+                </div>
+              )}
             </div>
           </div>
           <div>
@@ -93,11 +158,12 @@ export default function AdminAgenciesPage() {
               <option value="unlimited">Unlimited</option>
             </select>
           </div>
+          {createError && <p className="text-sm text-destructive">{createError}</p>}
           <div className="flex gap-2">
             <Button onClick={create} disabled={saving || !slug.trim() || !ownerUserId.trim()}>
               {saving && <Loader2 className="h-4 w-4 animate-spin mr-1" />} Create
             </Button>
-            <Button variant="outline" onClick={() => setShowForm(false)}>Cancel</Button>
+            <Button variant="outline" onClick={() => { setShowForm(false); setCreateError(""); }}>Cancel</Button>
           </div>
         </Card>
       )}

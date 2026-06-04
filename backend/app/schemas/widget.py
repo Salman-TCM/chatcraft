@@ -14,6 +14,7 @@ class WidgetConfigResponse(BaseModel):
     show_branding: bool
     embed_token: str
     persistent_menu: list | None = None
+    embedded_store_id: uuid.UUID | None = None
     created_at: datetime
     updated_at: datetime
 
@@ -23,6 +24,7 @@ class WidgetConfigUpdate(BaseModel):
     position: str | None = Field(None, pattern=r"^(bottom-right|bottom-left|top-right|top-left)$")
     show_branding: bool | None = None
     persistent_menu: list | None = None
+    embedded_store_id: uuid.UUID | None = None
 
 
 class WidgetPublicConfig(BaseModel):
@@ -51,3 +53,5 @@ class WidgetPublicConfig(BaseModel):
     show_branding: bool
     reply_delay_seconds: int = 0
     persistent_menu: list | None = None
+    embedded_store_id: uuid.UUID | None = None
+    embedded_store_slug: str | None = None

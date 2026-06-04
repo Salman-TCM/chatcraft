@@ -205,6 +205,8 @@ def _user_dict(u: User) -> dict:
         "name": u.name,
         "role": u.role.value,
         "email_verified": u.email_verified,
+        "is_suspended": getattr(u, "is_suspended", False),
+        "suspended_reason": getattr(u, "suspended_reason", None),
         "subscription": {
             "plan": sub.plan.value if sub else None,
             "status": sub.status.value if sub else None,
@@ -309,6 +311,8 @@ async def update_user(
     db: DBSession,
     caller: CurrentUser,
 ) -> dict:
+    from app.models.admin_log import AdminActionLog
+
     result = await db.execute(
         select(User).where(User.id == user_id).options(selectinload(User.subscription))
     )
@@ -324,14 +328,45 @@ async def update_user(
         )
 
     if "role" in body:
+        old_role = u.role.value
         u.role = UserRole(body["role"])
+        db.add(AdminActionLog(
+            admin_user_id=caller.id,
+            admin_email=caller.email,
+            action="role_change",
+            target_user_id=u.id,
+            target_email=u.email,
+            old_value=old_role,
+            new_value=body["role"],
+        ))
+
     if "email_verified" in body:
+        old_ev = str(u.email_verified)
         u.email_verified = bool(body["email_verified"])
+        db.add(AdminActionLog(
+            admin_user_id=caller.id,
+            admin_email=caller.email,
+            action="verify_email",
+            target_user_id=u.id,
+            target_email=u.email,
+            old_value=old_ev,
+            new_value=str(u.email_verified),
+        ))
 
     # Override subscription plan/status
     if ("plan" in body or "subscription_status" in body) and u.subscription:
         if "plan" in body:
+            old_plan = u.subscription.plan.value
             u.subscription.plan = SubscriptionPlan(body["plan"])
+            db.add(AdminActionLog(
+                admin_user_id=caller.id,
+                admin_email=caller.email,
+                action="plan_change",
+                target_user_id=u.id,
+                target_email=u.email,
+                old_value=old_plan,
+                new_value=body["plan"],
+            ))
         if "subscription_status" in body:
             u.subscription.status = SubscriptionState(body["subscription_status"])
 
@@ -346,6 +381,8 @@ async def delete_user(
     db: DBSession,
     caller: CurrentUser,
 ) -> dict:
+    from app.models.admin_log import AdminActionLog
+
     if str(user_id) == str(caller.id):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -355,6 +392,16 @@ async def delete_user(
     u = result.scalar_one_or_none()
     if not u:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+
+    db.add(AdminActionLog(
+        admin_user_id=caller.id,
+        admin_email=caller.email,
+        action="user_delete",
+        target_user_id=u.id,
+        target_email=u.email,
+        old_value=u.role.value,
+        new_value=None,
+    ))
     await db.delete(u)
     await db.commit()
     return {"success": True, "data": None}
@@ -367,6 +414,8 @@ async def impersonate_user(
     caller: CurrentUser,
 ) -> dict:
     """Issue a short-lived access token (15 min) for the target user."""
+    from app.models.admin_log import AdminActionLog
+
     result = await db.execute(select(User).where(User.id == user_id))
     u = result.scalar_one_or_none()
     if not u:
@@ -389,11 +438,152 @@ async def impersonate_user(
     }
     token = jwt.encode(payload, settings.secret_key, algorithm=settings.jwt_algorithm)
 
-    log = ImpersonationAuditLog(actor_user_id=caller.id, target_user_id=u.id)
-    db.add(log)
+    db.add(ImpersonationAuditLog(actor_user_id=caller.id, target_user_id=u.id))
+    db.add(AdminActionLog(
+        admin_user_id=caller.id,
+        admin_email=caller.email,
+        action="impersonate",
+        target_user_id=u.id,
+        target_email=u.email,
+        old_value=None,
+        new_value=None,
+    ))
     await db.commit()
 
     return {"success": True, "data": {"access_token": token, "expires_in": 900, "user": _user_dict(u)}}
+
+
+@router.post("/users/{user_id}/suspend", response_model=dict)
+async def suspend_user(
+    user_id: uuid.UUID,
+    db: DBSession,
+    caller: CurrentUser,
+    reason: str | None = None,
+) -> dict:
+    from app.models.admin_log import AdminActionLog
+    from datetime import datetime, timezone
+
+    if str(user_id) == str(caller.id):
+        raise HTTPException(status_code=400, detail="Cannot suspend your own account")
+    result = await db.execute(select(User).where(User.id == user_id))
+    u = result.scalar_one_or_none()
+    if not u:
+        raise HTTPException(status_code=404, detail="User not found")
+    u.is_suspended = True
+    u.suspended_at = datetime.now(timezone.utc)
+    u.suspended_reason = reason
+    db.add(AdminActionLog(
+        admin_user_id=caller.id, admin_email=caller.email,
+        action="suspend", target_user_id=u.id, target_email=u.email,
+        old_value="active", new_value=f"suspended: {reason or 'no reason'}",
+    ))
+    await db.commit()
+    return {"success": True}
+
+
+@router.post("/users/{user_id}/unsuspend", response_model=dict)
+async def unsuspend_user(user_id: uuid.UUID, db: DBSession, caller: CurrentUser) -> dict:
+    from app.models.admin_log import AdminActionLog
+
+    result = await db.execute(select(User).where(User.id == user_id))
+    u = result.scalar_one_or_none()
+    if not u:
+        raise HTTPException(status_code=404, detail="User not found")
+    u.is_suspended = False
+    u.suspended_at = None
+    u.suspended_reason = None
+    db.add(AdminActionLog(
+        admin_user_id=caller.id, admin_email=caller.email,
+        action="unsuspend", target_user_id=u.id, target_email=u.email,
+        old_value="suspended", new_value="active",
+    ))
+    await db.commit()
+    return {"success": True}
+
+
+# ─── Platform settings ────────────────────────────────────────────────────────
+
+_DEFAULT_SETTINGS = {
+    "allow_signups": True,
+    "require_email_verification": True,
+    "max_chatbots_free": 3,
+    "max_messages_free": 500,
+    "maintenance_mode": False,
+    "maintenance_message": "We'll be back shortly.",
+    "feature_voice_lab": True,
+    "feature_agent_builder": True,
+    "feature_browser_agent": True,
+    "feature_social": True,
+}
+
+
+@router.get("/settings", response_model=dict)
+async def get_platform_settings(db: DBSession) -> dict:
+    from app.models.platform_settings import PlatformSetting
+
+    result = await db.execute(select(PlatformSetting))
+    stored = {r.key: r.value for r in result.scalars().all()}
+    # Merge with defaults so new keys always appear
+    merged = {**_DEFAULT_SETTINGS, **{k: v for k, v in stored.items() if k in _DEFAULT_SETTINGS}}
+    return {"success": True, "data": merged}
+
+
+@router.patch("/settings", response_model=dict)
+async def update_platform_settings(body: dict, db: DBSession, caller: CurrentUser) -> dict:
+    from app.models.platform_settings import PlatformSetting
+
+    for key, value in body.items():
+        if key not in _DEFAULT_SETTINGS:
+            continue
+        result = await db.execute(select(PlatformSetting).where(PlatformSetting.key == key))
+        row = result.scalar_one_or_none()
+        if row:
+            row.value = value
+        else:
+            db.add(PlatformSetting(key=key, value=value))
+    await db.commit()
+    return {"success": True}
+
+
+@router.get("/action-log", response_model=dict)
+async def list_action_log(
+    db: DBSession,
+    page: Annotated[int, Query(ge=1)] = 1,
+    limit: Annotated[int, Query(ge=1, le=200)] = 50,
+    action: str | None = Query(None),
+) -> dict:
+    """Audit log for all admin mutations (role changes, deletions, impersonation)."""
+    from app.models.admin_log import AdminActionLog
+
+    offset = (page - 1) * limit
+    stmt = select(AdminActionLog).order_by(AdminActionLog.created_at.desc())
+    count_stmt = select(func.count()).select_from(AdminActionLog)
+    if action:
+        stmt = stmt.where(AdminActionLog.action == action)
+        count_stmt = count_stmt.where(AdminActionLog.action == action)
+
+    result = await db.execute(stmt.offset(offset).limit(limit))
+    logs = result.scalars().all()
+    total = (await db.execute(count_stmt)).scalar_one()
+
+    return {
+        "success": True,
+        "data": [
+            {
+                "id": str(log.id),
+                "admin_email": log.admin_email,
+                "action": log.action,
+                "target_email": log.target_email,
+                "old_value": log.old_value,
+                "new_value": log.new_value,
+                "created_at": log.created_at.isoformat(),
+            }
+            for log in logs
+        ],
+        "total": total,
+        "page": page,
+        "limit": limit,
+    }
 
 
 @router.get("/impersonation-log", response_model=dict)
