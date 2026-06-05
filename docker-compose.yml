@@ -239,6 +239,8 @@ services:
     environment:
       NEXTAUTH_URL:                    ${NEXTAUTH_URL:-http://localhost:3000}
       NEXTAUTH_SECRET:                 ${NEXTAUTH_SECRET:-dev-nextauth-secret}
+      AUTH_SECRET:                     ${NEXTAUTH_SECRET:-dev-nextauth-secret}
+      AUTH_URL:                        ${NEXTAUTH_URL:-http://localhost:3000}
       GOOGLE_CLIENT_ID:                ${GOOGLE_CLIENT_ID:-}
       GOOGLE_CLIENT_SECRET:            ${GOOGLE_CLIENT_SECRET:-}
       NEXT_PUBLIC_API_URL:             ${NEXT_PUBLIC_API_URL:-http://localhost:8000}
