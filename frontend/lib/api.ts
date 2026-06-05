@@ -49,14 +49,24 @@ apiClient.interceptors.response.use(
       const { useAppStore } = await import("@/store");
       const cap = error.response?.data?.detail?.cap ?? 0;
       useAppStore.getState().openHardPaywall(cap);
-    } else if (
-      typeof window !== "undefined" &&
-      (status === 429 || code === "USAGE_LIMIT_REACHED")
-    ) {
+      return Promise.reject(error);
+    }
+
+    if (typeof window !== "undefined" && code === "USAGE_LIMIT_REACHED") {
       const { useAppStore } = await import("@/store");
       useAppStore.getState().openUpgradeModal(
         error.response?.data?.detail?.error ?? "You've reached your usage limit"
       );
+      return Promise.reject(error);
+    }
+
+    // Generic rate-limit: show a toast and swallow the error so components
+    // without explicit try/catch don't crash with "Unhandled Runtime Error".
+    if (status === 429 && typeof window !== "undefined") {
+      console.warn("Rate limit hit:", error.config?.url);
+      // Fire a custom DOM event so any toast/notification layer can pick it up
+      window.dispatchEvent(new CustomEvent("api:ratelimit", { detail: { url: error.config?.url } }));
+      return Promise.reject(error);
     }
 
     return Promise.reject(error);

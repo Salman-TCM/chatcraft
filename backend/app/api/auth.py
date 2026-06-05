@@ -11,6 +11,7 @@ from sqlalchemy import select
 
 from app.core.config import settings
 from app.core.dependencies import CurrentUser, DBSession, RedisClient
+from app.core.rate_limit import limiter
 from app.core.security import (
     REFRESH_TOKEN_COOKIE,
     REFRESH_TOKEN_EXPIRE_DAYS,
@@ -165,6 +166,7 @@ _INVALID_REFRESH = HTTPException(
 
 
 @router.post("/refresh", response_model=RefreshResponse)
+@limiter.exempt
 async def refresh(
     response: Response,
     db: DBSession,
