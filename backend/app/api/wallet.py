@@ -49,10 +49,11 @@ import uuid
 from datetime import datetime, timezone
 from typing import Annotated
 
-from fastapi import APIRouter, Header, HTTPException, Query, Response, status
+from fastapi import APIRouter, Header, HTTPException, Query, Request, Response, status
 from sqlalchemy import select, func
 
 from app.core.dependencies import CurrentUser, DBSession
+from app.core.rate_limit import limiter
 from app.models.wallet import (
     UserWalletCredentials, WalletCard, WalletCardEvent, WalletProgram,
     WalletPushSubscription, WalletReceiptScan,
@@ -60,6 +61,8 @@ from app.models.wallet import (
 from app.services.wallet.service import apply_action, default_push_message
 
 router = APIRouter(tags=["wallet"])
+
+_VALID_PROGRAM_STATUSES = frozenset({"active", "inactive", "archived"})
 
 PROGRAM_TYPES = [
     {"value": "membership",      "label": "Membership Card",    "icon": "🪪",  "description": "Tiered membership with optional points"},
@@ -311,17 +314,30 @@ async def create_program(body: dict, user: CurrentUser, db: DBSession) -> dict:
         raise HTTPException(status_code=422, detail="name required")
     if prog_type not in {t["value"] for t in PROGRAM_TYPES}:
         raise HTTPException(status_code=422, detail=f"invalid type: {prog_type}")
+    prog_status = body.get("status", "active")
+    if prog_status not in _VALID_PROGRAM_STATUSES:
+        raise HTTPException(status_code=422, detail=f"Invalid status. Must be one of: {', '.join(sorted(_VALID_PROGRAM_STATUSES))}")
+
+    chatbot_id = body.get("chatbot_id")
+    if chatbot_id:
+        from app.models.chatbot_config import ChatbotConfig
+        try:
+            chatbot = await db.get(ChatbotConfig, uuid.UUID(str(chatbot_id)))
+        except Exception:
+            chatbot = None
+        if not chatbot or chatbot.user_id != user.id:
+            raise HTTPException(status_code=404, detail="Chatbot not found")
 
     join_token = secrets.token_hex(32)
     scanner_token = secrets.token_hex(32)
 
     program = WalletProgram(
         user_id=user.id,
-        chatbot_id=body.get("chatbot_id"),
+        chatbot_id=chatbot_id,
         name=name,
         type=prog_type,
         description=body.get("description"),
-        status=body.get("status", "active"),
+        status=prog_status,
         config=body.get("config", {}),
         brand_overrides=body.get("brand_overrides", {}),
         join_token=join_token,
@@ -354,6 +370,11 @@ async def get_program(program_id: uuid.UUID, user: CurrentUser, db: DBSession) -
 @router.patch("/api/wallet/programs/{program_id}", response_model=dict)
 async def update_program(program_id: uuid.UUID, body: dict, user: CurrentUser, db: DBSession) -> dict:
     program = await _get_program(program_id, user.id, db)
+    if "status" in body and body["status"] not in _VALID_PROGRAM_STATUSES:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Invalid status. Must be one of: {', '.join(sorted(_VALID_PROGRAM_STATUSES))}",
+        )
     for field in ("name", "description", "status", "config", "brand_overrides", "chatbot_id",
                   "join_form_fields", "receipt_scanning_config"):
         if field in body:
@@ -411,7 +432,8 @@ async def rotate_scanner_token(program_id: uuid.UUID, user: CurrentUser, db: DBS
 # ── Public join endpoints ──────────────────────────────────────────────────────
 
 @router.get("/api/wallet/join/{token}", response_model=dict)
-async def get_join_program(token: str, db: DBSession) -> dict:
+@limiter.limit("60/minute")
+async def get_join_program(request: Request, token: str, db: DBSession) -> dict:
     """Public: return program info for the self-enrollment join page."""
     result = await db.execute(
         select(WalletProgram).where(WalletProgram.join_token == token, WalletProgram.status == "active")
@@ -434,7 +456,8 @@ async def get_join_program(token: str, db: DBSession) -> dict:
 
 
 @router.post("/api/wallet/join/{token}", response_model=dict, status_code=status.HTTP_201_CREATED)
-async def self_enroll(token: str, body: dict, db: DBSession) -> dict:
+@limiter.limit("5/minute")
+async def self_enroll(request: Request, token: str, body: dict, db: DBSession) -> dict:
     """Public: customer self-enrolls. Returns card info with wallet add URLs."""
     result = await db.execute(
         select(WalletProgram).where(WalletProgram.join_token == token, WalletProgram.status == "active")
@@ -447,11 +470,19 @@ async def self_enroll(token: str, body: dict, db: DBSession) -> dict:
     name  = (body.get("name") or "").strip() or None
     phone = (body.get("phone") or "").strip() or None
 
-    # Dedup by email
+    # Dedup by email first, then by phone
     if email:
         ex = (await db.execute(
             select(WalletCard).where(
                 WalletCard.program_id == program.id, WalletCard.customer_email == email,
+            )
+        )).scalar_one_or_none()
+        if ex:
+            return {"success": True, "data": _card_dict(ex), "reissued": True}
+    elif phone:
+        ex = (await db.execute(
+            select(WalletCard).where(
+                WalletCard.program_id == program.id, WalletCard.customer_phone == phone,
             )
         )).scalar_one_or_none()
         if ex:
@@ -517,7 +548,8 @@ async def self_enroll(token: str, body: dict, db: DBSession) -> dict:
 # ── Public scanner endpoints ───────────────────────────────────────────────────
 
 @router.get("/api/wallet/scan/{token}", response_model=dict)
-async def get_scanner_program(token: str, db: DBSession) -> dict:
+@limiter.limit("60/minute")
+async def get_scanner_program(request: Request, token: str, db: DBSession) -> dict:
     """Public: return program info for the staff scanner page."""
     result = await db.execute(
         select(WalletProgram).where(WalletProgram.scanner_token == token)
@@ -548,7 +580,8 @@ async def get_scanner_program(token: str, db: DBSession) -> dict:
 
 
 @router.post("/api/wallet/scan/{token}/action", response_model=dict)
-async def scanner_action(token: str, body: dict, db: DBSession) -> dict:
+@limiter.limit("30/minute")
+async def scanner_action(request: Request, token: str, body: dict, db: DBSession) -> dict:
     """Public staff scanner: apply a quick action to a card by serial."""
     result = await db.execute(
         select(WalletProgram).where(WalletProgram.scanner_token == token)
@@ -563,6 +596,8 @@ async def scanner_action(token: str, body: dict, db: DBSession) -> dict:
 
     if not serial or not action:
         raise HTTPException(status_code=422, detail="serial and action required")
+    if action not in _SCANNER_ACTIONS:
+        raise HTTPException(status_code=422, detail=f"Action not permitted via scanner: {action}")
 
     card_result = await db.execute(
         select(WalletCard).where(WalletCard.serial == serial, WalletCard.program_id == program.id)
@@ -710,6 +745,12 @@ _VALID_ACTIONS = frozenset({
     "deduct_balance", "load_balance", "refund_balance", "redeem_coupon",
 })
 
+# Subset of actions allowed via the public scanner URL (staff-facing quick actions only)
+_SCANNER_ACTIONS = frozenset({
+    "add_punch", "redeem", "add_points", "redeem_points_reward",
+    "check_in", "deduct_balance", "redeem_coupon",
+})
+
 
 @router.post("/api/wallet/cards/{serial}/action", response_model=dict)
 async def card_action(serial: str, body: dict, user: CurrentUser, db: DBSession) -> dict:
@@ -812,7 +853,8 @@ async def list_card_events(
 # ── Receipt scanning ───────────────────────────────────────────────────────────
 
 @router.post("/api/wallet/cards/{serial}/receipt-scan", response_model=dict)
-async def receipt_scan(serial: str, body: dict, db: DBSession) -> dict:
+@limiter.limit("10/minute")
+async def receipt_scan(request: Request, serial: str, body: dict, db: DBSession) -> dict:
     """
     Public endpoint (authenticated by serial being in the customer's pass).
     Accepts base64-encoded receipt image and awards points/punches via AI extraction.
@@ -829,6 +871,19 @@ async def receipt_scan(serial: str, body: dict, db: DBSession) -> dict:
     if not rs_cfg.get("enabled"):
         raise HTTPException(status_code=422, detail="Receipt scanning is not enabled for this program")
 
+    # Clamp config values to safe ranges — guards against bad stored config
+    try:
+        rs_cfg = {
+            **rs_cfg,
+            "max_scans_per_day": max(1, int(rs_cfg.get("max_scans_per_day", 5))),
+            "min_amount": max(0.0, float(rs_cfg.get("min_amount", 0))),
+            "points_per_dollar": max(0.0, float(rs_cfg.get("points_per_dollar", 1))),
+            "punches_per_receipt": max(1, int(rs_cfg.get("punches_per_receipt", 1))),
+            "max_award_per_scan": max(1.0, float(rs_cfg.get("max_award_per_scan", 999999))),
+        }
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=500, detail="Invalid receipt scanning configuration")
+
     if program.type not in ("points", "punch_card"):
         raise HTTPException(status_code=422, detail="Receipt scanning only available for points and punch card programs")
 
@@ -840,8 +895,12 @@ async def receipt_scan(serial: str, body: dict, db: DBSession) -> dict:
     if "," in image_b64:
         image_b64 = image_b64.split(",", 1)[1]
 
+    _MAX_IMAGE_B64 = 7_000_000  # ~5 MB original image
+    if len(image_b64) > _MAX_IMAGE_B64:
+        raise HTTPException(status_code=413, detail="Image too large (max ~5 MB)")
+
     # ── Check per-customer daily cap ───────────────────────────────────────────
-    max_daily = int(rs_cfg.get("max_scans_per_day", 5))
+    max_daily = max(1, int(rs_cfg.get("max_scans_per_day", 5)))
     today_start = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
     daily_count_result = await db.execute(
         select(func.count(WalletReceiptScan.id)).where(
@@ -896,10 +955,21 @@ async def receipt_scan(serial: str, body: dict, db: DBSession) -> dict:
     except Exception as exc:
         raise HTTPException(status_code=422, detail=f"Could not extract receipt data: {exc}")
 
-    merchant_name = str(ai_result.get("merchant_name") or "").strip()
-    receipt_date  = str(ai_result.get("date") or "").strip()
-    total_amount  = float(ai_result.get("total_amount") or 0)
+    from datetime import date as _date
+
+    merchant_name  = str(ai_result.get("merchant_name") or "").strip()
+    receipt_date   = str(ai_result.get("date") or "").strip()
+    total_amount   = float(ai_result.get("total_amount") or 0)
     transaction_id = str(ai_result.get("transaction_id") or "").strip()
+
+    # Validate receipt date: must be a real date and not in the future
+    if receipt_date:
+        try:
+            parsed_date = _date.fromisoformat(receipt_date)
+            if parsed_date > _date.today():
+                raise HTTPException(status_code=422, detail="Receipt date cannot be in the future")
+        except ValueError:
+            receipt_date = ""  # AI returned garbage — clear it to avoid dedup bypass
 
     # ── Validate against program rules ─────────────────────────────────────────
     min_amount = float(rs_cfg.get("min_amount", 0))
@@ -1058,6 +1128,7 @@ async def broadcast_push(program_id: uuid.UUID, body: dict, user: CurrentUser, d
 @router.post("/api/wallet/v1/devices/{device_id}/registrations/{pass_type}/{serial}", status_code=status.HTTP_201_CREATED)
 async def apple_register_device(
     device_id: str, pass_type: str, serial: str,
+    request: Request,
     db: DBSession,
     authorization: str | None = Header(default=None),
 ) -> Response:
@@ -1072,25 +1143,38 @@ async def apple_register_device(
     if card.auth_token and auth != card.auth_token:
         return Response(status_code=401)
 
-    push_token = (await db.execute(
+    # Apple sends the APNs push token in the request body JSON: {"pushToken": "..."}
+    try:
+        body_data = await request.json()
+        push_token_value = str(body_data.get("pushToken") or "").strip()
+    except Exception:
+        push_token_value = ""
+
+    if not push_token_value:
+        return Response(status_code=400)
+
+    existing = (await db.execute(
         select(WalletPushSubscription).where(
             WalletPushSubscription.card_id == card.id,
             WalletPushSubscription.device_library_id == device_id,
         )
     )).scalar_one_or_none()
 
-    if not push_token:
-        body_bytes = b""  # push token comes from request body
-        # The body is the push token as plain text
+    if not existing:
         sub = WalletPushSubscription(
             card_id=card.id,
             device_type="apple",
-            push_token=device_id,  # Apple sends the push token in body
+            push_token=push_token_value,
             device_library_id=device_id,
         )
         db.add(sub)
         await db.commit()
         return Response(status_code=201)
+
+    # Update push token if it changed (Apple rotates tokens)
+    if existing.push_token != push_token_value:
+        existing.push_token = push_token_value
+        await db.commit()
 
     return Response(status_code=200)
 
@@ -1130,7 +1214,7 @@ async def apple_get_updated_serials(
     device_id: str, pass_type: str,
     db: DBSession,
     passesUpdatedSince: str | None = Query(default=None),
-) -> dict:
+) -> Response | dict:
     """Return serials of passes that have been updated since a given time."""
     subs = (await db.execute(
         select(WalletPushSubscription).where(
@@ -1198,7 +1282,8 @@ async def apple_log(body: dict) -> dict:
 # ── Public pass download ───────────────────────────────────────────────────────
 
 @router.get("/api/wallet/cards/{serial}/pkpass")
-async def download_pkpass(serial: str, db: DBSession) -> Response:
+@limiter.limit("20/minute")
+async def download_pkpass(request: Request, serial: str, db: DBSession) -> Response:
     card = await _get_card_by_serial(serial, db)
     if card.status != "active":
         raise HTTPException(status_code=410, detail="Card is no longer active")
@@ -1228,7 +1313,8 @@ async def download_pkpass(serial: str, db: DBSession) -> Response:
 
 
 @router.get("/api/wallet/cards/{serial}/google", response_model=dict)
-async def google_wallet_link(serial: str, db: DBSession) -> dict:
+@limiter.limit("20/minute")
+async def google_wallet_link(request: Request, serial: str, db: DBSession) -> dict:
     card = await _get_card_by_serial(serial, db)
     if card.status != "active":
         raise HTTPException(status_code=410, detail="Card is no longer active")
@@ -1243,7 +1329,8 @@ async def google_wallet_link(serial: str, db: DBSession) -> dict:
 
 
 @router.get("/api/wallet/cards/{serial}/public", response_model=dict)
-async def public_card_info(serial: str, db: DBSession) -> dict:
+@limiter.limit("30/minute")
+async def public_card_info(request: Request, serial: str, db: DBSession) -> dict:
     card = await _get_card_by_serial(serial, db)
     if card.status == "revoked":
         raise HTTPException(status_code=410, detail="Card has been revoked")
@@ -1311,6 +1398,25 @@ async def get_wallet_settings(user: CurrentUser, db: DBSession) -> dict:
     }
 
 
+# Fields in apple_config that contain sensitive key material — stored encrypted.
+_APPLE_ENCRYPTED_FIELDS = frozenset({"cert_pem", "key_pem", "wwdr_pem", "push_key_pem"})
+
+
+def _encrypt_apple_field(value: str) -> str:
+    from app.services.llm.key_store import encrypt_key
+    return encrypt_key(value)
+
+
+def _decrypt_apple_field(value: str) -> str:
+    """Decrypt a field, falling back to plaintext for backwards compatibility."""
+    from app.services.llm.key_store import decrypt_key
+    from cryptography.fernet import InvalidToken
+    try:
+        return decrypt_key(value)
+    except (InvalidToken, Exception):
+        return value  # already plaintext (pre-encryption migration)
+
+
 @router.patch("/api/settings/wallet/apple", response_model=dict)
 async def save_apple_credentials(body: dict, user: CurrentUser, db: DBSession) -> dict:
     creds = await db.get(UserWalletCredentials, user.id)
@@ -1330,7 +1436,10 @@ async def save_apple_credentials(body: dict, user: CurrentUser, db: DBSession) -
     }
     for body_key, cfg_key in mapping.items():
         if body_key in body and body[body_key]:
-            current[cfg_key] = body[body_key]
+            val = body[body_key]
+            if cfg_key in _APPLE_ENCRYPTED_FIELDS:
+                val = _encrypt_apple_field(val)
+            current[cfg_key] = val
 
     creds.apple_config = current
     await db.commit()
