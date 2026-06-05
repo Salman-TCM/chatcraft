@@ -926,11 +926,11 @@ async def receipt_scan(request: Request, serial: str, body: dict, db: DBSession)
         )).scalar_one_or_none()
 
         if key_row:
-            import google.generativeai as genai
+            from google import genai as _genai
+            from google.genai import types as _gtypes
             import base64
 
-            genai.configure(api_key=decrypt_key(key_row.encrypted_key))
-            model = genai.GenerativeModel("gemini-1.5-flash")
+            client = _genai.Client(api_key=decrypt_key(key_row.encrypted_key))
 
             custom_prompt = rs_cfg.get("custom_prompt", "")
             merchant_kw = rs_cfg.get("merchant_keywords", [])
@@ -944,10 +944,13 @@ async def receipt_scan(request: Request, serial: str, body: dict, db: DBSession)
             )
 
             img_bytes = base64.b64decode(image_b64)
-            response = model.generate_content([
-                prompt,
-                {"mime_type": "image/jpeg", "data": img_bytes},
-            ])
+            response = await client.aio.models.generate_content(
+                model="gemini-1.5-flash",
+                contents=[
+                    _gtypes.Part.from_text(prompt),
+                    _gtypes.Part.from_bytes(data=img_bytes, mime_type="image/jpeg"),
+                ],
+            )
             raw = response.text.strip()
             if raw.startswith("```"):
                 raw = raw.split("\n", 1)[1].rsplit("```", 1)[0]
@@ -1209,12 +1212,12 @@ async def apple_unregister_device(
     return Response(status_code=200)
 
 
-@router.get("/api/wallet/v1/devices/{device_id}/registrations/{pass_type}")
+@router.get("/api/wallet/v1/devices/{device_id}/registrations/{pass_type}", response_model=None)
 async def apple_get_updated_serials(
     device_id: str, pass_type: str,
     db: DBSession,
     passesUpdatedSince: str | None = Query(default=None),
-) -> Response | dict:
+):
     """Return serials of passes that have been updated since a given time."""
     subs = (await db.execute(
         select(WalletPushSubscription).where(
