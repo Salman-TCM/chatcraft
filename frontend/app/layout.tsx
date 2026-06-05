@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { Inter } from "next/font/google";
 import { headers } from "next/headers";
 import { SessionProvider } from "next-auth/react";
@@ -15,6 +15,19 @@ const inter = Inter({
   subsets: ["latin"],
   variable: "--font-inter",
 });
+
+export async function generateViewport(): Promise<Viewport> {
+  const headersList = await headers();
+  const agencyThemeRaw = headersList.get("x-agency-theme");
+  const agencyTheme = agencyThemeRaw ? JSON.parse(agencyThemeRaw) : null;
+
+  return {
+    width: "device-width",
+    initialScale: 1,
+    maximumScale: 1,
+    themeColor: agencyTheme?.primaryColour ?? "#4F46E5",
+  };
+}
 
 export async function generateMetadata(): Promise<Metadata> {
   const headersList = await headers();
@@ -34,16 +47,10 @@ export async function generateMetadata(): Promise<Metadata> {
     creator: platformName,
     metadataBase: base,
     manifest: "/manifest.json",
-    themeColor: agencyTheme?.primaryColour ?? "#4F46E5",
     appleWebApp: {
       capable: true,
       statusBarStyle: "default",
       title: platformName,
-    },
-    viewport: {
-      width: "device-width",
-      initialScale: 1,
-      maximumScale: 1,
     },
     ...(agencyTheme?.logo
       ? {
