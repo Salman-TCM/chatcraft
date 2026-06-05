@@ -1,46 +1,84 @@
 # =============================================================================
 # ChatCraft AI — FastAPI Backend
-# Multi-stage build: builder installs deps, final image is lean
+# Alpine-based multi-stage build (musl libc — required for kernel 7.x hosts)
 # =============================================================================
 
 # -----------------------------------------------------------------------------
-# Stage 1: builder
+# Stage 1: builder — compile and install Python dependencies
 # -----------------------------------------------------------------------------
-FROM python:3.11-slim AS builder
+FROM python:3.11-alpine AS builder
 
 WORKDIR /build
 
-# System deps needed to compile some Python packages (psycopg2, cryptography)
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    build-essential \
-    libpq-dev \
+# Build-time system deps
+RUN apk add --no-cache \
+    build-base \
+    postgresql-dev \
     libffi-dev \
-    libssl-dev \
-    curl \
-    && rm -rf /var/lib/apt/lists/*
+    openssl-dev \
+    musl-dev \
+    curl
 
-# Install Python deps into a prefix we can copy cleanly
+# Install deps in small independent layers to keep peak memory low.
 COPY requirements.txt .
-RUN pip install --upgrade pip && \
-    pip install --prefix=/install --no-cache-dir -r requirements.txt
+
+RUN pip install --prefix=/install --no-cache-dir \
+        fastapi==0.136.1 "uvicorn[standard]==0.38.0" gunicorn==26.0.0 \
+        "pydantic[email]==2.12.5" pydantic-settings==2.14.0 python-multipart==0.0.20
+
+RUN pip install --prefix=/install --no-cache-dir \
+        sqlalchemy==2.0.49 alembic==1.18.4 asyncpg==0.31.0 \
+        psycopg2-binary==2.9.12 pgvector==0.4.2
+
+RUN pip install --prefix=/install --no-cache-dir \
+        redis==6.4.0 "celery[redis]==5.6.3"
+
+RUN pip install --prefix=/install --no-cache-dir \
+        "python-jose[cryptography]==3.5.0" "bcrypt>=4.0.0" httpx==0.28.1
+
+RUN pip install --prefix=/install --no-cache-dir \
+        anthropic==0.100.0 openai==2.30.0 google-genai==1.14.0 tiktoken==0.12.0
+
+RUN pip install --prefix=/install --no-cache-dir \
+        litellm==1.83.7
+
+RUN pip install --prefix=/install --no-cache-dir \
+        langchain==1.2.17 langchain-openai==1.2.1 langchain-community==0.4.1
+
+RUN pip install --prefix=/install --no-cache-dir \
+        stripe==15.1.0 elevenlabs==2.45.0 boto3==1.43.5 supabase==2.30.0 resend==2.30.0
+
+RUN pip install --prefix=/install --no-cache-dir \
+        "sentry-sdk[fastapi]==2.59.0" loguru==0.7.3 axiom-py==0.10.0 slowapi==0.1.9
+
+RUN pip install --prefix=/install --no-cache-dir \
+        pdfplumber==0.11.9 pymupdf==1.27.2.3 python-docx==1.2.0 \
+        beautifulsoup4==4.14.3 lxml==6.0.2 cryptography==46.0.5
+
+RUN pip install --prefix=/install --no-cache-dir \
+        websockets==14.2 python-dotenv==1.0.1 pywebpush==2.0.0 \
+        duckduckgo-search==6.3.7 "qrcode[pil]==8.1.0" \
+        pytest==9.0.3 pytest-asyncio==1.3.0
 
 
 # -----------------------------------------------------------------------------
 # Stage 2: final runtime image
 # -----------------------------------------------------------------------------
-FROM python:3.11-slim AS final
+FROM python:3.11-alpine AS final
 
 WORKDIR /app
 
-# Runtime system libs only (no build tools)
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    libpq5 \
+# Runtime-only system libs + bash (needed by start.sh)
+RUN apk add --no-cache \
+    bash \
+    libpq \
     curl \
-    && rm -rf /var/lib/apt/lists/*
+    libffi \
+    openssl
 
-# Non-root user for security
-RUN groupadd --gid 1001 appgroup && \
-    useradd --uid 1001 --gid appgroup --shell /bin/bash --create-home appuser && \
+# Non-root user
+RUN addgroup -g 1001 appgroup && \
+    adduser -u 1001 -G appgroup -s /bin/bash -D appuser && \
     mkdir -p /var/run/celerybeat && chown appuser:appgroup /var/run/celerybeat
 
 # Copy installed Python packages from builder
@@ -56,15 +94,11 @@ USER appuser
 
 ENTRYPOINT ["/app/start.sh"]
 
-# Expose API port
 EXPOSE 8000
 
-# Health check — polls /health every 30s, fails after 3 misses
 HEALTHCHECK --interval=30s --timeout=10s --start-period=20s --retries=3 \
     CMD curl -f http://localhost:8000/health || exit 1
 
-# Default: production mode with Gunicorn + Uvicorn workers
-# Override CMD in docker-compose for hot-reload in dev
 CMD ["gunicorn", "app.main:app", \
      "--workers", "4", \
      "--worker-class", "uvicorn.workers.UvicornWorker", \
