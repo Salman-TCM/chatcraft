@@ -12,6 +12,8 @@ const cookiePrefix = useSecureCookies ? "__Secure-" : "";
 
 export const { handlers, auth, signIn, signOut } = NextAuth({
   trustHost: true,
+  // Use || (not ??) so an empty-string AUTH_SECRET env var doesn't win over NEXTAUTH_SECRET
+  secret: process.env.AUTH_SECRET || process.env.NEXTAUTH_SECRET,
 
   // Explicit cookie config prevents PKCE parse failures when running over
   // HTTP in dev. Auth.js defaults to Secure + __Host- prefix which breaks
