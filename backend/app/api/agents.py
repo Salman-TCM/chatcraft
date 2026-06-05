@@ -10,23 +10,26 @@ Each agent has:
   - Optional public share link
 """
 import asyncio
+import ipaddress
 import json
 import re as _re
 import secrets
 import uuid
 from datetime import datetime, timezone
 from typing import Any, AsyncIterator
+from urllib.parse import urlparse
 
 import anthropic
 import httpx
 from openai import AsyncOpenAI
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from sqlalchemy import func, select
 
 from app.core.config import settings
 from app.core.dependencies import CurrentUser, DBSession
+from app.core.rate_limit import limiter
 from app.models.agent import Agent
 from app.models.agent_conversation import AgentConversation
 from app.models.chatbot_config import ChatbotConfig
@@ -160,7 +163,8 @@ class PublicChatRequest(BaseModel):
 
 
 @public_router.post("/{share_token}/chat")
-async def public_agent_chat(share_token: str, body: PublicChatRequest, db: DBSession):
+@limiter.limit("5/minute")
+async def public_agent_chat(share_token: str, request: Request, body: PublicChatRequest, db: DBSession):
     """Stream a public agent response. No authentication required."""
     agent = await _get_shared_agent(share_token, db)
     system_prompt = await _build_system_prompt(agent, db)  # no user_id — never inject token for public
@@ -301,7 +305,9 @@ class AgentChatRequest(BaseModel):
 
 
 @router.post("/{agent_id}/chat")
+@limiter.limit("20/minute")
 async def agent_chat(
+    request: Request,
     agent_id: uuid.UUID,
     body: AgentChatRequest,
     user: CurrentUser,
@@ -448,18 +454,12 @@ async def _run_agent_anthropic(
             if tools:
                 kwargs["tools"] = tools
 
-            response = await client.messages.create(**kwargs)
+            async with client.messages.stream(**kwargs) as stream:
+                async for text in stream.text_stream:
+                    yield _sse({"type": "text", "content": text})
+                response = await stream.get_final_message()
 
-            text_parts: list[str] = []
-            tool_uses: list[Any] = []
-            for block in response.content:
-                if block.type == "text":
-                    text_parts.append(block.text)
-                elif block.type == "tool_use":
-                    tool_uses.append(block)
-
-            if text_parts:
-                yield _sse({"type": "text", "content": "".join(text_parts)})
+            tool_uses: list[Any] = [b for b in response.content if b.type == "tool_use"]
 
             if not tool_uses or response.stop_reason == "end_turn":
                 break
@@ -478,7 +478,6 @@ async def _run_agent_anthropic(
                 break
     except Exception as exc:
         msg = str(exc)
-        # Trim verbose API error bodies to the first line for the UI
         short = msg.split("\n")[0].strip()
         yield _sse({"type": "error", "content": short or msg})
         return
@@ -1213,12 +1212,50 @@ async def _tool_web_search(query: str, ctx: dict | None = None) -> str:
     return "No search results found. Add a search API key in Settings → Search Integrations for better results (Tavily is free at app.tavily.com)."
 
 
+_PRIVATE_NETS = [
+    ipaddress.ip_network("10.0.0.0/8"),
+    ipaddress.ip_network("172.16.0.0/12"),
+    ipaddress.ip_network("192.168.0.0/16"),
+    ipaddress.ip_network("127.0.0.0/8"),
+    ipaddress.ip_network("169.254.0.0/16"),  # link-local / cloud metadata
+    ipaddress.ip_network("::1/128"),
+    ipaddress.ip_network("fc00::/7"),
+]
+
+_BLOCKED_HOSTNAMES = {"localhost", "metadata.google.internal", "metadata.internal"}
+
+
+def _is_ssrf_safe(url: str) -> bool:
+    """Return True only if the URL does not target a private/internal address."""
+    try:
+        parsed = urlparse(url)
+        if parsed.scheme not in ("http", "https"):
+            return False
+        host = (parsed.hostname or "").lower().rstrip(".")
+        if not host:
+            return False
+        if host in _BLOCKED_HOSTNAMES:
+            return False
+        if host.endswith(".local") or host.endswith(".internal") or host.endswith(".localhost"):
+            return False
+        try:
+            ip = ipaddress.ip_address(host)
+            return not any(ip in net for net in _PRIVATE_NETS)
+        except ValueError:
+            pass  # not an IP literal — hostname checks above are sufficient
+        return True
+    except Exception:
+        return False
+
+
 async def _tool_http(inputs: dict) -> str:
     method = inputs.get("method", "GET").upper()
     url = inputs.get("url", "")
     headers = inputs.get("headers") or {}
     body = inputs.get("body")
-    async with httpx.AsyncClient(timeout=20, follow_redirects=True) as client:
+    if not _is_ssrf_safe(url):
+        return "Error: URL is not allowed (private/internal addresses are blocked)."
+    async with httpx.AsyncClient(timeout=20, follow_redirects=False) as client:
         if method == "POST":
             resp = await client.post(url, headers=headers, json=body)
         else:
@@ -1230,31 +1267,41 @@ async def _tool_http(inputs: dict) -> str:
 
 
 def _tool_run_code(code: str) -> str:
+    import contextlib
     import io
-    import sys
+    import concurrent.futures
+
     allowed_builtins = {
         "print": print, "len": len, "range": range, "enumerate": enumerate,
         "zip": zip, "map": map, "filter": filter, "sorted": sorted,
         "list": list, "dict": dict, "set": set, "tuple": tuple, "str": str,
         "int": int, "float": float, "bool": bool, "abs": abs, "round": round,
         "min": min, "max": max, "sum": sum, "type": type, "isinstance": isinstance,
-        "repr": repr, "__import__": __builtins__,  # type: ignore[dict-item]
+        "repr": repr, "__import__": __import__,
     }
-    buf = io.StringIO()
-    old_stdout = sys.stdout
-    sys.stdout = buf
-    try:
-        exec(code, {"__builtins__": allowed_builtins})  # noqa: S102
-    except Exception as e:
-        return f"Error: {e}"
-    finally:
-        sys.stdout = old_stdout
-    return buf.getvalue()[:2000] or "(no output)"
+
+    def _run() -> str:
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            try:
+                exec(code, {"__builtins__": allowed_builtins})  # noqa: S102
+            except Exception as e:
+                return f"Error: {e}"
+        return buf.getvalue()[:2000] or "(no output)"
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+        future = pool.submit(_run)
+        try:
+            return future.result(timeout=10)
+        except concurrent.futures.TimeoutError:
+            return "Error: code execution timed out (10s limit)"
 
 
 async def _tool_browse(url: str) -> str:
     from bs4 import BeautifulSoup
-    async with httpx.AsyncClient(follow_redirects=True, timeout=20,
+    if not _is_ssrf_safe(url):
+        return "Error: URL is not allowed (private/internal addresses are blocked)."
+    async with httpx.AsyncClient(follow_redirects=False, timeout=20,
                                   headers={"User-Agent": "ChatCraft-Agent/1.0"}) as client:
         resp = await client.get(url)
     soup = BeautifulSoup(resp.content, "lxml")
@@ -1495,7 +1542,7 @@ async def _tool_list_available_models(ctx: dict) -> str:
         "xai": "xai_api_key",
     }
     _PROVIDER_MODELS = {
-        "anthropic": ["claude-sonnet-4-6", "claude-opus-4-7", "claude-haiku-4-5"],
+        "anthropic": ["claude-sonnet-4-6", "claude-opus-4-7", "claude-haiku-4-5-20251001"],
         "openai": ["gpt-4o", "gpt-4o-mini", "gpt-5", "gpt-5-mini"],
         "google": ["gemini-2.5-pro", "gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-pro"],
         "groq": ["llama-3.3-70b-versatile", "llama-3.1-8b-instant", "mixtral-8x7b-32768"],
@@ -1643,7 +1690,11 @@ async def _load_agent_memory(agent_id: uuid.UUID, user_id: uuid.UUID, db) -> lis
     for s in sessions:
         for msg in s.messages:
             if msg.get("role") in ("user", "assistant"):
-                history.append({"role": msg["role"], "content": msg["content"]})
+                content = msg.get("content", "")
+                # Only load turns with plain string content — skip tool-call turns
+                # that carry content block lists (they'd break OpenAI-compat providers).
+                if isinstance(content, str) and content.strip():
+                    history.append({"role": msg["role"], "content": content})
     return history
 
 
@@ -1687,7 +1738,7 @@ async def _post_run_tasks(
             pass
 
     # Fire webhook (fire-and-forget, never raises)
-    if agent.webhook_url:
+    if agent.webhook_url and _is_ssrf_safe(agent.webhook_url):
         try:
             payload = {
                 "agent_id": str(agent.id),
