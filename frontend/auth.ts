@@ -161,7 +161,14 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
           method: "POST",
           headers: { "X-Refresh-Token": token.refreshToken },
         });
-        if (!res.ok) throw new Error("refresh failed");
+        if (!res.ok) {
+          // On rate-limit (429), back off 60 s before next attempt to prevent
+          // a tight retry loop where every request immediately re-triggers refresh.
+          if (res.status === 429) {
+            token.accessTokenExpiry = Date.now() + 60_000;
+          }
+          throw new Error(`refresh failed: ${res.status}`);
+        }
         const { data } = await res.json();
         token.accessToken = data.access_token;
         token.refreshToken = data.refresh_token ?? token.refreshToken;
