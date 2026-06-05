@@ -27,7 +27,7 @@ httpx==0.28.1
 # AI / LLM
 anthropic==0.100.0
 openai==2.30.0
-google-generativeai==0.8.6
+google-genai==1.14.0
 litellm==1.83.7
 langchain==1.2.17
 langchain-openai==1.2.1

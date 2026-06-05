@@ -680,29 +680,30 @@ async def _run_agent_openai_compat(
 
 
 def _tools_to_gemini(tools: list[dict]) -> list:
-    """Convert Anthropic-format tool definitions to google.generativeai Tool objects."""
-    import google.generativeai as genai  # local import to avoid startup cost
+    """Convert Anthropic-format tool definitions to google.genai Tool objects."""
+    from google.genai import types as _gtypes
     if not tools:
         return []
     declarations = []
     for t in tools:
         schema = t.get("input_schema", {})
-        declarations.append(genai.protos.FunctionDeclaration(
+        props = {
+            k: _gtypes.Schema(
+                type=v.get("type", "string").upper(),
+                description=v.get("description", ""),
+            )
+            for k, v in schema.get("properties", {}).items()
+        }
+        declarations.append(_gtypes.FunctionDeclaration(
             name=t["name"],
             description=t.get("description", ""),
-            parameters=genai.protos.Schema(
-                type=genai.protos.Type.OBJECT,
-                properties={
-                    k: genai.protos.Schema(
-                        type=genai.protos.Type[v.get("type", "string").upper()],
-                        description=v.get("description", ""),
-                    )
-                    for k, v in schema.get("properties", {}).items()
-                },
+            parameters=_gtypes.Schema(
+                type="OBJECT",
+                properties=props,
                 required=schema.get("required", []),
             ),
         ))
-    return [genai.protos.Tool(function_declarations=declarations)]
+    return [_gtypes.Tool(function_declarations=declarations)]
 
 
 async def _run_agent_gemini(
@@ -714,45 +715,46 @@ async def _run_agent_gemini(
     history: list[dict],
     api_key: str,
 ) -> AsyncIterator[str]:
-    import asyncio
-    import google.generativeai as genai
+    from google import genai as _genai
+    from google.genai import types as _gtypes
 
-    genai.configure(api_key=api_key)
+    client = _genai.Client(api_key=api_key)
     gemini_tools = _tools_to_gemini(tools)
-    model_kwargs: dict[str, Any] = {"model_name": agent.model or "gemini-2.0-flash"}
-    if system_prompt:
-        model_kwargs["system_instruction"] = system_prompt
-    if gemini_tools:
-        model_kwargs["tools"] = gemini_tools
 
-    model = genai.GenerativeModel(**model_kwargs)
-
-    # Build history in Gemini format
-    gemini_history: list[dict] = []
+    # Build contents list from history + current message
+    contents: list = []
     for m in history:
         role = "user" if m.get("role") == "user" else "model"
-        gemini_history.append({"role": role, "parts": [m.get("content", "")]})
+        contents.append(_gtypes.Content(role=role, parts=[_gtypes.Part.from_text(m.get("content", "") or "")]))
+    contents.append(_gtypes.Content(role="user", parts=[_gtypes.Part.from_text(user_message)]))
 
-    chat = model.start_chat(history=gemini_history)
+    config = _gtypes.GenerateContentConfig(
+        system_instruction=system_prompt or None,
+        tools=gemini_tools if gemini_tools else None,
+        max_output_tokens=4096,
+    )
+
     step = 0
     max_steps = agent.max_steps or 10
     ctx = {"agent_id": str(agent.id), "user_id": str(agent.user_id)}
-    current_message: Any = user_message
 
     try:
         while step < max_steps:
             step += 1
-            response = await asyncio.get_event_loop().run_in_executor(
-                None, lambda msg=current_message: chat.send_message(msg)
+            response = await client.aio.models.generate_content(
+                model=agent.model or "gemini-2.0-flash",
+                contents=contents,
+                config=config,
             )
 
             text_parts: list[str] = []
             function_calls: list[Any] = []
-            for part in response.parts:
-                if hasattr(part, "text") and part.text:
-                    text_parts.append(part.text)
-                if hasattr(part, "function_call") and part.function_call.name:
-                    function_calls.append(part.function_call)
+            if response.candidates:
+                for part in response.candidates[0].content.parts:
+                    if hasattr(part, "text") and part.text:
+                        text_parts.append(part.text)
+                    if hasattr(part, "function_call") and part.function_call and part.function_call.name:
+                        function_calls.append(part.function_call)
 
             if text_parts:
                 yield _sse({"type": "text", "content": "".join(text_parts)})
@@ -760,20 +762,23 @@ async def _run_agent_gemini(
             if not function_calls:
                 break
 
-            fn_responses: list[Any] = []
+            # Append model turn to contents
+            contents.append(response.candidates[0].content)
+
+            fn_result_parts: list[Any] = []
             for fc in function_calls:
-                args = dict(fc.args)
+                args = dict(fc.args) if fc.args else {}
                 yield _sse({"type": "tool_call", "tool": fc.name, "input": args})
                 result_text = await _execute_tool(fc.name, args, mcp_map, ctx)
                 yield _sse({"type": "tool_result", "tool": fc.name, "result": result_text[:500]})
-                fn_responses.append(genai.protos.Part(
-                    function_response=genai.protos.FunctionResponse(
+                fn_result_parts.append(_gtypes.Part(
+                    function_response=_gtypes.FunctionResponse(
                         name=fc.name,
                         response={"result": result_text},
                     )
                 ))
 
-            current_message = fn_responses
+            contents.append(_gtypes.Content(role="user", parts=fn_result_parts))
     except Exception as exc:
         msg = str(exc)
         short = msg.split("\n")[0].strip()

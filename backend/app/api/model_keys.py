@@ -179,12 +179,14 @@ async def test_key(provider: str, user: CurrentUser, db: DBSession) -> dict:
             await client.models.list()
 
         elif provider == "google":
-            import google.generativeai as genai
-            genai.configure(api_key=api_key)
-            # Just configure — no free "list models" async call without extra setup
-            # We'll do a minimal generation test instead
-            model = genai.GenerativeModel("gemini-1.5-flash")
-            await model.generate_content_async("Hi", generation_config=genai.types.GenerationConfig(max_output_tokens=5))
+            from google import genai as _genai
+            from google.genai import types as _gtypes
+            _client = _genai.Client(api_key=api_key)
+            await _client.aio.models.generate_content(
+                model="gemini-1.5-flash",
+                contents="Hi",
+                config=_gtypes.GenerateContentConfig(max_output_tokens=5),
+            )
 
         elif provider in ("deepseek", "groq", "perplexity", "xai"):
             base_urls = {
