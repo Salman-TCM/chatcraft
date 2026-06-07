@@ -114,7 +114,7 @@ async def login(
             detail={"success": False, "error": "Account suspended. Contact support.", "code": "ACCOUNT_SUSPENDED"},
         )
 
-    access_token = create_access_token(user.id, user.role.value)
+    access_token = create_access_token(user.id, user.role.value, allowed_features=user.allowed_features)
     refresh_token, jti = create_refresh_token(user.id)
 
     # Store JTI in Redis so it can be revoked on logout
@@ -228,7 +228,7 @@ async def refresh(
     if not user or user.is_suspended:
         raise _INVALID_REFRESH
 
-    access_token = create_access_token(user.id, user.role.value)
+    access_token = create_access_token(user.id, user.role.value, allowed_features=user.allowed_features)
     new_refresh_token, new_jti = create_refresh_token(user.id)
     await redis.setex(f"refresh:{new_jti}", _REFRESH_TTL, str(user.id))
 
@@ -516,7 +516,7 @@ async def google_oauth_callback(
         await db.refresh(user)
 
     # Issue tokens
-    access_token = create_access_token(user.id, user.role.value)
+    access_token = create_access_token(user.id, user.role.value, allowed_features=user.allowed_features)
     refresh_token, jti = create_refresh_token(user.id)
     await redis.setex(f"refresh:{jti}", _REFRESH_TTL, str(user.id))
 
@@ -578,7 +578,7 @@ async def google_sync(
             detail={"success": False, "error": "Account suspended. Contact support.", "code": "ACCOUNT_SUSPENDED"},
         )
 
-    access_token = create_access_token(user.id, user.role.value)
+    access_token = create_access_token(user.id, user.role.value, allowed_features=user.allowed_features)
     refresh_token, jti = create_refresh_token(user.id)
     await redis.setex(f"refresh:{jti}", _REFRESH_TTL, str(user.id))
 

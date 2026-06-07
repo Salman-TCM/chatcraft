@@ -29,15 +29,16 @@ Keywords:
 import uuid
 from typing import Annotated
 
-from fastapi import APIRouter, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import func, select
 
-from app.core.dependencies import CurrentUser, DBSession
+from app.core.dependencies import CurrentUser, DBSession, require_feature
+from app.core.features import AUTOMATIONS
 from app.models.automation import (
     Automation, AutomationRun, Keyword, Sequence, SequenceEnrollment,
 )
 
-router = APIRouter(prefix="/api/v1", tags=["automations"])
+router = APIRouter(prefix="/api/v1", tags=["automations"], dependencies=[Depends(require_feature(AUTOMATIONS))])
 
 
 # ── Helpers ────────────────────────────────────────────────────────────────────

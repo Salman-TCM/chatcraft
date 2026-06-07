@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import {
-  ArrowLeft, Shield, Trash2, Eye, CheckCircle, AlertTriangle,
+  ArrowLeft, Shield, Trash2, Eye, CheckCircle, AlertTriangle, Lock,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -12,6 +12,20 @@ import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from "@/components/ui/dialog";
 import { apiClient } from "@/lib/api";
+
+// Keep in sync with backend features.py
+const ALL_FEATURES_LIST: { key: string; label: string }[] = [
+  { key: "wallet",         label: "Wallet & Loyalty" },
+  { key: "agent_builder",  label: "Agent Builder" },
+  { key: "flows",          label: "Flows" },
+  { key: "automations",    label: "Automations" },
+  { key: "analytics",      label: "Analytics" },
+  { key: "knowledge_base", label: "Knowledge Base" },
+  { key: "inbox",          label: "Inbox" },
+  { key: "forms",          label: "Forms" },
+  { key: "campaigns",      label: "Campaigns" },
+  { key: "white_label",    label: "White Label / Agency" },
+];
 
 interface AdminUser {
   id: string;
@@ -22,6 +36,7 @@ interface AdminUser {
   is_suspended: boolean;
   suspended_reason: string | null;
   stripe_customer_id: string | null;
+  allowed_features: string[] | null;
   subscription: {
     plan: string | null;
     status: string | null;
@@ -60,6 +75,12 @@ export default function AdminUserDetailPage() {
   const [suspending, setSuspending] = useState(false);
   const [suspendReason, setSuspendReason] = useState("");
 
+  // Feature access management
+  const [featuresOpen, setFeaturesOpen] = useState(false);
+  const [featureUnrestricted, setFeatureUnrestricted] = useState(true);
+  const [selectedFeatures, setSelectedFeatures] = useState<string[]>([]);
+  const [savingFeatures, setSavingFeatures] = useState(false);
+
   async function load() {
     setLoading(true);
     try {
@@ -70,6 +91,8 @@ export default function AdminUserDetailPage() {
       setEditPlan(u.subscription?.plan ?? "free");
       setEditSubStatus(u.subscription?.status ?? "active");
       setEditVerified(u.email_verified);
+      setFeatureUnrestricted(u.allowed_features === null);
+      setSelectedFeatures(u.allowed_features ?? []);
     } finally {
       setLoading(false);
     }
@@ -90,6 +113,25 @@ export default function AdminUserDetailPage() {
     } finally {
       setSaving(false);
     }
+  }
+
+  async function handleSaveFeatures() {
+    setSavingFeatures(true);
+    try {
+      await apiClient.patch(`/api/admin/users/${id}/features`, {
+        allowed_features: featureUnrestricted ? null : selectedFeatures,
+      });
+      setFeaturesOpen(false);
+      await load();
+    } finally {
+      setSavingFeatures(false);
+    }
+  }
+
+  function toggleFeature(key: string) {
+    setSelectedFeatures((prev) =>
+      prev.includes(key) ? prev.filter((f) => f !== key) : [...prev, key]
+    );
   }
 
   async function handleDelete() {
@@ -162,6 +204,9 @@ export default function AdminUserDetailPage() {
         <div className="flex items-center gap-2">
           <Button size="sm" variant="outline" onClick={() => setEditOpen(true)}>
             <Shield className="h-4 w-4" /> Edit Role / Plan
+          </Button>
+          <Button size="sm" variant="outline" onClick={() => setFeaturesOpen(true)}>
+            <Lock className="h-4 w-4" /> Feature Access
           </Button>
           <Button size="sm" variant="outline" onClick={handleImpersonate} disabled={impersonating}>
             <Eye className="h-4 w-4" /> {impersonating ? "…" : "Impersonate"}
@@ -324,6 +369,63 @@ export default function AdminUserDetailPage() {
           <DialogFooter>
             <Button variant="outline" onClick={() => setEditOpen(false)}>Cancel</Button>
             <Button onClick={handleSave} disabled={saving}>{saving ? "Saving…" : "Save Changes"}</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Feature access */}
+      <Dialog open={featuresOpen} onOpenChange={setFeaturesOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Feature Access — {user.email}</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 py-2">
+            <div className="flex items-center gap-3 rounded-lg border p-3 bg-muted/40">
+              <input
+                id="unrestricted"
+                type="checkbox"
+                checked={featureUnrestricted}
+                onChange={(e) => setFeatureUnrestricted(e.target.checked)}
+                className="h-4 w-4 rounded border-input"
+              />
+              <div>
+                <Label htmlFor="unrestricted" className="font-medium">Unrestricted (all features)</Label>
+                <p className="text-xs text-muted-foreground">User has access to every feature. Uncheck to restrict.</p>
+              </div>
+            </div>
+
+            {!featureUnrestricted && (
+              <div className="space-y-2">
+                <Label className="text-sm text-muted-foreground">Allowed features</Label>
+                <div className="grid grid-cols-1 gap-2">
+                  {ALL_FEATURES_LIST.map(({ key, label }) => (
+                    <label
+                      key={key}
+                      className="flex items-center gap-3 rounded-md border px-3 py-2 cursor-pointer hover:bg-muted/40 transition-colors"
+                    >
+                      <input
+                        type="checkbox"
+                        checked={selectedFeatures.includes(key)}
+                        onChange={() => toggleFeature(key)}
+                        className="h-4 w-4 rounded border-input"
+                      />
+                      <span className="text-sm">{label}</span>
+                    </label>
+                  ))}
+                </div>
+                <p className="text-xs text-muted-foreground pt-1">
+                  {selectedFeatures.length === 0
+                    ? "No features selected — user will see a restricted message on all feature pages."
+                    : `${selectedFeatures.length} feature${selectedFeatures.length === 1 ? "" : "s"} enabled.`}
+                </p>
+              </div>
+            )}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setFeaturesOpen(false)}>Cancel</Button>
+            <Button onClick={handleSaveFeatures} disabled={savingFeatures}>
+              {savingFeatures ? "Saving…" : "Save"}
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
