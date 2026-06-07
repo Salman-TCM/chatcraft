@@ -44,6 +44,7 @@ Wallet settings (authenticated):
 """
 import hashlib
 import json
+import logging
 import secrets
 import uuid
 from datetime import datetime, timezone
@@ -51,6 +52,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Header, HTTPException, Query, Request, Response, status
 from sqlalchemy import select, func
+from sqlalchemy.exc import IntegrityError
 
 from app.core.dependencies import CurrentUser, DBSession
 from app.core.rate_limit import limiter
@@ -61,6 +63,7 @@ from app.models.wallet import (
 from app.services.wallet.service import apply_action, default_push_message
 
 router = APIRouter(tags=["wallet"])
+logger = logging.getLogger(__name__)
 
 _VALID_PROGRAM_STATUSES = frozenset({"active", "inactive", "archived"})
 
@@ -85,7 +88,7 @@ def _render_message(msg: str, card: WalletCard, program: WalletProgram) -> str:
         "{{wallet_punches}}":       str(state.get("punches", 0)),
         "{{wallet_max_punches}}":   str(cfg.get("max_punches", 10)),
         "{{wallet_points}}":        str(state.get("points", 0)),
-        "{{wallet_balance}}":       str(state.get("points", 0)),
+        "{{wallet_balance}}":       str(state.get("balance", 0)),
         "{{wallet_points_label}}":  cfg.get("points_label", "Points"),
         "{{wallet_threshold}}":     str(cfg.get("points_threshold", 0)),
         "{{wallet_reward_name}}":   cfg.get("reward_description", "Reward"),
@@ -160,12 +163,46 @@ async def _get_program(program_id: uuid.UUID, user_id: uuid.UUID, db) -> WalletP
     return prog
 
 
-async def _get_card_by_serial(serial: str, db) -> WalletCard:
-    result = await db.execute(select(WalletCard).where(WalletCard.serial == serial))
+async def _get_card_by_serial(serial: str, db, locked: bool = False) -> WalletCard:
+    q = select(WalletCard).where(WalletCard.serial == serial)
+    if locked:
+        q = q.with_for_update()
+    result = await db.execute(q)
     card = result.scalar_one_or_none()
     if not card:
         raise HTTPException(status_code=404, detail="Card not found")
     return card
+
+
+def _validate_action_value(action: str, value, state: dict) -> None:
+    """Validate numeric value for a wallet action. Raises HTTPException on bad input."""
+    numeric_actions = frozenset({
+        "add_punch", "remove_punch", "set_punches",
+        "add_points", "remove_points", "redeem_points_reward",
+        "deduct_balance", "load_balance", "set_balance", "refund_balance",
+    })
+    if action not in numeric_actions or value is None:
+        return
+
+    try:
+        if action in ("add_punch", "remove_punch", "set_punches",
+                      "add_points", "remove_points", "redeem_points_reward"):
+            v = int(value)
+        else:
+            v = float(value)
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=422, detail=f"value must be a number for action '{action}'")
+
+    if v < 0:
+        raise HTTPException(status_code=422, detail=f"value must be non-negative for action '{action}'")
+
+    if action == "deduct_balance":
+        current = float(state.get("balance", 0.0))
+        if v > current:
+            raise HTTPException(
+                status_code=422,
+                detail=f"Insufficient balance: requested {v:.2f}, available {current:.2f}",
+            )
 
 
 def _initial_state(program_type: str, config: dict) -> dict:
@@ -207,8 +244,8 @@ async def _push_card_devices(card: WalletCard, program: WalletProgram, message: 
                 from app.services.wallet.google_wallet import push_update
                 push_update(card.google_pass_object_id, program.type)
                 sent += 1
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.warning("Google Wallet push_update failed for card %s: %s", card.serial, exc)
     return sent
 
 
@@ -229,8 +266,8 @@ async def _dispatch_wallet_trigger(
             **extra_context,
         }
         await dispatch(trigger, program.user_id, db, context)
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.warning("Wallet automation dispatch failed (trigger=%s, card=%s): %s", trigger, card.serial, exc)
 
 
 async def _find_or_create_contact(
@@ -354,8 +391,8 @@ async def create_program(body: dict, user: CurrentUser, db: DBSession) -> dict:
         gid = create_or_update_class(program)
         program.google_class_id = gid
         await db.commit()
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.warning("Google Wallet class creation failed for program %s: %s", program.id, exc)
 
     return {"success": True, "data": _program_dict(program, frontend_base=_get_frontend_base())}
 
@@ -403,8 +440,8 @@ async def bulk_delete_programs(body: dict, user: CurrentUser, db: DBSession) -> 
             if prog and prog.user_id == user.id:
                 await db.delete(prog)
                 deleted += 1
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.warning("Failed to delete program %s: %s", id_str, exc)
     await db.commit()
     return {"success": True, "data": {"deleted": deleted}}
 
@@ -508,8 +545,8 @@ async def self_enroll(request: Request, token: str, body: dict, db: DBSession) -
     try:
         from app.services.wallet.google_wallet import issue_pass
         card.google_pass_object_id = issue_pass(program, card)
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.warning("Google Wallet pass issuance failed for card serial=%s: %s", card.serial, exc)
 
     # Log self-enroll event
     event = WalletCardEvent(
@@ -532,8 +569,8 @@ async def self_enroll(request: Request, token: str, body: dict, db: DBSession) -
         try:
             from app.services.wallet.google_wallet import add_pass_save_link
             google_url = add_pass_save_link(card.google_pass_object_id)
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.warning("Google Wallet save link failed for card serial=%s: %s", card.serial, exc)
 
     return {
         "success": True,
@@ -600,7 +637,9 @@ async def scanner_action(request: Request, token: str, body: dict, db: DBSession
         raise HTTPException(status_code=422, detail=f"Action not permitted via scanner: {action}")
 
     card_result = await db.execute(
-        select(WalletCard).where(WalletCard.serial == serial, WalletCard.program_id == program.id)
+        select(WalletCard)
+        .where(WalletCard.serial == serial, WalletCard.program_id == program.id)
+        .with_for_update()
     )
     card = card_result.scalar_one_or_none()
     if not card:
@@ -609,8 +648,13 @@ async def scanner_action(request: Request, token: str, body: dict, db: DBSession
         raise HTTPException(status_code=409, detail="Card is not active")
 
     old_state = dict(card.state or {})
+    _validate_action_value(action, value, old_state)
+
     cfg = program.config or {}
-    new_state = apply_action(action, value, old_state, cfg)
+    try:
+        new_state = apply_action(action, value, old_state, cfg)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
     card.state = new_state
 
     delta = {k: new_state[k] for k in new_state if new_state.get(k) != old_state.get(k)}
@@ -632,8 +676,8 @@ async def scanner_action(request: Request, token: str, body: dict, db: DBSession
         try:
             from app.services.wallet.google_wallet import push_update
             push_update(card.google_pass_object_id, program.type)
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.warning("Google Wallet push_update failed for card %s: %s", card.serial, exc)
 
     await _dispatch_wallet_trigger(
         "wallet_punch_added" if action == "add_punch" else
@@ -706,8 +750,8 @@ async def issue_card(program_id: uuid.UUID, body: dict, user: CurrentUser, db: D
     try:
         from app.services.wallet.google_wallet import issue_pass
         card.google_pass_object_id = issue_pass(program, card)
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.warning("Google Wallet pass issuance failed for card serial=%s: %s", card.serial, exc)
 
     event = WalletCardEvent(
         card_id=card.id,
@@ -754,7 +798,7 @@ _SCANNER_ACTIONS = frozenset({
 
 @router.post("/api/wallet/cards/{serial}/action", response_model=dict)
 async def card_action(serial: str, body: dict, user: CurrentUser, db: DBSession) -> dict:
-    card = await _get_card_by_serial(serial, db)
+    card = await _get_card_by_serial(serial, db, locked=True)
     program = await db.get(WalletProgram, card.program_id)
     if not program or program.user_id != user.id:
         raise HTTPException(status_code=404, detail="Card not found")
@@ -768,8 +812,13 @@ async def card_action(serial: str, body: dict, user: CurrentUser, db: DBSession)
     custom_message = (body.get("message") or "").strip() or None
 
     old_state = dict(card.state or {})
+    _validate_action_value(action, value, old_state)
+
     cfg = program.config or {}
-    new_state = apply_action(action, value, old_state, cfg)
+    try:
+        new_state = apply_action(action, value, old_state, cfg)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
     card.state = new_state
 
     delta = {k: new_state[k] for k in new_state if new_state.get(k) != old_state.get(k)}
@@ -797,8 +846,8 @@ async def card_action(serial: str, body: dict, user: CurrentUser, db: DBSession)
         try:
             from app.services.wallet.google_wallet import push_update
             push_update(card.google_pass_object_id, program.type)
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.warning("Google Wallet push_update failed for card %s: %s", card.serial, exc)
 
     # Automation triggers
     trigger = None
@@ -859,7 +908,7 @@ async def receipt_scan(request: Request, serial: str, body: dict, db: DBSession)
     Public endpoint (authenticated by serial being in the customer's pass).
     Accepts base64-encoded receipt image and awards points/punches via AI extraction.
     """
-    card = await _get_card_by_serial(serial, db)
+    card = await _get_card_by_serial(serial, db, locked=True)
     if card.status != "active":
         raise HTTPException(status_code=409, detail="Card is not active")
 
@@ -991,18 +1040,9 @@ async def receipt_scan(request: Request, serial: str, body: dict, db: DBSession)
                 detail=f"Receipt merchant '{merchant_name}' does not match program's accepted merchants",
             )
 
-    # ── Dedup check ────────────────────────────────────────────────────────────
+    # ── Dedup hash ─────────────────────────────────────────────────────────────
     hash_source = f"{program.id}:{merchant_name}:{receipt_date}:{total_amount:.2f}:{transaction_id}"
     receipt_hash = hashlib.sha256(hash_source.encode()).hexdigest()
-
-    existing_scan = (await db.execute(
-        select(WalletReceiptScan).where(
-            WalletReceiptScan.program_id == program.id,
-            WalletReceiptScan.receipt_hash == receipt_hash,
-        )
-    )).scalar_one_or_none()
-    if existing_scan:
-        raise HTTPException(status_code=409, detail="Already redeemed — this receipt has already been used.")
 
     # ── Award ──────────────────────────────────────────────────────────────────
     max_award = float(rs_cfg.get("max_award_per_scan", 999999))
@@ -1036,7 +1076,11 @@ async def receipt_scan(request: Request, serial: str, body: dict, db: DBSession)
         ai_response=ai_result,
     )
     db.add(scan_record)
-    await db.flush()
+    try:
+        await db.flush()  # enforces unique constraint on (program_id, receipt_hash)
+    except IntegrityError:
+        await db.rollback()
+        raise HTTPException(status_code=409, detail="Already redeemed — this receipt has already been used.")
 
     event = WalletCardEvent(
         card_id=card.id,
@@ -1061,8 +1105,8 @@ async def receipt_scan(request: Request, serial: str, body: dict, db: DBSession)
         try:
             from app.services.wallet.google_wallet import push_update
             push_update(card.google_pass_object_id, program.type)
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.warning("Google Wallet push_update failed for card %s: %s", card.serial, exc)
 
     return {
         "success": True,
@@ -1346,8 +1390,8 @@ async def public_card_info(request: Request, serial: str, db: DBSession) -> dict
         try:
             from app.services.wallet.google_wallet import add_pass_save_link
             google_url = add_pass_save_link(card.google_pass_object_id)
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.warning("Google Wallet save link failed for card serial=%s: %s", serial, exc)
 
     rs_cfg = program.receipt_scanning_config or {}
     receipt_scan_enabled = bool(rs_cfg.get("enabled")) and program.type in ("points", "punch_card")
