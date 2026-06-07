@@ -54,7 +54,9 @@ from fastapi import APIRouter, Header, HTTPException, Query, Request, Response, 
 from sqlalchemy import select, func
 from sqlalchemy.exc import IntegrityError
 
-from app.core.dependencies import CurrentUser, DBSession
+from fastapi import Depends
+from app.core.dependencies import CurrentUser, DBSession, require_feature
+from app.core.features import WALLET
 from app.core.rate_limit import limiter
 from app.models.wallet import (
     UserWalletCredentials, WalletCard, WalletCardEvent, WalletProgram,
@@ -62,7 +64,10 @@ from app.models.wallet import (
 )
 from app.services.wallet.service import apply_action, default_push_message
 
+# Public routes (join, scan, pkpass download, Apple Wallet web-service)
 router = APIRouter(tags=["wallet"])
+# Authenticated management routes — requires wallet feature access
+wallet_mgmt_router = APIRouter(tags=["wallet"], dependencies=[Depends(require_feature(WALLET))])
 logger = logging.getLogger(__name__)
 
 _VALID_PROGRAM_STATUSES = frozenset({"active", "inactive", "archived"})
@@ -319,7 +324,7 @@ async def list_program_types() -> dict:
 
 # ── Programs CRUD ──────────────────────────────────────────────────────────────
 
-@router.get("/api/wallet/programs", response_model=dict)
+@wallet_mgmt_router.get("/api/wallet/programs", response_model=dict)
 async def list_programs(
     user: CurrentUser, db: DBSession,
     page: Annotated[int, Query(ge=1)] = 1,
@@ -343,7 +348,7 @@ async def list_programs(
     }
 
 
-@router.post("/api/wallet/programs", response_model=dict, status_code=status.HTTP_201_CREATED)
+@wallet_mgmt_router.post("/api/wallet/programs", response_model=dict, status_code=status.HTTP_201_CREATED)
 async def create_program(body: dict, user: CurrentUser, db: DBSession) -> dict:
     name = (body.get("name") or "").strip()
     prog_type = (body.get("type") or "").strip()
@@ -397,14 +402,14 @@ async def create_program(body: dict, user: CurrentUser, db: DBSession) -> dict:
     return {"success": True, "data": _program_dict(program, frontend_base=_get_frontend_base())}
 
 
-@router.get("/api/wallet/programs/{program_id}", response_model=dict)
+@wallet_mgmt_router.get("/api/wallet/programs/{program_id}", response_model=dict)
 async def get_program(program_id: uuid.UUID, user: CurrentUser, db: DBSession) -> dict:
     program = await _get_program(program_id, user.id, db)
     dc = await _program_device_count(program_id, db)
     return {"success": True, "data": _program_dict(program, dc, _get_frontend_base())}
 
 
-@router.patch("/api/wallet/programs/{program_id}", response_model=dict)
+@wallet_mgmt_router.patch("/api/wallet/programs/{program_id}", response_model=dict)
 async def update_program(program_id: uuid.UUID, body: dict, user: CurrentUser, db: DBSession) -> dict:
     program = await _get_program(program_id, user.id, db)
     if "status" in body and body["status"] not in _VALID_PROGRAM_STATUSES:
@@ -422,7 +427,7 @@ async def update_program(program_id: uuid.UUID, body: dict, user: CurrentUser, d
     return {"success": True, "data": _program_dict(program, dc, _get_frontend_base())}
 
 
-@router.delete("/api/wallet/programs/{program_id}", response_model=dict)
+@wallet_mgmt_router.delete("/api/wallet/programs/{program_id}", response_model=dict)
 async def delete_program(program_id: uuid.UUID, user: CurrentUser, db: DBSession) -> dict:
     program = await _get_program(program_id, user.id, db)
     await db.delete(program)
@@ -430,7 +435,7 @@ async def delete_program(program_id: uuid.UUID, user: CurrentUser, db: DBSession
     return {"success": True, "data": None}
 
 
-@router.post("/api/wallet/programs/bulk-delete", response_model=dict)
+@wallet_mgmt_router.post("/api/wallet/programs/bulk-delete", response_model=dict)
 async def bulk_delete_programs(body: dict, user: CurrentUser, db: DBSession) -> dict:
     ids: list[str] = body.get("ids", [])
     deleted = 0
@@ -448,7 +453,7 @@ async def bulk_delete_programs(body: dict, user: CurrentUser, db: DBSession) -> 
 
 # ── Join token rotation ────────────────────────────────────────────────────────
 
-@router.post("/api/wallet/programs/{program_id}/rotate-join-token", response_model=dict)
+@wallet_mgmt_router.post("/api/wallet/programs/{program_id}/rotate-join-token", response_model=dict)
 async def rotate_join_token(program_id: uuid.UUID, user: CurrentUser, db: DBSession) -> dict:
     program = await _get_program(program_id, user.id, db)
     program.join_token = secrets.token_hex(32)
@@ -457,7 +462,7 @@ async def rotate_join_token(program_id: uuid.UUID, user: CurrentUser, db: DBSess
     return {"success": True, "data": {"join_token": program.join_token, "join_url": f"{fb}/join/{program.join_token}"}}
 
 
-@router.post("/api/wallet/programs/{program_id}/rotate-scanner-token", response_model=dict)
+@wallet_mgmt_router.post("/api/wallet/programs/{program_id}/rotate-scanner-token", response_model=dict)
 async def rotate_scanner_token(program_id: uuid.UUID, user: CurrentUser, db: DBSession) -> dict:
     program = await _get_program(program_id, user.id, db)
     program.scanner_token = secrets.token_hex(32)
@@ -693,7 +698,7 @@ async def scanner_action(request: Request, token: str, body: dict, db: DBSession
 
 # ── Cards ──────────────────────────────────────────────────────────────────────
 
-@router.get("/api/wallet/programs/{program_id}/cards", response_model=dict)
+@wallet_mgmt_router.get("/api/wallet/programs/{program_id}/cards", response_model=dict)
 async def list_cards(
     program_id: uuid.UUID, user: CurrentUser, db: DBSession,
     page: Annotated[int, Query(ge=1)] = 1,
@@ -713,7 +718,7 @@ async def list_cards(
     return {"success": True, "data": [_card_dict(c) for c in cards], "total": total}
 
 
-@router.post("/api/wallet/programs/{program_id}/cards", response_model=dict, status_code=status.HTTP_201_CREATED)
+@wallet_mgmt_router.post("/api/wallet/programs/{program_id}/cards", response_model=dict, status_code=status.HTTP_201_CREATED)
 async def issue_card(program_id: uuid.UUID, body: dict, user: CurrentUser, db: DBSession) -> dict:
     program = await _get_program(program_id, user.id, db)
 
@@ -769,7 +774,7 @@ async def issue_card(program_id: uuid.UUID, body: dict, user: CurrentUser, db: D
     return {"success": True, "data": _card_dict(card)}
 
 
-@router.delete("/api/wallet/cards/{serial}", response_model=dict)
+@wallet_mgmt_router.delete("/api/wallet/cards/{serial}", response_model=dict)
 async def revoke_card(serial: str, user: CurrentUser, db: DBSession) -> dict:
     card = await _get_card_by_serial(serial, db)
     program = await db.get(WalletProgram, card.program_id)
@@ -796,7 +801,7 @@ _SCANNER_ACTIONS = frozenset({
 })
 
 
-@router.post("/api/wallet/cards/{serial}/action", response_model=dict)
+@wallet_mgmt_router.post("/api/wallet/cards/{serial}/action", response_model=dict)
 async def card_action(serial: str, body: dict, user: CurrentUser, db: DBSession) -> dict:
     card = await _get_card_by_serial(serial, db, locked=True)
     program = await db.get(WalletProgram, card.program_id)
@@ -878,7 +883,7 @@ async def card_action(serial: str, body: dict, user: CurrentUser, db: DBSession)
 
 # ── Card events ────────────────────────────────────────────────────────────────
 
-@router.get("/api/wallet/cards/{serial}/events", response_model=dict)
+@wallet_mgmt_router.get("/api/wallet/cards/{serial}/events", response_model=dict)
 async def list_card_events(
     serial: str, user: CurrentUser, db: DBSession,
     page: Annotated[int, Query(ge=1)] = 1,
@@ -1121,7 +1126,7 @@ async def receipt_scan(request: Request, serial: str, body: dict, db: DBSession)
     }
 
 
-@router.get("/api/wallet/receipt-scans/{scan_id}/image", response_model=dict)
+@wallet_mgmt_router.get("/api/wallet/receipt-scans/{scan_id}/image", response_model=dict)
 async def get_receipt_image(scan_id: uuid.UUID, user: CurrentUser, db: DBSession) -> dict:
     """Return the stored receipt image for audit."""
     scan = await db.get(WalletReceiptScan, scan_id)
@@ -1135,7 +1140,7 @@ async def get_receipt_image(scan_id: uuid.UUID, user: CurrentUser, db: DBSession
 
 # ── Push notifications ─────────────────────────────────────────────────────────
 
-@router.post("/api/wallet/cards/{serial}/push", response_model=dict)
+@wallet_mgmt_router.post("/api/wallet/cards/{serial}/push", response_model=dict)
 async def push_to_card(serial: str, body: dict, user: CurrentUser, db: DBSession) -> dict:
     card = await _get_card_by_serial(serial, db)
     program = await db.get(WalletProgram, card.program_id)
@@ -1150,7 +1155,7 @@ async def push_to_card(serial: str, body: dict, user: CurrentUser, db: DBSession
     return {"success": True, "data": {"sent": sent}}
 
 
-@router.post("/api/wallet/programs/{program_id}/push", response_model=dict)
+@wallet_mgmt_router.post("/api/wallet/programs/{program_id}/push", response_model=dict)
 async def broadcast_push(program_id: uuid.UUID, body: dict, user: CurrentUser, db: DBSession) -> dict:
     program = await _get_program(program_id, user.id, db)
     raw_message = (body.get("message") or "Your pass has been updated.").strip()
@@ -1420,7 +1425,7 @@ async def public_card_info(request: Request, serial: str, db: DBSession) -> dict
 
 # ── Wallet credential settings ─────────────────────────────────────────────────
 
-@router.get("/api/settings/wallet", response_model=dict)
+@wallet_mgmt_router.get("/api/settings/wallet", response_model=dict)
 async def get_wallet_settings(user: CurrentUser, db: DBSession) -> dict:
     creds = await db.get(UserWalletCredentials, user.id)
     apple = creds.apple_config or {} if creds else {}
@@ -1464,7 +1469,7 @@ def _decrypt_apple_field(value: str) -> str:
         return value  # already plaintext (pre-encryption migration)
 
 
-@router.patch("/api/settings/wallet/apple", response_model=dict)
+@wallet_mgmt_router.patch("/api/settings/wallet/apple", response_model=dict)
 async def save_apple_credentials(body: dict, user: CurrentUser, db: DBSession) -> dict:
     creds = await db.get(UserWalletCredentials, user.id)
     if not creds:
@@ -1493,7 +1498,7 @@ async def save_apple_credentials(body: dict, user: CurrentUser, db: DBSession) -
     return {"success": True, "data": {"saved": True}}
 
 
-@router.patch("/api/settings/wallet/google", response_model=dict)
+@wallet_mgmt_router.patch("/api/settings/wallet/google", response_model=dict)
 async def save_google_credentials(body: dict, user: CurrentUser, db: DBSession) -> dict:
     creds = await db.get(UserWalletCredentials, user.id)
     if not creds:

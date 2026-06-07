@@ -34,7 +34,12 @@ def verify_password(plain: str, hashed: str) -> bool:
 # JWT tokens
 # ---------------------------------------------------------------------------
 
-def create_access_token(user_id, role: str, expires_minutes: int | None = None) -> str:
+def create_access_token(
+    user_id,
+    role: str,
+    expires_minutes: int | None = None,
+    allowed_features: list | None = None,
+) -> str:
     now = datetime.now(timezone.utc)
     payload = {
         "sub": str(user_id),
@@ -43,6 +48,9 @@ def create_access_token(user_id, role: str, expires_minutes: int | None = None) 
         "exp": now + timedelta(minutes=expires_minutes if expires_minutes is not None else ACCESS_TOKEN_EXPIRE_MINUTES),
         "type": "access",
     }
+    # Only include in token when restricted — None means unrestricted
+    if allowed_features is not None:
+        payload["allowed_features"] = allowed_features
     return jwt.encode(payload, settings.secret_key, algorithm=ALGORITHM)
 
 

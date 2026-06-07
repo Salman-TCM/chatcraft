@@ -22,13 +22,14 @@ from urllib.parse import urlparse
 import anthropic
 import httpx
 from openai import AsyncOpenAI
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from sqlalchemy import func, select
 
 from app.core.config import settings
-from app.core.dependencies import CurrentUser, DBSession
+from app.core.dependencies import CurrentUser, DBSession, require_feature
+from app.core.features import AGENT_BUILDER
 from app.core.rate_limit import limiter
 from app.models.agent import Agent
 from app.models.agent_conversation import AgentConversation
@@ -39,7 +40,7 @@ from app.schemas.agent import AgentCreateRequest, AgentResponse, AgentUpdateRequ
 from app.services.kb.rag import RAGService
 from app.services.llm.key_store import get_key as _get_user_key
 
-router = APIRouter(prefix="/api/v1/agents", tags=["agents"])
+router = APIRouter(prefix="/api/v1/agents", tags=["agents"], dependencies=[Depends(require_feature(AGENT_BUILDER))])
 public_router = APIRouter(prefix="/api/public/agents", tags=["agents-public"])
 
 
