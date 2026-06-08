@@ -79,12 +79,12 @@ export default auth(async (req) => {
     return NextResponse.redirect(loginUrl);
   }
 
-  if (isAdminRoute && isAuthenticated && userRole !== "admin") {
+  if (isAdminRoute && isAuthenticated && userRole !== "admin" && userRole !== "superadmin") {
     return NextResponse.redirect(new URL("/dashboard", nextUrl.origin));
   }
 
   // Feature-level route protection
-  if (isAuthenticated && userRole !== "admin") {
+  if (isAuthenticated && userRole !== "admin" && userRole !== "superadmin") {
     const allowedFeatures = (session?.user as any)?.allowedFeatures ?? null;
     for (const [feature, routePrefix] of Object.entries(FEATURE_ROUTES)) {
       if (path.startsWith(routePrefix)) {
