@@ -61,6 +61,13 @@ async def seed() -> None:
     email    = os.environ.get("ADMIN_EMAIL")    or _prompt("Admin email")
     password = os.environ.get("ADMIN_PASSWORD") or _prompt("Admin password", secret=True)
     name     = os.environ.get("ADMIN_NAME", "Admin")
+    role_str = os.environ.get("ADMIN_ROLE", "superadmin")
+
+    try:
+        role = UserRole(role_str)
+    except ValueError:
+        print(f"ERROR: Invalid ADMIN_ROLE '{role_str}'. Valid values: {[r.value for r in UserRole]}")
+        sys.exit(1)
 
     _validate_password(password)
 
@@ -68,28 +75,27 @@ async def seed() -> None:
         existing = await db.scalar(select(User).where(User.email == email.lower()))
 
         if existing:
-            if existing.role == UserRole.admin:
-                print(f"✓ Admin user '{email}' already exists — no changes made.")
+            if existing.role == role:
+                print(f"✓ User '{email}' already exists with role '{role.value}' — no changes made.")
                 return
 
-            # Promote existing user to admin
-            existing.role = UserRole.admin
+            existing.role = role
             existing.password_hash = hash_password(password)
             await db.commit()
-            print(f"✓ Existing user '{email}' promoted to admin.")
+            print(f"✓ Existing user '{email}' updated to role '{role.value}'.")
             return
 
         user = User(
             email=email.lower(),
             password_hash=hash_password(password),
             name=name,
-            role=UserRole.admin,
+            role=role,
             email_verified=True,
         )
         db.add(user)
         await db.commit()
         await db.refresh(user)
-        print(f"✓ Admin user created: {email}  (id: {user.id})")
+        print(f"✓ User created: {email}  role={role.value}  (id: {user.id})")
 
 
 if __name__ == "__main__":

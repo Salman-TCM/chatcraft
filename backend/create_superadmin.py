@@ -10,7 +10,12 @@ async def create_superadmin():
         # Check if superadmin already exists
         existing = await db.scalar(select(User).where(User.email == "superadmin@chatcraft.ai"))
         if existing:
-            print(f"✓ Superadmin already exists: {existing.email}")
+            if existing.role == UserRole.superadmin:
+                print(f"✓ Superadmin already exists: {existing.email}")
+                return
+            existing.role = UserRole.superadmin
+            await db.commit()
+            print(f"✓ Upgraded {existing.email} to superadmin role")
             return
         
         # Create superadmin
@@ -18,7 +23,7 @@ async def create_superadmin():
             email="superadmin@chatcraft.ai",
             password_hash=hash_password("SuperAdmin@123"),
             name="Super Admin",
-            role=UserRole.admin,
+            role=UserRole.superadmin,
             email_verified=True,
         )
         db.add(superadmin)
