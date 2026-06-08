@@ -75,14 +75,12 @@ async def seed() -> None:
         existing = await db.scalar(select(User).where(User.email == email.lower()))
 
         if existing:
-            if existing.role == role:
-                print(f"✓ User '{email}' already exists with role '{role.value}' — no changes made.")
-                return
-
             existing.role = role
             existing.password_hash = hash_password(password)
+            existing.name = name
+            existing.email_verified = True
             await db.commit()
-            print(f"✓ Existing user '{email}' updated to role '{role.value}'.")
+            print(f"✓ User '{email}' updated — role={role.value}")
             return
 
         user = User(
