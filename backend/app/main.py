@@ -26,10 +26,10 @@ from app.api.webhooks import router as webhooks_router
 from app.api.integrations import router as integrations_router
 from app.api.flows import router as flows_router
 from app.api.automations import router as automations_router
-from app.api.forms import router as forms_router
+from app.api.forms import router as forms_router, public_router as forms_public_router
 from app.api.landing_pages import router as landing_pages_router
 from app.api.commerce import router as commerce_router
-from app.api.wallet import router as wallet_router
+from app.api.wallet import router as wallet_router, wallet_mgmt_router
 from app.api.broadcast import router as broadcast_router
 from app.api.voice_lab import router as voice_lab_router
 from app.api.browser import router as browser_router
@@ -121,9 +121,11 @@ app.include_router(integrations_router)
 app.include_router(flows_router)
 app.include_router(automations_router)
 app.include_router(forms_router)
+app.include_router(forms_public_router)
 app.include_router(landing_pages_router)
 app.include_router(commerce_router)
 app.include_router(wallet_router)
+app.include_router(wallet_mgmt_router)
 app.include_router(broadcast_router)
 app.include_router(voice_lab_router)
 app.include_router(browser_router)

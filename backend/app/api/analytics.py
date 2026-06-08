@@ -9,18 +9,19 @@ Analytics API — creator dashboard data.
 import uuid
 from datetime import date, datetime, timedelta, timezone
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Depends, Query
 from sqlalchemy import Float, func, select
 from sqlalchemy.orm import selectinload
 
-from app.core.dependencies import CurrentUser, DBSession
+from app.core.dependencies import CurrentUser, DBSession, require_feature
+from app.core.features import ANALYTICS
 from app.models.chatbot_config import ChatbotConfig
 from app.models.conversation import Conversation
 from app.models.message import Message, MessageFeedback, MessageRole
 from app.models.usage_log import UsageLog
 from app.schemas.chat import ConversationResponse
 
-router = APIRouter(prefix="/api/analytics", tags=["analytics"])
+router = APIRouter(prefix="/api/analytics", tags=["analytics"], dependencies=[Depends(require_feature(ANALYTICS))])
 
 
 @router.get("/overview", response_model=dict)

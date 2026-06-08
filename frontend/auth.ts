@@ -93,6 +93,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
             accessToken: data.access_token,
             refreshToken: data.refresh_token ?? "",
             trialEndsAt: data.user.trial_ends_at ?? null,
+            allowedFeatures: data.user.allowed_features ?? null,
           };
         } catch (err) {
           if (err instanceof Error && err.message === "ACCOUNT_SUSPENDED") throw err;
@@ -129,6 +130,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
           user.accessToken = data.access_token;
           user.refreshToken = data.refresh_token ?? "";
           user.trialEndsAt = data.user.trial_ends_at ?? null;
+          user.allowedFeatures = data.user.allowed_features ?? null;
         } catch {
           return false;
         }
@@ -144,6 +146,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         token.refreshToken = user.refreshToken;
         token.accessTokenExpiry = Date.now() + ACCESS_TOKEN_LIFETIME_MS;
         token.trialEndsAt = user.trialEndsAt ?? null;
+        token.allowedFeatures = user.allowedFeatures ?? null;
       }
       // Proactively refresh the backend access token when it nears expiry
       if (Date.now() < token.accessTokenExpiry) return token;
@@ -174,6 +177,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         token.refreshToken = data.refresh_token ?? token.refreshToken;
         token.accessTokenExpiry = Date.now() + ACCESS_TOKEN_LIFETIME_MS;
         if (data.user?.role) token.role = data.user.role;
+        if ("allowed_features" in (data.user ?? {})) token.allowedFeatures = data.user.allowed_features ?? null;
         delete token.error;
       } catch {
         token.error = "RefreshTokenError";
@@ -186,6 +190,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
       session.user.role = token.role;
       session.user.accessToken = token.accessToken;
       session.user.trialEndsAt = token.trialEndsAt ?? null;
+      session.user.allowedFeatures = token.allowedFeatures ?? null;
       if (token.error) session.error = token.error;
       return session;
     },

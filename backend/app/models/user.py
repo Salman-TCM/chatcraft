@@ -14,6 +14,7 @@ class UserRole(str, enum.Enum):
     premium = "premium"
     creator = "creator"
     admin = "admin"
+    superadmin = "superadmin"
 
 
 class SubscriptionStatus(str, enum.Enum):
@@ -87,6 +88,12 @@ class User(TimestampMixin, Base):
     is_suspended: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
     suspended_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     suspended_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    # Feature-level access control
+    # None = all features allowed (default for existing users / admins)
+    # [] = no features allowed
+    # ["wallet", "agent_builder"] = only those features
+    allowed_features: Mapped[list | None] = mapped_column(JSONB, nullable=True, default=None)
 
     # Relationships
     subscription: Mapped["Subscription | None"] = relationship(  # type: ignore[name-defined]

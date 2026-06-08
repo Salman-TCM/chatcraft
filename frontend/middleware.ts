@@ -1,6 +1,7 @@
 import { auth } from "@/auth";
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
+import { FEATURE_ROUTES, hasFeatureAccess, type FeatureKey } from "@/lib/features";
 
 const PROTECTED_PREFIXES = [
   "/dashboard",
@@ -80,6 +81,19 @@ export default auth(async (req) => {
 
   if (isAdminRoute && isAuthenticated && userRole !== "admin") {
     return NextResponse.redirect(new URL("/dashboard", nextUrl.origin));
+  }
+
+  // Feature-level route protection
+  if (isAuthenticated && userRole !== "admin") {
+    const allowedFeatures = (session?.user as any)?.allowedFeatures ?? null;
+    for (const [feature, routePrefix] of Object.entries(FEATURE_ROUTES)) {
+      if (path.startsWith(routePrefix)) {
+        if (!hasFeatureAccess(userRole, allowedFeatures, feature as FeatureKey)) {
+          return NextResponse.redirect(new URL("/dashboard?error=feature_restricted", nextUrl.origin));
+        }
+        break;
+      }
+    }
   }
 
   if (isAuthPage && isAuthenticated) {

@@ -89,6 +89,12 @@ async def get_current_user(
     if not user:
         raise exc
 
+    if user.is_suspended:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={"success": False, "error": "Account suspended", "code": "SUSPENDED"},
+        )
+
     return user
 
 
@@ -130,7 +136,51 @@ def require_role(*allowed_roles: str):
 
 
 # Convenience aliases — import these in route files
-RequireTrial = Depends(require_role("trial", "premium", "creator", "admin"))
-RequirePremium = Depends(require_role("premium", "creator", "admin"))
-RequireCreator = Depends(require_role("creator", "admin"))
-RequireAdmin = Depends(require_role("admin"))
+RequireTrial = Depends(require_role("trial", "premium", "creator", "admin", "superadmin"))
+RequirePremium = Depends(require_role("premium", "creator", "admin", "superadmin"))
+RequireCreator = Depends(require_role("creator", "admin", "superadmin"))
+RequireAdmin = Depends(require_role("admin", "superadmin"))
+RequireSuperAdmin = Depends(require_role("superadmin"))
+
+
+# ---------------------------------------------------------------------------
+# Feature-level access control
+# ---------------------------------------------------------------------------
+
+def require_feature(feature: str):
+    """
+    Dependency factory — enforces that the authenticated user has access to a
+    specific feature. Admins always bypass this check.
+
+    User.allowed_features == None  → full access (default, no restriction)
+    User.allowed_features == []    → no features allowed
+    User.allowed_features == ["wallet", "agent_builder"] → only those features
+
+    Usage:
+        router = APIRouter(dependencies=[Depends(require_feature("wallet"))])
+    """
+    from app.core.features import ALL_FEATURE_KEYS
+    from app.models.user import UserRole
+
+    if feature not in ALL_FEATURE_KEYS:
+        raise ValueError(f"Unknown feature key: {feature!r}. Valid keys: {ALL_FEATURE_KEYS}")
+
+    async def _check(user: CurrentUser) -> None:  # type: ignore[name-defined]
+        if user.role in (UserRole.admin, UserRole.superadmin):
+            return
+        allowed = user.allowed_features
+        # None means unrestricted
+        if allowed is None:
+            return
+        if feature not in allowed:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail={
+                    "success": False,
+                    "error": f"Your account does not have access to this feature",
+                    "code": "FEATURE_RESTRICTED",
+                    "feature": feature,
+                },
+            )
+
+    return _check

@@ -12,6 +12,7 @@ from sqlalchemy import func, or_, select
 from sqlalchemy.orm import selectinload
 
 from app.core.dependencies import CurrentUser, DBSession, RequireAdmin
+from app.core.features import ALL_FEATURES, ALL_FEATURE_KEYS
 from app.core.security import create_access_token
 from app.models.chatbot_config import ChatbotConfig
 from app.models.conversation import Conversation
@@ -213,6 +214,7 @@ def _user_dict(u: User) -> dict:
             "current_period_end": sub.current_period_end.isoformat() if sub and sub.current_period_end else None,
         } if sub else None,
         "stripe_customer_id": u.stripe_customer_id,
+        "allowed_features": u.allowed_features,  # None = unrestricted, list = specific features only
         "created_at": u.created_at.isoformat(),
         "updated_at": u.updated_at.isoformat(),
     }
@@ -320,14 +322,27 @@ async def update_user(
     if not u:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
 
-    # Prevent admin from stripping their own admin role
-    if str(u.id) == str(caller.id) and body.get("role") and body["role"] != "admin":
+    # superadmin accounts are off-limits to plain admins
+    if u.role == UserRole.superadmin and caller.role != UserRole.superadmin:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only superadmins can modify superadmin accounts",
+        )
+
+    # Prevent any user from stripping their own elevated role
+    if str(u.id) == str(caller.id) and body.get("role") and body["role"] not in ("admin", "superadmin"):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Cannot change your own admin role",
+            detail="Cannot demote your own account",
         )
 
     if "role" in body:
+        # Only superadmin can grant the superadmin role
+        if body["role"] == "superadmin" and caller.role != UserRole.superadmin:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Only superadmins can grant the superadmin role",
+            )
         old_role = u.role.value
         u.role = UserRole(body["role"])
         db.add(AdminActionLog(
@@ -392,6 +407,13 @@ async def delete_user(
     u = result.scalar_one_or_none()
     if not u:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+
+    # superadmin accounts are off-limits to plain admins
+    if u.role == UserRole.superadmin and caller.role != UserRole.superadmin:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only superadmins can delete superadmin accounts",
+        )
 
     db.add(AdminActionLog(
         admin_user_id=caller.id,
@@ -716,4 +738,91 @@ async def list_payments(
         "total": total,
         "page": page,
         "limit": limit,
+    }
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# FEATURE ACCESS MANAGEMENT
+# ══════════════════════════════════════════════════════════════════════════════
+
+@router.get("/features", response_model=dict)
+async def list_all_features() -> dict:
+    """Return the full feature registry — used by admin UI to render toggles."""
+    return {"success": True, "data": ALL_FEATURES}
+
+
+@router.get("/users/{user_id}/features", response_model=dict)
+async def get_user_features(user_id: uuid.UUID, db: DBSession) -> dict:
+    """Return a user's current feature access.
+    allowed_features=None means unrestricted (all features allowed).
+    """
+    user = await db.get(User, user_id)
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    return {
+        "success": True,
+        "data": {
+            "user_id": str(user.id),
+            "allowed_features": user.allowed_features,
+            "is_unrestricted": user.allowed_features is None,
+            "all_features": ALL_FEATURES,
+        },
+    }
+
+
+@router.patch("/users/{user_id}/features", response_model=dict)
+async def update_user_features(
+    user_id: uuid.UUID,
+    body: dict,
+    db: DBSession,
+    caller: CurrentUser,
+) -> dict:
+    """Set a user's allowed features.
+
+    Body:
+      { "allowed_features": ["wallet", "agent_builder"] }  — restrict to these features
+      { "allowed_features": null }                          — remove all restrictions (full access)
+
+    Admins are always unrestricted regardless of this setting.
+    """
+    user = await db.get(User, user_id)
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    if "allowed_features" not in body:
+        raise HTTPException(status_code=422, detail="allowed_features field required")
+
+    features = body["allowed_features"]
+
+    if features is not None:
+        if not isinstance(features, list):
+            raise HTTPException(status_code=422, detail="allowed_features must be a list or null")
+        invalid = [f for f in features if f not in ALL_FEATURE_KEYS]
+        if invalid:
+            raise HTTPException(
+                status_code=422,
+                detail=f"Unknown feature keys: {invalid}. Valid keys: {sorted(ALL_FEATURE_KEYS)}",
+            )
+        features = list(set(features))  # deduplicate
+
+    user.allowed_features = features
+    await db.commit()
+
+    from app.models.admin_log import AdminActionLog
+    log = AdminActionLog(
+        admin_id=caller.id,
+        action="update_user_features",
+        target_user_id=user.id,
+        details={"allowed_features": features},
+    )
+    db.add(log)
+    await db.commit()
+
+    return {
+        "success": True,
+        "data": {
+            "user_id": str(user.id),
+            "allowed_features": user.allowed_features,
+            "is_unrestricted": user.allowed_features is None,
+        },
     }
