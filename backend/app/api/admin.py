@@ -322,14 +322,27 @@ async def update_user(
     if not u:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
 
-    # Prevent admin from stripping their own admin role
-    if str(u.id) == str(caller.id) and body.get("role") and body["role"] != "admin":
+    # superadmin accounts are off-limits to plain admins
+    if u.role == UserRole.superadmin and caller.role != UserRole.superadmin:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only superadmins can modify superadmin accounts",
+        )
+
+    # Prevent any user from stripping their own elevated role
+    if str(u.id) == str(caller.id) and body.get("role") and body["role"] not in ("admin", "superadmin"):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Cannot change your own admin role",
+            detail="Cannot demote your own account",
         )
 
     if "role" in body:
+        # Only superadmin can grant the superadmin role
+        if body["role"] == "superadmin" and caller.role != UserRole.superadmin:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Only superadmins can grant the superadmin role",
+            )
         old_role = u.role.value
         u.role = UserRole(body["role"])
         db.add(AdminActionLog(
@@ -394,6 +407,13 @@ async def delete_user(
     u = result.scalar_one_or_none()
     if not u:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+
+    # superadmin accounts are off-limits to plain admins
+    if u.role == UserRole.superadmin and caller.role != UserRole.superadmin:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only superadmins can delete superadmin accounts",
+        )
 
     db.add(AdminActionLog(
         admin_user_id=caller.id,
