@@ -14,6 +14,7 @@ class UserRole(str, enum.Enum):
     premium = "premium"
     creator = "creator"
     admin = "admin"
+    superadmin = "superadmin"
 
 
 class SubscriptionStatus(str, enum.Enum):
