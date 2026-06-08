@@ -30,7 +30,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
   useEffect(() => {
     if (status === "loading") return;
     const role = (session?.user as any)?.role;
-    if (!session || role !== "admin") {
+    if (!session || (role !== "admin" && role !== "superadmin")) {
       router.replace("/dashboard");
     }
   }, [session, status, router]);
