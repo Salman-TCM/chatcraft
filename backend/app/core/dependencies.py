@@ -136,10 +136,11 @@ def require_role(*allowed_roles: str):
 
 
 # Convenience aliases — import these in route files
-RequireTrial = Depends(require_role("trial", "premium", "creator", "admin"))
-RequirePremium = Depends(require_role("premium", "creator", "admin"))
-RequireCreator = Depends(require_role("creator", "admin"))
-RequireAdmin = Depends(require_role("admin"))
+RequireTrial = Depends(require_role("trial", "premium", "creator", "admin", "superadmin"))
+RequirePremium = Depends(require_role("premium", "creator", "admin", "superadmin"))
+RequireCreator = Depends(require_role("creator", "admin", "superadmin"))
+RequireAdmin = Depends(require_role("admin", "superadmin"))
+RequireSuperAdmin = Depends(require_role("superadmin"))
 
 
 # ---------------------------------------------------------------------------
@@ -165,7 +166,7 @@ def require_feature(feature: str):
         raise ValueError(f"Unknown feature key: {feature!r}. Valid keys: {ALL_FEATURE_KEYS}")
 
     async def _check(user: CurrentUser) -> None:  # type: ignore[name-defined]
-        if user.role == UserRole.admin:
+        if user.role in (UserRole.admin, UserRole.superadmin):
             return
         allowed = user.allowed_features
         # None means unrestricted
