@@ -1,6 +1,7 @@
 """
 WalletService — reusable wallet card operations for flows and internal callers.
 """
+import logging
 import uuid
 from typing import Optional
 
@@ -9,20 +10,48 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.wallet import WalletCard, WalletCardEvent, WalletProgram, WalletPushSubscription
 
+logger = logging.getLogger(__name__)
+
+
+def _to_int(v, default: int = 0) -> int:
+    try:
+        return int(v)
+    except (TypeError, ValueError):
+        raise ValueError(f"expected an integer, got {v!r}")
+
+
+def _to_float(v, default: float = 0.0) -> float:
+    try:
+        return float(v)
+    except (TypeError, ValueError):
+        raise ValueError(f"expected a number, got {v!r}")
+
 
 def apply_action(action: str, value, state: dict, cfg: dict) -> dict:
-    """Pure function: apply a card action to a state dict, return updated state."""
+    """Pure function: apply a card action to a state dict, return updated state.
+
+    Raises ValueError for invalid inputs (negative values, insufficient balance).
+    """
     state = dict(state)
     if action == "add_punch":
-        state["punches"] = state.get("punches", 0) + int(value or 1)
+        v = _to_int(value, 1) if value is not None else 1
+        if v < 0:
+            raise ValueError("value must be non-negative")
+        state["punches"] = state.get("punches", 0) + v
         max_p = cfg.get("max_punches", 10)
         if state["punches"] >= max_p:
             state["punches"] = 0
             state["redeemed"] = state.get("redeemed", 0) + 1
     elif action == "remove_punch":
-        state["punches"] = max(0, state.get("punches", 0) - int(value or 1))
+        v = _to_int(value, 1) if value is not None else 1
+        if v < 0:
+            raise ValueError("value must be non-negative")
+        state["punches"] = max(0, state.get("punches", 0) - v)
     elif action == "set_punches":
-        state["punches"] = int(value or 0)
+        v = _to_int(value, 0)
+        if v < 0:
+            raise ValueError("value must be non-negative")
+        state["punches"] = v
     elif action == "redeem":
         state["redeemed"] = state.get("redeemed", 0) + 1
         if "redeemed" in state and isinstance(state.get("redeemed"), bool):
@@ -32,7 +61,9 @@ def apply_action(action: str, value, state: dict, cfg: dict) -> dict:
     elif action == "set_tier":
         state["tier"] = str(value or "Standard")
     elif action == "add_points":
-        pts = int(value or 0)
+        pts = _to_int(value, 0)
+        if pts < 0:
+            raise ValueError("value must be non-negative")
         state["points"] = state.get("points", 0) + pts
         state["lifetime_points"] = state.get("lifetime_points", 0) + pts
         tiers: list = cfg.get("tiers", [])
@@ -41,17 +72,34 @@ def apply_action(action: str, value, state: dict, cfg: dict) -> dict:
                 state["tier"] = tier["name"]
                 break
     elif action == "remove_points":
-        state["points"] = max(0, state.get("points", 0) - int(value or 0))
+        v = _to_int(value, 0)
+        if v < 0:
+            raise ValueError("value must be non-negative")
+        state["points"] = max(0, state.get("points", 0) - v)
     elif action == "redeem_points_reward":
-        cost = int(value or cfg.get("points_threshold", 0))
+        cost = _to_int(value, 0) if value is not None else _to_int(cfg.get("points_threshold", 0), 0)
+        if cost < 0:
+            raise ValueError("value must be non-negative")
         state["points"] = max(0, state.get("points", 0) - cost)
         state["redeemed"] = state.get("redeemed", 0) + 1
     elif action in ("set_balance", "load_balance"):
-        state["balance"] = float(value or 0)
+        v = _to_float(value, 0.0)
+        if v < 0:
+            raise ValueError("value must be non-negative")
+        state["balance"] = round(v, 2)
     elif action == "deduct_balance":
-        state["balance"] = max(0.0, state.get("balance", 0.0) - float(value or 0))
+        v = _to_float(value, 0.0)
+        if v < 0:
+            raise ValueError("value must be non-negative")
+        current = state.get("balance", 0.0)
+        if v > current:
+            raise ValueError(f"Insufficient balance: requested {v:.2f}, available {current:.2f}")
+        state["balance"] = round(current - v, 2)
     elif action == "refund_balance":
-        state["balance"] = state.get("balance", 0.0) + float(value or 0)
+        v = _to_float(value, 0.0)
+        if v < 0:
+            raise ValueError("value must be non-negative")
+        state["balance"] = round(state.get("balance", 0.0) + v, 2)
     elif action == "check_in":
         state["checked_in"] = True
     elif action == "un_check_in":
@@ -94,7 +142,9 @@ class WalletService:
         message: Optional[str] = None,
         silent: bool = False,
     ) -> WalletCard:
-        result = await self.db.execute(select(WalletCard).where(WalletCard.serial == serial))
+        result = await self.db.execute(
+            select(WalletCard).where(WalletCard.serial == serial).with_for_update()
+        )
         card = result.scalar_one_or_none()
         if not card:
             raise ValueError(f"Card not found: {serial}")
@@ -143,8 +193,8 @@ class WalletService:
                 try:
                     from app.services.wallet.google_wallet import push_update
                     push_update(card.google_pass_object_id, program.type)
-                except Exception:
-                    pass
+                except Exception as exc:
+                    logger.warning("Google Wallet push_update failed for card %s: %s", card.serial, exc)
 
     async def _dispatch_triggers(
         self, action: str, card: WalletCard, program: WalletProgram,
@@ -190,5 +240,5 @@ class WalletService:
         if trigger:
             try:
                 await dispatch(trigger, user_id, self.db, context)
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.warning("Wallet automation dispatch failed (trigger=%s, card=%s): %s", trigger, card.serial, exc)

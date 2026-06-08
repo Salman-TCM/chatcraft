@@ -27,13 +27,14 @@ import uuid
 from datetime import datetime, timezone
 from typing import Annotated
 
-from fastapi import APIRouter, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import func, select
 
-from app.core.dependencies import CurrentUser, DBSession
+from app.core.dependencies import CurrentUser, DBSession, require_feature
+from app.core.features import FLOWS
 from app.models.flow import Flow, FlowFolder, FlowRun
 
-router = APIRouter(tags=["flows"])
+router = APIRouter(tags=["flows"], dependencies=[Depends(require_feature(FLOWS))])
 
 
 # ── Simplified list (must be registered before /{flow_id} to avoid UUID parse) ─

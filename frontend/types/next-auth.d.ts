@@ -7,6 +7,8 @@ declare module "next-auth" {
       role: string;
       accessToken: string;
       trialEndsAt: string | null;
+      /** null = unrestricted (all features). string[] = only listed features allowed. */
+      allowedFeatures: string[] | null;
     } & DefaultSession["user"];
     error?: "RefreshTokenError";
   }
@@ -17,6 +19,7 @@ declare module "next-auth" {
     accessToken: string;
     refreshToken: string;
     trialEndsAt: string | null;
+    allowedFeatures: string[] | null;
   }
 }
 
@@ -28,6 +31,7 @@ declare module "next-auth/jwt" {
     accessTokenExpiry: number;
     refreshToken: string;
     trialEndsAt: string | null;
+    allowedFeatures: string[] | null;
     error?: "RefreshTokenError";
   }
 }

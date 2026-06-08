@@ -5,11 +5,12 @@ and test-searching the vector store.
 """
 import uuid
 
-from fastapi import APIRouter, HTTPException, UploadFile, status
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, status
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 
-from app.core.dependencies import CurrentUser, DBSession
+from app.core.dependencies import CurrentUser, DBSession, require_feature
+from app.core.features import KNOWLEDGE_BASE
 from app.models.chatbot_config import ChatbotConfig
 from app.models.knowledge_base import (
     DocumentStatus,
@@ -34,7 +35,7 @@ from app.services.storage import (
 )
 from app.services.virus_scan import scan_bytes
 
-router = APIRouter(prefix="/api/kb", tags=["knowledge-base"])
+router = APIRouter(prefix="/api/kb", tags=["knowledge-base"], dependencies=[Depends(require_feature(KNOWLEDGE_BASE))])
 
 
 # ── Upload file ───────────────────────────────────────────────────────────────

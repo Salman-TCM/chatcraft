@@ -10,13 +10,14 @@ import uuid
 from datetime import datetime, timezone
 from typing import Annotated
 
-from fastapi import APIRouter, File, Form, HTTPException, Query, UploadFile, status
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile, status
 from sqlalchemy import func, or_, select, text
 from sqlalchemy.orm import selectinload
 
 from pydantic import BaseModel
 
-from app.core.dependencies import CurrentUser, DBSession
+from app.core.dependencies import CurrentUser, DBSession, require_feature
+from app.core.features import INBOX
 from app.models.channel_integration import ChannelIntegration
 from app.models.chatbot_config import ChatbotConfig
 from app.models.crm import Contact, Tag
@@ -25,7 +26,7 @@ from app.models.inbox import InboxAssignment, InternalNote, TeamMember
 from app.models.message import Message, MessageRole
 from app.models.user import User
 
-router = APIRouter(prefix="/api/v1", tags=["inbox"])
+router = APIRouter(prefix="/api/v1", tags=["inbox"], dependencies=[Depends(require_feature(INBOX))])
 
 # ── Role constants ─────────────────────────────────────────────────────────────
 #

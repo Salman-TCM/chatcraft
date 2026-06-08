@@ -15,13 +15,17 @@ import uuid
 from datetime import datetime, timezone
 from typing import Annotated
 
-from fastapi import APIRouter, HTTPException, Query, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from sqlalchemy import func, select
 
-from app.core.dependencies import CurrentUser, DBSession
+from app.core.dependencies import CurrentUser, DBSession, require_feature
+from app.core.features import FORMS
 from app.models.form import Form, FormSubmission
 
-router = APIRouter(tags=["forms"])
+# Authenticated management routes — requires forms feature access
+router = APIRouter(tags=["forms"], dependencies=[Depends(require_feature(FORMS))])
+# Public form submission — no feature gate
+public_router = APIRouter(tags=["forms"])
 
 
 def _form_dict(f: Form, include_fields: bool = True) -> dict:
@@ -154,7 +158,7 @@ async def list_submissions(
 
 # ── Public submission (no auth) ────────────────────────────────────────────────
 
-@router.post("/api/public/forms/{public_id}/submit", response_model=dict, status_code=status.HTTP_201_CREATED)
+@public_router.post("/api/public/forms/{public_id}/submit", response_model=dict, status_code=status.HTTP_201_CREATED)
 async def public_submit(
     public_id: str,
     body: dict,

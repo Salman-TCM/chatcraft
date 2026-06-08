@@ -106,6 +106,10 @@ services:
       JWT_ALGORITHM:            ${JWT_ALGORITHM:-HS256}
       ACCESS_TOKEN_EXPIRE_MINUTES: ${ACCESS_TOKEN_EXPIRE_MINUTES:-15}
       REFRESH_TOKEN_EXPIRE_DAYS:   ${REFRESH_TOKEN_EXPIRE_DAYS:-7}
+      ADMIN_EMAIL:              ${ADMIN_EMAIL:-}
+      ADMIN_PASSWORD:           ${ADMIN_PASSWORD:-}
+      ADMIN_NAME:               ${ADMIN_NAME:-Admin}
+      ADMIN_ROLE:               ${ADMIN_ROLE:-superadmin}
     depends_on:
       postgres:
         condition: service_healthy
