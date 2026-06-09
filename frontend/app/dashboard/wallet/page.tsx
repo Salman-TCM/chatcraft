@@ -838,23 +838,23 @@ export default function WalletPage() {
                               ["points", "punch_card"].includes(activeProgram.type);
 
     return (
-      <div className="p-6 max-w-5xl mx-auto">
-        <div className="flex items-center justify-between mb-6">
-          <div className="flex items-center gap-3">
-            <Button variant="outline" size="sm" onClick={() => setView("list")}>← Back</Button>
-            <div>
-              <h1 className="text-xl font-semibold">{activeProgram.name}</h1>
-              <p className="text-sm text-muted-foreground">
-                {activeProgramType?.icon} {activeProgramType?.label} · {cards.length} card{cards.length !== 1 ? "s" : ""}
+      <div className="p-4 sm:p-6 max-w-5xl mx-auto">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-6">
+          <div className="flex items-center gap-3 min-w-0">
+            <Button variant="outline" size="sm" onClick={() => setView("list")} className="shrink-0">← Back</Button>
+            <div className="min-w-0">
+              <h1 className="text-xl font-semibold truncate">{activeProgram.name}</h1>
+              <p className="text-sm text-muted-foreground flex flex-wrap items-center gap-1.5">
+                <span>{activeProgramType?.icon} {activeProgramType?.label} · {cards.length} card{cards.length !== 1 ? "s" : ""}</span>
                 {activeProgram.device_count > 0 && (
-                  <span className="ml-2 text-xs bg-blue-100 text-blue-700 rounded-full px-2 py-0.5">
+                  <span className="text-xs bg-blue-100 text-blue-700 rounded-full px-2 py-0.5">
                     {activeProgram.device_count} device{activeProgram.device_count !== 1 ? "s" : ""}
                   </span>
                 )}
               </p>
             </div>
           </div>
-          <div className="flex gap-2">
+          <div className="flex gap-2 shrink-0">
             <Button variant="outline" size="sm"
               onClick={() => { setPushTarget({ type: "program", id: activeProgram.id }); setPushMessage(""); }}>
               <Send className="h-4 w-4 mr-1.5" /> Broadcast
@@ -938,9 +938,9 @@ export default function WalletPage() {
             {cards.map((card) => (
               <Card key={card.id} className="overflow-hidden">
                 <div className="p-4">
-                  <div className="flex items-start justify-between gap-4">
-                    <div className="min-w-0">
-                      <div className="flex items-center gap-2 mb-0.5">
+                  <div className="flex flex-col sm:flex-row sm:items-start gap-3">
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 mb-0.5 flex-wrap">
                         <p className="font-medium truncate">{card.customer_name ?? "Guest"}</p>
                         <span className={`shrink-0 text-xs px-2 py-0.5 rounded-full font-medium ${
                           card.status === "active" ? "bg-green-100 text-green-700" : "bg-red-100 text-red-600"}`}>
@@ -960,11 +960,11 @@ export default function WalletPage() {
                         </div>
                       )}
                     </div>
-                    <div className="flex items-center gap-0.5 shrink-0">
+                    <div className="flex items-center gap-0.5 shrink-0 flex-wrap">
                       {availableActions.length > 0 && card.status === "active" && (
-                        <Button variant="ghost" size="sm" title="Manage card"
+                        <Button variant="outline" size="sm" className="text-xs h-7 px-2"
                           onClick={() => { setActionCard(card); setSelectedAction(""); setActionValue(""); }}>
-                          <RefreshCw className="h-4 w-4" />
+                          <RefreshCw className="h-3.5 w-3.5 mr-1" /> Action
                         </Button>
                       )}
                       <Button variant="ghost" size="sm" title="Send push notification"
@@ -1162,15 +1162,15 @@ export default function WalletPage() {
 
   // ── Programs list ───────────────────────────────────────────────────────────
   return (
-    <div className="p-6 max-w-5xl mx-auto">
-      <div className="flex items-center justify-between mb-6">
+    <div className="p-4 sm:p-6 max-w-5xl mx-auto">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-6">
         <div>
           <h1 className="text-2xl font-semibold">Wallet Programs</h1>
           <p className="text-sm text-muted-foreground mt-0.5">
             Loyalty cards, passes, and tickets for Apple &amp; Google Wallet.
           </p>
         </div>
-        <Button onClick={openCreate}>
+        <Button onClick={openCreate} className="sm:shrink-0">
           <Plus className="h-4 w-4 mr-1.5" /> New program
         </Button>
       </div>
@@ -1195,51 +1195,55 @@ export default function WalletPage() {
             const brandColor = p.brand_overrides?.background_color;
             return (
               <Card key={p.id} className="p-4 hover:shadow-sm transition-shadow">
-                <div className="flex items-center gap-4">
-                  <div className="flex h-10 w-10 items-center justify-center rounded-xl text-xl shrink-0"
+                <div className="flex gap-3">
+                  <div className="flex h-11 w-11 items-center justify-center rounded-xl text-xl shrink-0"
                     style={brandColor
                       ? { backgroundColor: brandColor + "22", border: `1px solid ${brandColor}44` }
                       : { backgroundColor: "hsl(var(--muted))" }}>
                     {pt?.icon ?? "🪪"}
                   </div>
                   <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2">
-                      <p className="font-medium truncate">{p.name}</p>
-                      <span className={`shrink-0 text-xs px-2 py-0.5 rounded-full font-medium ${
-                        p.status === "active" ? "bg-green-100 text-green-700" : "bg-muted text-muted-foreground"}`}>
-                        {p.status}
-                      </span>
-                      {p.device_count > 0 && (
-                        <span className="shrink-0 text-xs bg-blue-50 text-blue-600 px-2 py-0.5 rounded-full">
-                          {p.device_count} device{p.device_count !== 1 ? "s" : ""}
-                        </span>
-                      )}
-                      {Boolean(p.receipt_scanning_config?.enabled) && (
-                        <span className="shrink-0 text-xs bg-emerald-50 text-emerald-700 px-2 py-0.5 rounded-full flex items-center gap-0.5">
-                          <Camera className="h-2.5 w-2.5" /> Receipt scan
-                        </span>
-                      )}
-                    </div>
-                    <p className="text-sm text-muted-foreground truncate">
-                      {pt?.label}{p.description ? ` · ${p.description}` : ""}
-                    </p>
-                    {p.join_url && (
-                      <div className="flex items-center gap-2 mt-1">
-                        <CopyButton value={p.join_url} label="Copy join link" />
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="min-w-0">
+                        <div className="flex flex-wrap items-center gap-1.5 mb-0.5">
+                          <p className="font-medium truncate">{p.name}</p>
+                          <span className={`shrink-0 text-xs px-2 py-0.5 rounded-full font-medium ${
+                            p.status === "active" ? "bg-green-100 text-green-700" : "bg-muted text-muted-foreground"}`}>
+                            {p.status}
+                          </span>
+                          {p.device_count > 0 && (
+                            <span className="shrink-0 text-xs bg-blue-50 text-blue-600 px-2 py-0.5 rounded-full">
+                              {p.device_count} device{p.device_count !== 1 ? "s" : ""}
+                            </span>
+                          )}
+                          {Boolean(p.receipt_scanning_config?.enabled) && (
+                            <span className="shrink-0 text-xs bg-emerald-50 text-emerald-700 px-2 py-0.5 rounded-full flex items-center gap-0.5">
+                              <Camera className="h-2.5 w-2.5" /> Receipt scan
+                            </span>
+                          )}
+                        </div>
+                        <p className="text-sm text-muted-foreground truncate">
+                          {pt?.label}{p.description ? ` · ${p.description}` : ""}
+                        </p>
+                        {p.join_url && (
+                          <div className="flex items-center gap-2 mt-1">
+                            <CopyButton value={p.join_url} label="Copy join link" />
+                          </div>
+                        )}
                       </div>
-                    )}
-                  </div>
-                  <div className="flex items-center gap-0.5 shrink-0">
-                    <Button variant="ghost" size="sm" onClick={() => loadCards(p)} title="View issued cards">
-                      <Users className="h-4 w-4" />
-                    </Button>
-                    <Button variant="ghost" size="sm" onClick={() => openEdit(p)} title="Edit program">
-                      <Pencil className="h-4 w-4" />
-                    </Button>
-                    <Button variant="ghost" size="sm" onClick={() => deleteProgram(p.id)}
-                      title="Delete program" className="text-destructive hover:text-destructive">
-                      <Trash2 className="h-4 w-4" />
-                    </Button>
+                      <div className="flex items-center gap-0.5 shrink-0">
+                        <Button variant="ghost" size="sm" onClick={() => loadCards(p)} title="View cards">
+                          <Users className="h-4 w-4" />
+                        </Button>
+                        <Button variant="ghost" size="sm" onClick={() => openEdit(p)} title="Edit">
+                          <Pencil className="h-4 w-4" />
+                        </Button>
+                        <Button variant="ghost" size="sm" onClick={() => deleteProgram(p.id)}
+                          title="Delete" className="text-destructive hover:text-destructive">
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
+                      </div>
+                    </div>
                   </div>
                 </div>
               </Card>
@@ -1250,20 +1254,20 @@ export default function WalletPage() {
 
       {/* ── Create / Edit modal ─────────────────────────────────────────────── */}
       {showModal && (
-        <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/50 p-4">
-          <div className="bg-background rounded-xl shadow-2xl w-full max-w-3xl max-h-[92vh] sm:max-h-[88vh] flex flex-col">
-            <div className="flex items-center justify-between px-5 py-4 border-b shrink-0">
-              <h2 className="font-semibold text-base">
+        <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/50 p-2 sm:p-4">
+          <div className="bg-background rounded-xl shadow-2xl w-full max-w-3xl max-h-[95vh] sm:max-h-[88vh] flex flex-col">
+            <div className="flex items-center justify-between px-4 sm:px-5 py-3.5 border-b shrink-0">
+              <h2 className="font-semibold text-base truncate pr-2">
                 {editingProgram ? `Edit "${editingProgram.name}"` : "Create wallet program"}
               </h2>
               <button onClick={() => setShowModal(false)}
-                className="rounded-md p-1 text-muted-foreground hover:text-foreground hover:bg-muted transition-colors">
+                className="rounded-md p-1 text-muted-foreground hover:text-foreground hover:bg-muted transition-colors shrink-0">
                 <X className="h-5 w-5" />
               </button>
             </div>
             <StepIndicator current={modalStep} onGoBack={() => setModalStep("setup")} />
             <div className="flex flex-1 overflow-hidden">
-              <div className="flex-1 overflow-y-auto px-5 py-5">
+              <div className="flex-1 overflow-y-auto px-4 sm:px-5 py-4 sm:py-5">
                 {modalStep === "setup" ? renderSetup() : renderAppearance()}
               </div>
               {progType && (
@@ -1279,7 +1283,7 @@ export default function WalletPage() {
                 </div>
               )}
             </div>
-            <div className="flex items-center justify-between gap-3 px-5 py-4 border-t shrink-0">
+            <div className="flex items-center justify-between gap-3 px-4 sm:px-5 py-3.5 border-t shrink-0">
               {modalStep === "appearance" && progName ? (
                 <div className="flex items-center gap-2 min-w-0">
                   <span className="text-lg shrink-0">{typeInfo?.icon}</span>
@@ -1291,15 +1295,15 @@ export default function WalletPage() {
               ) : <div />}
               <div className="flex gap-2 shrink-0">
                 {modalStep === "appearance" && (
-                  <Button variant="outline" onClick={() => setModalStep("setup")}>← Back</Button>
+                  <Button variant="outline" size="sm" onClick={() => setModalStep("setup")}>← Back</Button>
                 )}
                 {modalStep === "setup" ? (
-                  <Button onClick={() => { setNameTouched(true); if (setupCanAdvance) setModalStep("appearance"); }}
+                  <Button size="sm" onClick={() => { setNameTouched(true); if (setupCanAdvance) setModalStep("appearance"); }}
                     disabled={!progType} title={!progType ? "Select a program type first" : !progName.trim() ? "Enter a program name" : undefined}>
                     Next: Appearance →
                   </Button>
                 ) : (
-                  <Button onClick={saveProgram} disabled={saving || !progName.trim()}>
+                  <Button size="sm" onClick={saveProgram} disabled={saving || !progName.trim()}>
                     {saving && <Loader2 className="h-4 w-4 animate-spin mr-1.5" />}
                     {editingProgram ? "Save changes" : "Create program"}
                   </Button>
