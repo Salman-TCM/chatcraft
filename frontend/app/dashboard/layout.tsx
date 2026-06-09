@@ -220,11 +220,13 @@ function SidebarContent({
       .catch(() => {});
   }, [user?.accessToken]);
 
+  const isAdmin = user?.role === "admin" || user?.role === "superadmin";
+
   // Dismissible system-alert badge (admin only; wire to a real endpoint when ready)
   const [sysAlerts, setSysAlerts] = useState(0);
   useEffect(() => {
-    if (user?.role === "admin") setSysAlerts(1);
-  }, [user?.role]);
+    if (isAdmin) setSysAlerts(1);
+  }, [isAdmin]);
 
   const initials = user?.name
     ? user.name.split(" ").map((w) => w[0]).slice(0, 2).join("").toUpperCase()
@@ -279,7 +281,7 @@ function SidebarContent({
 
         {/* Footer: avatar + sign-out */}
         <div className="shrink-0 pb-2 space-y-1 border-t border-border/50 pt-2">
-          {user?.role === "admin" && (
+          {isAdmin && (
             <Link href="/admin" title="Admin Panel"
               className="flex h-8 w-8 mx-auto items-center justify-center rounded-lg text-rose-600 hover:bg-rose-50 transition-colors">
               <ShieldAlert className="h-4 w-4" />
@@ -410,7 +412,7 @@ function SidebarContent({
 
         <div className="border-t border-border/50 mx-2" />
 
-        {user?.role === "admin" && (
+        {isAdmin && (
           <div className="px-2 pt-1.5 pb-1">
             <Link
               href="/admin"
