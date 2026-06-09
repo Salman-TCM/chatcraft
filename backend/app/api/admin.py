@@ -438,7 +438,9 @@ async def impersonate_user(
     """Issue a short-lived access token (15 min) for the target user."""
     from app.models.admin_log import AdminActionLog
 
-    result = await db.execute(select(User).where(User.id == user_id))
+    result = await db.execute(
+        select(User).where(User.id == user_id).options(selectinload(User.subscription))
+    )
     u = result.scalar_one_or_none()
     if not u:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
@@ -810,10 +812,12 @@ async def update_user_features(
 
     from app.models.admin_log import AdminActionLog
     log = AdminActionLog(
-        admin_id=caller.id,
+        admin_user_id=caller.id,
+        admin_email=caller.email,
         action="update_user_features",
         target_user_id=user.id,
-        details={"allowed_features": features},
+        target_email=user.email,
+        new_value=str(features),
     )
     db.add(log)
     await db.commit()
