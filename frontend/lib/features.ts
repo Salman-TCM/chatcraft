@@ -13,6 +13,17 @@ export const FEATURES = {
   FORMS:           "forms",
   CAMPAIGNS:       "campaigns",
   WHITE_LABEL:     "white_label",
+  CHATBOTS:        "chatbots",
+  CONTACTS:        "contacts",
+  KEYWORDS:        "keywords",
+  SOCIAL:          "social",
+  SEQUENCES:       "sequences",
+  PIPELINES:       "pipelines",
+  LANDING_PAGES:   "landing_pages",
+  STORES:          "stores",
+  VOICE_LAB:       "voice_lab",
+  BROWSER_AGENT:   "browser_agent",
+  MCP_SERVERS:     "mcp_servers",
 } as const;
 
 export type FeatureKey = typeof FEATURES[keyof typeof FEATURES];
@@ -29,6 +40,17 @@ export const FEATURE_ROUTES: Record<FeatureKey, string> = {
   forms:          "/dashboard/forms",
   campaigns:      "/dashboard/campaigns",
   white_label:    "/dashboard/white-label",
+  chatbots:       "/dashboard/chatbots",
+  contacts:       "/dashboard/contacts",
+  keywords:       "/dashboard/keywords",
+  social:         "/dashboard/social",
+  sequences:      "/dashboard/sequences",
+  pipelines:      "/dashboard/pipelines",
+  landing_pages:  "/dashboard/landing-pages",
+  stores:         "/dashboard/stores",
+  voice_lab:      "/dashboard/voice-lab",
+  browser_agent:  "/dashboard/browser-agent",
+  mcp_servers:    "/dashboard/settings/mcp",
 };
 
 /**
