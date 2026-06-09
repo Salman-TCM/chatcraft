@@ -28,17 +28,17 @@ const PINNED: NavItem[] = [
   { href: "/dashboard",           label: "Overview",      icon: LayoutDashboard },
   { href: "/dashboard/inbox",     label: "Inbox",         icon: Inbox,         feature: "inbox" },
   { href: "/dashboard/analytics", label: "Conversations", icon: MessageSquare, feature: "analytics" },
-  { href: "/dashboard/contacts",  label: "Contacts",      icon: Users },
+  { href: "/dashboard/contacts",  label: "Contacts",      icon: Users,         feature: "contacts" },
 ];
 
 const SECTIONS: { label: string; items: NavItem[]; defaultOpen?: boolean }[] = [
   {
     label: "Engage",
     items: [
-      { href: "/dashboard/chatbots",  label: "Chatbots",   icon: Bot },
-      { href: "/dashboard/keywords",  label: "Keywords",   icon: Hash },
+      { href: "/dashboard/chatbots",  label: "Chatbots",   icon: Bot,      feature: "chatbots" },
+      { href: "/dashboard/keywords",  label: "Keywords",   icon: Hash,     feature: "keywords" },
       { href: "/dashboard/broadcast", label: "Broadcasts", icon: Megaphone, feature: "campaigns" },
-      { href: "/dashboard/social",    label: "Social",     icon: Share2 },
+      { href: "/dashboard/social",    label: "Social",     icon: Share2,   feature: "social" },
     ],
   },
   {
@@ -46,16 +46,16 @@ const SECTIONS: { label: string; items: NavItem[]; defaultOpen?: boolean }[] = [
     items: [
       { href: "/dashboard/flows",       label: "Flows",       icon: GitBranch, feature: "flows" },
       { href: "/dashboard/automations", label: "Automations", icon: Zap,       feature: "automations" },
-      { href: "/dashboard/sequences",   label: "Sequences",   icon: List },
-      { href: "/dashboard/pipelines",   label: "Pipelines",   icon: Activity },
+      { href: "/dashboard/sequences",   label: "Sequences",   icon: List,      feature: "sequences" },
+      { href: "/dashboard/pipelines",   label: "Pipelines",   icon: Activity,  feature: "pipelines" },
     ],
   },
   {
     label: "Build",
     items: [
       { href: "/dashboard/forms",         label: "Forms",         icon: ClipboardList, feature: "forms" },
-      { href: "/dashboard/landing-pages", label: "Landing Pages", icon: LayoutTemplate },
-      { href: "/dashboard/stores",        label: "Stores",        icon: ShoppingBag },
+      { href: "/dashboard/landing-pages", label: "Landing Pages", icon: LayoutTemplate, feature: "landing_pages" },
+      { href: "/dashboard/stores",        label: "Stores",        icon: ShoppingBag,   feature: "stores" },
       { href: "/dashboard/wallet",        label: "Wallet",        icon: Wallet,        feature: "wallet" },
     ],
   },
@@ -63,9 +63,9 @@ const SECTIONS: { label: string; items: NavItem[]; defaultOpen?: boolean }[] = [
 
 const AI_TOOLS: NavItem[] = [
   { href: "/dashboard/agents",        label: "Agent Builder", icon: Bot,     feature: "agent_builder" },
-  { href: "/dashboard/voice-lab",     label: "Voice Lab",     icon: Mic },
-  { href: "/dashboard/browser-agent", label: "Browser Agent", icon: Monitor },
-  { href: "/dashboard/settings/mcp",  label: "MCP Servers",   icon: Plug },
+  { href: "/dashboard/voice-lab",     label: "Voice Lab",     icon: Mic,     feature: "voice_lab" },
+  { href: "/dashboard/browser-agent", label: "Browser Agent", icon: Monitor, feature: "browser_agent" },
+  { href: "/dashboard/settings/mcp",  label: "MCP Servers",   icon: Plug,    feature: "mcp_servers" },
 ];
 
 const FOOTER_NAV: NavItem[] = [
