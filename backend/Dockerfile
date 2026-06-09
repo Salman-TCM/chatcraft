@@ -84,6 +84,10 @@ RUN addgroup -g 1001 appgroup && \
 # Copy installed Python packages from builder
 COPY --from=builder /install /usr/local
 
+# Remove any corrupted .pyc bytecode cache — Python recompiles from source on
+# first import. Avoids "marshal data too short" errors from build-time glitches.
+RUN find /usr/local/lib/python3.11/site-packages -name "*.pyc" -delete
+
 # Copy application source
 COPY --chown=appuser:appgroup . .
 
