@@ -373,6 +373,7 @@ type View = "list" | "cards";
 
 export default function WalletPage() {
   const [programTypes,  setProgramTypes]  = useState<ProgramType[]>([]);
+  const [typesError,    setTypesError]    = useState(false);
   const [programs,      setPrograms]      = useState<WalletProgram[]>([]);
   const [loading,       setLoading]       = useState(true);
   const [view,          setView]          = useState<View>("list");
@@ -425,16 +426,19 @@ export default function WalletPage() {
 
   const load = useCallback(async () => {
     setLoading(true);
-    try {
-      const [typesRes, progsRes, agentsRes] = await Promise.all([
-        apiClient.get("/api/wallet/program-types"),
-        apiClient.get("/api/wallet/programs?limit=100"),
-        apiClient.get("/api/v1/agents").catch(() => ({ data: { data: [] } })),
-      ]);
-      setProgramTypes(typesRes.data.data ?? []);
-      setPrograms(progsRes.data.data ?? []);
-      setAgents(agentsRes.data.data ?? []);
-    } catch {}
+    setTypesError(false);
+    const [typesRes, progsRes, agentsRes] = await Promise.allSettled([
+      apiClient.get("/api/wallet/program-types"),
+      apiClient.get("/api/wallet/programs?limit=100"),
+      apiClient.get("/api/v1/agents"),
+    ]);
+    if (typesRes.status === "fulfilled") {
+      setProgramTypes(typesRes.value.data.data ?? []);
+    } else {
+      setTypesError(true);
+    }
+    if (progsRes.status === "fulfilled") setPrograms(progsRes.value.data.data ?? []);
+    if (agentsRes.status === "fulfilled") setAgents(agentsRes.value.data.data ?? []);
     setLoading(false);
   }, []);
 
@@ -664,6 +668,16 @@ export default function WalletPage() {
         ) : (
           <div className="space-y-1.5">
             <Label className="text-sm">Program type</Label>
+            {typesError ? (
+              <div className="flex items-center gap-2 rounded-lg border border-destructive/40 bg-destructive/5 px-4 py-3 text-sm text-destructive">
+                <AlertCircle className="h-4 w-4 shrink-0" />
+                <span>Could not load program types. Check your API connection and <button onClick={load} className="underline font-medium">retry</button>.</span>
+              </div>
+            ) : programTypes.length === 0 ? (
+              <div className="flex justify-center py-6">
+                <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+              </div>
+            ) : (
             <div className="grid grid-cols-2 gap-2">
               {programTypes.map((t) => (
                 <button key={t.value} onClick={() => { setProgType(t.value); setProgConfig({}); }}
@@ -675,6 +689,7 @@ export default function WalletPage() {
                 </button>
               ))}
             </div>
+            )}
           </div>
         )}
 
