@@ -2,7 +2,13 @@ import axios, { type AxiosInstance, type AxiosRequestConfig } from "axios";
 import { getSession } from "next-auth/react";
 import type { ApiResponse, PaginatedResponse } from "@chatcraft/shared";
 
-const BASE_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
+// In the browser use same-origin ("") so requests go through Next.js rewrites
+// which proxy /api/* to the backend — works from any public URL with no CORS.
+// In SSR context use the direct backend URL.
+const BASE_URL =
+  typeof window !== "undefined"
+    ? ""
+    : (process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000");
 
 export const apiClient: AxiosInstance = axios.create({
   baseURL: BASE_URL,
