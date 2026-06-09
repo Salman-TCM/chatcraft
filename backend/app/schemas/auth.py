@@ -29,6 +29,7 @@ class UserResponse(BaseModel):
     email_verified: bool
     trial_ends_at: datetime | None = None
     created_at: datetime
+    allowed_features: list | None = None
 
     model_config = {"from_attributes": True}
 
