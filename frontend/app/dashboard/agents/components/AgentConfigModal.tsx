@@ -17,7 +17,7 @@ import {
 } from "@/components/ui/select";
 import {
   Globe, Code2, Link2, Mail, Smartphone, ShieldCheck, Bot,
-  Loader2, Check, X, Brain, Zap, Settings, Plug,
+  Loader2, Check, Brain, Zap, Settings, Plug,
   Webhook, RefreshCw, Trash2, Plus, ExternalLink,
   AlertCircle, ChevronDown, ChevronUp, Wrench, Sheet,
 } from "lucide-react";
@@ -282,15 +282,10 @@ export function AgentConfigModal({ agent, open, onClose, onUpdate }: AgentConfig
       <DialogContent className="max-w-2xl w-full max-h-[90vh] flex flex-col p-0 gap-0 overflow-hidden">
         {/* Header */}
         <DialogHeader className="px-5 pt-5 pb-0 shrink-0">
-          <div className="flex items-center justify-between">
-            <DialogTitle className="flex items-center gap-2 text-base">
-              <Settings className="h-4 w-4" />
-              Configure — <span className="text-muted-foreground font-normal truncate max-w-[200px]">{form.name}</span>
-            </DialogTitle>
-            <Button variant="ghost" size="icon" className="h-7 w-7 shrink-0" onClick={onClose}>
-              <X className="h-4 w-4" />
-            </Button>
-          </div>
+          <DialogTitle className="flex items-center gap-2 text-base">
+            <Settings className="h-4 w-4" />
+            Configure — <span className="text-muted-foreground font-normal truncate max-w-[200px]">{form.name}</span>
+          </DialogTitle>
         </DialogHeader>
 
         {/* Tabs */}
