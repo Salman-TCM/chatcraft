@@ -16,35 +16,36 @@ import { signOut } from "next-auth/react";
 import { useAppStore } from "@/store";
 import { ImpersonationBanner } from "@/components/impersonation-banner";
 import { PlatformLogo } from "@/components/platform-logo";
+import { hasFeatureAccess, type FeatureKey } from "@/lib/features";
 
 // ─── Brand colour ─────────────────────────────────────────────────────────────
 const INDIGO = "#3B52D4";
 
 // ─── Nav structure ────────────────────────────────────────────────────────────
-type NavItem = { href: string; label: string; icon: React.ElementType };
+type NavItem = { href: string; label: string; icon: React.ElementType; feature?: FeatureKey };
 
 const PINNED: NavItem[] = [
-  { href: "/dashboard",          label: "Overview",      icon: LayoutDashboard },
-  { href: "/dashboard/inbox",    label: "Inbox",         icon: Inbox },
-  { href: "/dashboard/analytics",label: "Conversations", icon: MessageSquare },
-  { href: "/dashboard/contacts", label: "Contacts",      icon: Users },
+  { href: "/dashboard",           label: "Overview",      icon: LayoutDashboard },
+  { href: "/dashboard/inbox",     label: "Inbox",         icon: Inbox,         feature: "inbox" },
+  { href: "/dashboard/analytics", label: "Conversations", icon: MessageSquare, feature: "analytics" },
+  { href: "/dashboard/contacts",  label: "Contacts",      icon: Users },
 ];
 
 const SECTIONS: { label: string; items: NavItem[]; defaultOpen?: boolean }[] = [
   {
     label: "Engage",
     items: [
-      { href: "/dashboard/chatbots",    label: "Chatbots",   icon: Bot },
-      { href: "/dashboard/keywords",    label: "Keywords",   icon: Hash },
-      { href: "/dashboard/broadcast",   label: "Broadcasts", icon: Megaphone },
-      { href: "/dashboard/social",      label: "Social",     icon: Share2 },
+      { href: "/dashboard/chatbots",  label: "Chatbots",   icon: Bot },
+      { href: "/dashboard/keywords",  label: "Keywords",   icon: Hash },
+      { href: "/dashboard/broadcast", label: "Broadcasts", icon: Megaphone, feature: "campaigns" },
+      { href: "/dashboard/social",    label: "Social",     icon: Share2 },
     ],
   },
   {
     label: "Automate",
     items: [
-      { href: "/dashboard/flows",       label: "Flows",       icon: GitBranch },
-      { href: "/dashboard/automations", label: "Automations", icon: Zap },
+      { href: "/dashboard/flows",       label: "Flows",       icon: GitBranch, feature: "flows" },
+      { href: "/dashboard/automations", label: "Automations", icon: Zap,       feature: "automations" },
       { href: "/dashboard/sequences",   label: "Sequences",   icon: List },
       { href: "/dashboard/pipelines",   label: "Pipelines",   icon: Activity },
     ],
@@ -52,19 +53,19 @@ const SECTIONS: { label: string; items: NavItem[]; defaultOpen?: boolean }[] = [
   {
     label: "Build",
     items: [
-      { href: "/dashboard/forms",         label: "Forms",         icon: ClipboardList },
+      { href: "/dashboard/forms",         label: "Forms",         icon: ClipboardList, feature: "forms" },
       { href: "/dashboard/landing-pages", label: "Landing Pages", icon: LayoutTemplate },
       { href: "/dashboard/stores",        label: "Stores",        icon: ShoppingBag },
-      { href: "/dashboard/wallet",        label: "Wallet",        icon: Wallet },
+      { href: "/dashboard/wallet",        label: "Wallet",        icon: Wallet,        feature: "wallet" },
     ],
   },
 ];
 
 const AI_TOOLS: NavItem[] = [
-  { href: "/dashboard/agents",       label: "Agent Builder", icon: Bot },
-  { href: "/dashboard/voice-lab",    label: "Voice Lab",     icon: Mic },
-  { href: "/dashboard/browser-agent",label: "Browser Agent", icon: Monitor },
-  { href: "/dashboard/settings/mcp", label: "MCP Servers",   icon: Plug },
+  { href: "/dashboard/agents",        label: "Agent Builder", icon: Bot,     feature: "agent_builder" },
+  { href: "/dashboard/voice-lab",     label: "Voice Lab",     icon: Mic },
+  { href: "/dashboard/browser-agent", label: "Browser Agent", icon: Monitor },
+  { href: "/dashboard/settings/mcp",  label: "MCP Servers",   icon: Plug },
 ];
 
 const FOOTER_NAV: NavItem[] = [
@@ -189,6 +190,9 @@ function SidebarContent({
   const brandColour = agencyTheme?.primaryColour ?? INDIGO;
   const platformName = agencyTheme?.name ?? "ChatCraft AI";
 
+  const canSee = (item: NavItem) =>
+    !item.feature || hasFeatureAccess(user?.role, user?.allowedFeatures ?? null, item.feature);
+
   // Collapsible section state — auto-open whichever section has the active route
   const [openSections, setOpenSections] = useState<Record<string, boolean>>(() =>
     Object.fromEntries(
@@ -241,7 +245,7 @@ function SidebarContent({
     ...SECTIONS.flatMap((s) => s.items),
     ...AI_TOOLS,
     ...FOOTER_NAV,
-  ];
+  ].filter(canSee);
 
   if (collapsed) {
     return (
@@ -333,7 +337,7 @@ function SidebarContent({
 
         {/* Pinned top items */}
         <div className="space-y-0.5">
-          {PINNED.map((item) => (
+          {PINNED.filter(canSee).map((item) => (
             <NavLink
               key={item.href}
               item={item}
@@ -349,49 +353,55 @@ function SidebarContent({
 
         {/* Collapsible sections */}
         <div className="space-y-3">
-          {SECTIONS.map((section) => (
-            <div key={section.label}>
-              <SectionLabel
-                label={section.label}
-                open={!!openSections[section.label]}
-                onToggle={() => toggleSection(section.label)}
-              />
-              {openSections[section.label] && (
-                <div className="mt-0.5 space-y-0.5">
-                  {section.items.map((item) => (
-                    <NavLink
-                      key={item.href}
-                      item={item}
-                      isActive={active(pathname, item.href)}
-                      onClick={onNavigate}
-                    />
-                  ))}
-                </div>
-              )}
-            </div>
-          ))}
-
-          {/* AI Tools */}
-          <div>
-            <div className="flex items-center justify-between px-2 py-1">
-              <span className="text-[10px] font-semibold uppercase tracking-[0.07em] text-muted-foreground/60">
-                AI Tools
-              </span>
-              <span className="rounded px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide bg-emerald-500/15 text-emerald-600">
-                New
-              </span>
-            </div>
-            <div className="mt-0.5 space-y-0.5">
-              {AI_TOOLS.map((item) => (
-                <NavLink
-                  key={item.href}
-                  item={item}
-                  isActive={active(pathname, item.href)}
-                  onClick={onNavigate}
+          {SECTIONS.map((section) => {
+            const visibleItems = section.items.filter(canSee);
+            if (visibleItems.length === 0) return null;
+            return (
+              <div key={section.label}>
+                <SectionLabel
+                  label={section.label}
+                  open={!!openSections[section.label]}
+                  onToggle={() => toggleSection(section.label)}
                 />
-              ))}
+                {openSections[section.label] && (
+                  <div className="mt-0.5 space-y-0.5">
+                    {visibleItems.map((item) => (
+                      <NavLink
+                        key={item.href}
+                        item={item}
+                        isActive={active(pathname, item.href)}
+                        onClick={onNavigate}
+                      />
+                    ))}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+
+          {/* AI Tools — only show section if at least one item is visible */}
+          {AI_TOOLS.filter(canSee).length > 0 && (
+            <div>
+              <div className="flex items-center justify-between px-2 py-1">
+                <span className="text-[10px] font-semibold uppercase tracking-[0.07em] text-muted-foreground/60">
+                  AI Tools
+                </span>
+                <span className="rounded px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide bg-emerald-500/15 text-emerald-600">
+                  New
+                </span>
+              </div>
+              <div className="mt-0.5 space-y-0.5">
+                {AI_TOOLS.filter(canSee).map((item) => (
+                  <NavLink
+                    key={item.href}
+                    item={item}
+                    isActive={active(pathname, item.href)}
+                    onClick={onNavigate}
+                  />
+                ))}
+              </div>
             </div>
-          </div>
+          )}
         </div>
       </div>
 
