@@ -5,13 +5,14 @@ import {
   Wallet, Plus, Loader2, Pencil, Trash2, Users, Send, X,
   ChevronDown, ChevronRight, Download, Smartphone, RefreshCw,
   Check, AlertCircle, Upload, Lock, Link2, QrCode, RotateCcw,
-  Clock, Camera, ScanLine,
+  Clock, Camera, ScanLine, ExternalLink, Search,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { apiClient } from "@/lib/api";
+import { QRCodeCanvas } from "qrcode.react";
 
 // ── Interfaces ─────────────────────────────────────────────────────────────────
 interface ProgramType {
@@ -319,6 +320,58 @@ function CopyButton({ value, label = "Copy" }: { value: string; label?: string }
   );
 }
 
+// ── QR Code modal ─────────────────────────────────────────────────────────────
+function QrModal({ url, title, onClose }: { url: string; title: string; onClose: () => void }) {
+  const [copied, setCopied] = useState(false);
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  async function copy() {
+    await navigator.clipboard.writeText(url);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  }
+
+  function download() {
+    const canvas = containerRef.current?.querySelector("canvas") as HTMLCanvasElement | null;
+    if (!canvas) return;
+    const link = document.createElement("a");
+    link.download = "qr-code.png";
+    link.href = canvas.toDataURL("image/png");
+    link.click();
+  }
+
+  return (
+    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 p-4 animate-in fade-in duration-150">
+      <div className="bg-background rounded-2xl shadow-2xl w-full max-w-xs">
+        <div className="flex items-center justify-between px-4 py-3 border-b">
+          <h2 className="font-semibold text-sm">{title}</h2>
+          <button onClick={onClose} className="rounded-md p-1 text-muted-foreground hover:text-foreground transition-colors">
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+        <div className="p-6 flex flex-col items-center gap-4">
+          <div ref={containerRef} className="bg-white p-3 rounded-xl shadow-sm border">
+            <QRCodeCanvas value={url} size={200} level="M" />
+          </div>
+          <p className="text-xs text-muted-foreground text-center break-all max-w-full">{url}</p>
+          <div className="flex gap-2 w-full">
+            <Button variant="outline" size="sm" className="flex-1" onClick={copy}>
+              {copied
+                ? <Check className="h-3.5 w-3.5 mr-1.5 text-green-500" />
+                : <Link2 className="h-3.5 w-3.5 mr-1.5" />}
+              {copied ? "Copied!" : "Copy URL"}
+            </Button>
+            <Button variant="outline" size="sm" className="flex-1" onClick={download}>
+              <Download className="h-3.5 w-3.5 mr-1.5" />
+              Download
+            </Button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 type ModalStep = "setup" | "appearance";
 
 function StepIndicator({ current, onGoBack }: { current: ModalStep; onGoBack: () => void }) {
@@ -423,6 +476,16 @@ export default function WalletPage() {
 
   // Rotating tokens
   const [rotatingToken, setRotatingToken] = useState(false);
+  const [rotatingScannerToken, setRotatingScannerToken] = useState(false);
+
+  // QR code modal
+  const [qrModal, setQrModal] = useState<{ url: string; title: string } | null>(null);
+
+  // Card search
+  const [cardSearch, setCardSearch] = useState("");
+
+  // Push result (replaces alert)
+  const [pushResult, setPushResult] = useState<{ sent: number; message: string } | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -564,14 +627,19 @@ export default function WalletPage() {
   async function sendPush() {
     if (!pushTarget || !pushMessage.trim()) return;
     setSendingPush(true);
+    setPushResult(null);
     try {
       const url = pushTarget.type === "card"
         ? `/api/wallet/cards/${pushTarget.serial}/push`
         : `/api/wallet/programs/${pushTarget.id}/push`;
       const res = await apiClient.post(url, { message: pushMessage });
-      alert(`Push sent to ${res.data.data.sent} device(s).`);
-      setPushTarget(null); setPushMessage("");
-    } catch {}
+      const sent = res.data.data?.sent ?? 0;
+      setPushResult({ sent, message: `Sent to ${sent} device${sent !== 1 ? "s" : ""}` });
+      setPushMessage("");
+      setTimeout(() => { setPushTarget(null); setPushResult(null); }, 2500);
+    } catch {
+      setPushResult({ sent: 0, message: "Failed to send — check device registrations." });
+    }
     setSendingPush(false);
   }
 
@@ -600,12 +668,24 @@ export default function WalletPage() {
 
   async function rotateJoinToken() {
     if (!activeProgram) return;
+    if (!confirm("Rotate the join link? The old URL will stop working immediately.")) return;
     setRotatingToken(true);
     try {
       const res = await apiClient.post(`/api/wallet/programs/${activeProgram.id}/rotate-join-token`);
       setActiveProgram((p) => p ? { ...p, join_token: res.data.data.join_token, join_url: res.data.data.join_url } : p);
     } catch {}
     setRotatingToken(false);
+  }
+
+  async function rotateScannerToken() {
+    if (!activeProgram) return;
+    if (!confirm("Rotate the scanner link? Staff using the old URL will lose access.")) return;
+    setRotatingScannerToken(true);
+    try {
+      const res = await apiClient.post(`/api/wallet/programs/${activeProgram.id}/rotate-scanner-token`);
+      setActiveProgram((p) => p ? { ...p, scanner_token: res.data.data.scanner_token, scanner_url: res.data.data.scanner_url } : p);
+    } catch {}
+    setRotatingScannerToken(false);
   }
 
   function configFields(type: string): { key: string; label: string; placeholder: string; numeric?: boolean }[] {
@@ -856,7 +936,7 @@ export default function WalletPage() {
       <div className="p-4 sm:p-6 max-w-5xl mx-auto">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-6">
           <div className="flex items-center gap-3 min-w-0">
-            <Button variant="outline" size="sm" onClick={() => setView("list")} className="shrink-0">← Back</Button>
+            <Button variant="outline" size="sm" onClick={() => { setView("list"); setCardSearch(""); }} className="shrink-0">← Back</Button>
             <div className="min-w-0">
               <h1 className="text-xl font-semibold truncate">{activeProgram.name}</h1>
               <p className="text-sm text-muted-foreground flex flex-wrap items-center gap-1.5">
@@ -885,44 +965,59 @@ export default function WalletPage() {
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-5">
           {/* Join link */}
           <Card className="p-4">
-            <div className="flex items-start justify-between gap-3">
-              <div className="flex-1 min-w-0">
-                <p className="text-sm font-medium flex items-center gap-1.5 mb-1">
-                  <QrCode className="h-4 w-4 text-muted-foreground" /> Join Link
-                </p>
-                <p className="text-xs text-muted-foreground truncate">{joinUrl || "No join link"}</p>
-                <div className="flex items-center gap-3 mt-2">
-                  {joinUrl && <CopyButton value={joinUrl} label="Copy URL" />}
-                  <button
-                    onClick={rotateJoinToken}
-                    disabled={rotatingToken}
-                    className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
-                    title="Rotate token — the old URL will stop working"
-                  >
-                    {rotatingToken ? <Loader2 className="h-3 w-3 animate-spin" /> : <RotateCcw className="h-3 w-3" />}
-                    Rotate
-                  </button>
-                </div>
-              </div>
+            <p className="text-sm font-medium flex items-center gap-1.5 mb-1">
+              <QrCode className="h-4 w-4 text-muted-foreground" /> Customer Join Link
+            </p>
+            <p className="text-xs text-muted-foreground truncate mb-2">{joinUrl || "No join link"}</p>
+            <div className="flex items-center gap-2 flex-wrap">
+              {joinUrl && (
+                <Button variant="outline" size="sm" className="h-7 text-xs gap-1.5"
+                  onClick={() => setQrModal({ url: joinUrl, title: "Customer Join QR" })}>
+                  <QrCode className="h-3 w-3" /> Show QR
+                </Button>
+              )}
+              {joinUrl && <CopyButton value={joinUrl} label="Copy URL" />}
+              <button
+                onClick={rotateJoinToken}
+                disabled={rotatingToken}
+                className="flex items-center gap-1 text-xs text-muted-foreground hover:text-destructive transition-colors"
+                title="Invalidate the old link and generate a new one"
+              >
+                {rotatingToken ? <Loader2 className="h-3 w-3 animate-spin" /> : <RotateCcw className="h-3 w-3" />}
+                Rotate
+              </button>
             </div>
           </Card>
 
           {/* Scanner link */}
           <Card className="p-4">
-            <div className="flex items-start justify-between gap-3">
-              <div className="flex-1 min-w-0">
-                <p className="text-sm font-medium flex items-center gap-1.5 mb-1">
-                  <ScanLine className="h-4 w-4 text-muted-foreground" /> Staff Scanner
-                </p>
-                <p className="text-xs text-muted-foreground truncate">{scannerUrl || "No scanner link"}</p>
-                <div className="flex items-center gap-3 mt-2">
-                  {scannerUrl && <CopyButton value={scannerUrl} label="Copy scanner URL" />}
-                  {scannerUrl && (
-                    <a href={scannerUrl} target="_blank" rel="noreferrer"
-                      className="text-xs text-primary hover:underline">Open scanner →</a>
-                  )}
-                </div>
-              </div>
+            <p className="text-sm font-medium flex items-center gap-1.5 mb-1">
+              <ScanLine className="h-4 w-4 text-muted-foreground" /> Staff Scanner Link
+            </p>
+            <p className="text-xs text-muted-foreground truncate mb-2">{scannerUrl || "No scanner link"}</p>
+            <div className="flex items-center gap-2 flex-wrap">
+              {scannerUrl && (
+                <Button variant="outline" size="sm" className="h-7 text-xs gap-1.5"
+                  onClick={() => setQrModal({ url: scannerUrl, title: "Staff Scanner QR" })}>
+                  <QrCode className="h-3 w-3" /> Show QR
+                </Button>
+              )}
+              {scannerUrl && <CopyButton value={scannerUrl} label="Copy" />}
+              {scannerUrl && (
+                <a href={scannerUrl} target="_blank" rel="noreferrer"
+                  className="flex items-center gap-1 text-xs text-primary hover:underline">
+                  Open <ExternalLink className="h-3 w-3" />
+                </a>
+              )}
+              <button
+                onClick={rotateScannerToken}
+                disabled={rotatingScannerToken}
+                className="flex items-center gap-1 text-xs text-muted-foreground hover:text-destructive transition-colors"
+                title="Invalidate the old scanner link"
+              >
+                {rotatingScannerToken ? <Loader2 className="h-3 w-3 animate-spin" /> : <RotateCcw className="h-3 w-3" />}
+                Rotate
+              </button>
             </div>
           </Card>
         </div>
@@ -949,8 +1044,35 @@ export default function WalletPage() {
             </Button>
           </Card>
         ) : (
-          <div className="space-y-2">
-            {cards.map((card) => (
+          <div className="space-y-3">
+            {/* Search */}
+            <div className="relative">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none" />
+              <Input
+                value={cardSearch}
+                onChange={(e) => setCardSearch(e.target.value)}
+                placeholder="Search by name, email, or phone…"
+                className="pl-9 h-9"
+              />
+            </div>
+            {(() => {
+              const q = cardSearch.toLowerCase().trim();
+              const filtered = q
+                ? cards.filter((c) =>
+                    (c.customer_name ?? "").toLowerCase().includes(q) ||
+                    (c.customer_email ?? "").toLowerCase().includes(q) ||
+                    (c.customer_phone ?? "").toLowerCase().includes(q) ||
+                    c.serial.toLowerCase().includes(q)
+                  )
+                : cards;
+              if (filtered.length === 0 && q) {
+                return (
+                  <p className="text-sm text-muted-foreground text-center py-8">
+                    No cards match &quot;{cardSearch}&quot;
+                  </p>
+                );
+              }
+              return filtered.map((card) => (
               <Card key={card.id} className="overflow-hidden">
                 <div className="p-4">
                   <div className="flex flex-col sm:flex-row sm:items-start gap-3">
@@ -982,12 +1104,17 @@ export default function WalletPage() {
                           <RefreshCw className="h-3.5 w-3.5 mr-1" /> Action
                         </Button>
                       )}
+                      <a href={`/pass/${card.serial}`} target="_blank" rel="noreferrer">
+                        <Button variant="ghost" size="sm" title="View customer pass page">
+                          <ExternalLink className="h-4 w-4" />
+                        </Button>
+                      </a>
                       <Button variant="ghost" size="sm" title="Send push notification"
-                        onClick={() => { setPushTarget({ type: "card", serial: card.serial }); setPushMessage(""); }}>
+                        onClick={() => { setPushTarget({ type: "card", serial: card.serial }); setPushMessage(""); setPushResult(null); }}>
                         <Send className="h-4 w-4" />
                       </Button>
                       <a href={`${apiBase}/api/wallet/cards/${card.serial}/pkpass`} target="_blank" rel="noreferrer">
-                        <Button variant="ghost" size="sm" title="Download Apple Wallet pass">
+                        <Button variant="ghost" size="sm" title="Download Apple Wallet pass (.pkpass)">
                           <Download className="h-4 w-4" />
                         </Button>
                       </a>
@@ -1051,8 +1178,14 @@ export default function WalletPage() {
                   </div>
                 )}
               </Card>
-            ))}
+            ));
+            })()}
           </div>
+        )}
+
+        {/* QR modal */}
+        {qrModal && (
+          <QrModal url={qrModal.url} title={qrModal.title} onClose={() => setQrModal(null)} />
         )}
 
         {/* Issue card modal */}
@@ -1152,7 +1285,7 @@ export default function WalletPage() {
                   <X className="h-5 w-5" />
                 </button>
               </div>
-              <div className="p-4 space-y-1.5">
+              <div className="p-4 space-y-2">
                 <Label className="text-sm">Message</Label>
                 <textarea className="w-full h-24 rounded-md border bg-background px-3 py-2 text-sm resize-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                   value={pushMessage} onChange={(e) => setPushMessage(e.target.value)}
@@ -1160,9 +1293,20 @@ export default function WalletPage() {
                 <p className="text-xs text-muted-foreground">
                   Variables: {'{{wallet_punches}}'}, {'{{wallet_points}}'}, {'{{customerName}}'}, {'{{wallet_program_name}}'}
                 </p>
+                {pushResult && (
+                  <div className={`flex items-center gap-2 rounded-lg px-3 py-2 text-xs border ${
+                    pushResult.sent > 0
+                      ? "bg-green-50 border-green-200 text-green-800"
+                      : "bg-amber-50 border-amber-200 text-amber-800"}`}>
+                    {pushResult.sent > 0
+                      ? <Check className="h-3.5 w-3.5 shrink-0" />
+                      : <AlertCircle className="h-3.5 w-3.5 shrink-0" />}
+                    {pushResult.message}
+                  </div>
+                )}
               </div>
               <div className="flex justify-end gap-2 p-4 border-t">
-                <Button variant="outline" onClick={() => setPushTarget(null)}>Cancel</Button>
+                <Button variant="outline" onClick={() => { setPushTarget(null); setPushResult(null); }}>Cancel</Button>
                 <Button onClick={sendPush} disabled={sendingPush || !pushMessage.trim()}>
                   {sendingPush ? <Loader2 className="h-4 w-4 animate-spin mr-1.5" /> : <Send className="h-4 w-4 mr-1.5" />}
                   Send
@@ -1241,7 +1385,14 @@ export default function WalletPage() {
                           {pt?.label}{p.description ? ` · ${p.description}` : ""}
                         </p>
                         {p.join_url && (
-                          <div className="flex items-center gap-2 mt-1">
+                          <div className="flex items-center gap-2 mt-1.5">
+                            <button
+                              onClick={(e) => { e.stopPropagation(); setQrModal({ url: p.join_url!, title: `${p.name} — Join QR` }); }}
+                              className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
+                              title="Show QR code for join link"
+                            >
+                              <QrCode className="h-3 w-3" /> QR
+                            </button>
                             <CopyButton value={p.join_url} label="Copy join link" />
                           </div>
                         )}
@@ -1265,6 +1416,11 @@ export default function WalletPage() {
             );
           })}
         </div>
+      )}
+
+      {/* QR modal */}
+      {qrModal && (
+        <QrModal url={qrModal.url} title={qrModal.title} onClose={() => setQrModal(null)} />
       )}
 
       {/* ── Create / Edit modal ─────────────────────────────────────────────── */}
