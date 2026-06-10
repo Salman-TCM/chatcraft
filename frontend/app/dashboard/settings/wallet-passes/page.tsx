@@ -1,9 +1,9 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   Wallet, ChevronDown, ChevronRight, ExternalLink,
-  Check, X, Loader2, Copy, AlertCircle,
+  Check, X, Loader2, Copy, AlertCircle, Eye, EyeOff, Save,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -119,7 +119,17 @@ export default function WalletPassesSettingsPage() {
 
   // Load existing settings on mount
   const [settingsLoaded, setSettingsLoaded] = useState(false);
-  useState(() => {
+  const [settingsLoading, setSettingsLoading] = useState(true);
+  const [appleSaveSuccess, setAppleSaveSuccess] = useState(false);
+  const [googleSaveSuccess, setGoogleSaveSuccess] = useState(false);
+
+  // PEM show/hide toggles
+  const [showCert, setShowCert] = useState(false);
+  const [showKey, setShowKey] = useState(false);
+  const [showWwdr, setShowWwdr] = useState(false);
+  const [showServiceAcct, setShowServiceAcct] = useState(false);
+
+  useEffect(() => {
     apiClient.get("/api/settings/wallet").then((res) => {
       const data = res.data?.data;
       if (data?.apple) {
@@ -130,8 +140,8 @@ export default function WalletPassesSettingsPage() {
         setGoogleIssuerId(data.google.issuer_id || "");
       }
       setSettingsLoaded(true);
-    }).catch(() => setSettingsLoaded(true));
-  });
+    }).catch(() => setSettingsLoaded(true)).finally(() => setSettingsLoading(false));
+  }, []);
 
   // Connection status
   const appleConnected  = !!(applePassTypeId && appleTeamId && appleCertPem && appleKeyPem) ||
@@ -175,27 +185,41 @@ export default function WalletPassesSettingsPage() {
 
   async function saveApple() {
     setAppleSaving(true);
+    setAppleSaveSuccess(false);
     try {
       await apiClient.patch("/api/settings/wallet/apple", {
         pass_type_identifier: applePassTypeId,
         team_identifier: appleTeamId,
-        pass_cert_pem: appleCertPem,
-        pass_key_pem: appleKeyPem,
-        wwdr_pem: appleWwdrPem,
+        pass_cert_pem: appleCertPem || undefined,
+        pass_key_pem: appleKeyPem || undefined,
+        wwdr_pem: appleWwdrPem || undefined,
       });
+      setAppleSaveSuccess(true);
+      setTimeout(() => setAppleSaveSuccess(false), 3000);
     } catch {}
     setAppleSaving(false);
   }
 
   async function saveGoogle() {
     setGoogleSaving(true);
+    setGoogleSaveSuccess(false);
     try {
       await apiClient.patch("/api/settings/wallet/google", {
         issuer_id: googleIssuerId,
-        service_account: googleServiceAcct,
+        service_account: googleServiceAcct || undefined,
       });
+      setGoogleSaveSuccess(true);
+      setTimeout(() => setGoogleSaveSuccess(false), 3000);
     } catch {}
     setGoogleSaving(false);
+  }
+
+  if (settingsLoading) {
+    return (
+      <div className="flex items-center justify-center py-24">
+        <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+      </div>
+    );
   }
 
   return (
@@ -213,7 +237,10 @@ export default function WalletPassesSettingsPage() {
       <Card className="divide-y">
         <div className="flex items-center gap-3 px-4 py-3">
           <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-black text-white text-lg font-bold shrink-0">
-          </div>
+          <svg viewBox="0 0 24 24" className="h-5 w-5 fill-white" xmlns="http://www.w3.org/2000/svg">
+            <path d="M18.71 19.5c-.83 1.24-1.71 2.45-3.05 2.47-1.34.03-1.77-.79-3.29-.79-1.53 0-2 .77-3.27.82-1.31.05-2.3-1.32-3.14-2.53C4.25 17 2.94 12.45 4.7 9.39c.87-1.52 2.43-2.48 4.12-2.51 1.28-.02 2.5.87 3.29.87.78 0 2.26-1.07 3.8-.91.65.03 2.47.26 3.64 1.98-.09.06-2.17 1.28-2.15 3.81.03 3.02 2.65 4.03 2.68 4.04-.03.07-.42 1.44-1.38 2.83M13 3.5c.73-.83 1.94-1.46 2.94-1.5.13 1.17-.34 2.35-1.04 3.19-.69.85-1.83 1.51-2.95 1.42-.15-1.15.41-2.35 1.05-3.11z"/>
+          </svg>
+        </div>
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-2">
               <p className="font-semibold text-sm">Apple Wallet</p>
@@ -241,33 +268,54 @@ export default function WalletPassesSettingsPage() {
           </div>
 
           <div className="space-y-1">
-            <Label className="text-xs">Pass Certificate (PEM)</Label>
+            <div className="flex items-center justify-between">
+              <Label className="text-xs">Pass Certificate (PEM)</Label>
+              <button onClick={() => setShowCert((v) => !v)} className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors">
+                {showCert ? <EyeOff className="h-3 w-3" /> : <Eye className="h-3 w-3" />}
+                {showCert ? "Hide" : "Show"}
+              </button>
+            </div>
             <textarea
-              value={appleCertPem}
-              onChange={(e) => setAppleCertPem(e.target.value)}
-              placeholder={"-----BEGIN CERTIFICATE-----\n…\n-----END CERTIFICATE-----"}
+              value={showCert ? appleCertPem : (appleCertPem ? "•".repeat(Math.min(appleCertPem.length, 60)) : "")}
+              onChange={(e) => { if (showCert) setAppleCertPem(e.target.value); }}
+              onFocus={() => setShowCert(true)}
+              placeholder={showCert ? "-----BEGIN CERTIFICATE-----\n…\n-----END CERTIFICATE-----" : appleCertPem ? "Click Show to edit" : "-----BEGIN CERTIFICATE-----\n…\n-----END CERTIFICATE-----"}
               rows={3}
               className="w-full rounded-md border bg-background px-3 py-2 text-xs font-mono resize-y focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
             />
           </div>
 
           <div className="space-y-1">
-            <Label className="text-xs">Private Key (PEM)</Label>
+            <div className="flex items-center justify-between">
+              <Label className="text-xs">Private Key (PEM)</Label>
+              <button onClick={() => setShowKey((v) => !v)} className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors">
+                {showKey ? <EyeOff className="h-3 w-3" /> : <Eye className="h-3 w-3" />}
+                {showKey ? "Hide" : "Show"}
+              </button>
+            </div>
             <textarea
-              value={appleKeyPem}
-              onChange={(e) => setAppleKeyPem(e.target.value)}
-              placeholder={"-----BEGIN PRIVATE KEY-----\n…\n-----END PRIVATE KEY-----"}
+              value={showKey ? appleKeyPem : (appleKeyPem ? "•".repeat(Math.min(appleKeyPem.length, 60)) : "")}
+              onChange={(e) => { if (showKey) setAppleKeyPem(e.target.value); }}
+              onFocus={() => setShowKey(true)}
+              placeholder={showKey ? "-----BEGIN PRIVATE KEY-----\n…\n-----END PRIVATE KEY-----" : appleKeyPem ? "Click Show to edit" : "-----BEGIN PRIVATE KEY-----\n…\n-----END PRIVATE KEY-----"}
               rows={3}
               className="w-full rounded-md border bg-background px-3 py-2 text-xs font-mono resize-y focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
             />
           </div>
 
           <div className="space-y-1">
-            <Label className="text-xs">WWDR Certificate (PEM)</Label>
+            <div className="flex items-center justify-between">
+              <Label className="text-xs">WWDR Certificate (PEM)</Label>
+              <button onClick={() => setShowWwdr((v) => !v)} className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors">
+                {showWwdr ? <EyeOff className="h-3 w-3" /> : <Eye className="h-3 w-3" />}
+                {showWwdr ? "Hide" : "Show"}
+              </button>
+            </div>
             <textarea
-              value={appleWwdrPem}
-              onChange={(e) => setAppleWwdrPem(e.target.value)}
-              placeholder={"-----BEGIN CERTIFICATE-----\n(Apple WWDR G4)\n-----END CERTIFICATE-----"}
+              value={showWwdr ? appleWwdrPem : (appleWwdrPem ? "•".repeat(Math.min(appleWwdrPem.length, 60)) : "")}
+              onChange={(e) => { if (showWwdr) setAppleWwdrPem(e.target.value); }}
+              onFocus={() => setShowWwdr(true)}
+              placeholder={showWwdr ? "-----BEGIN CERTIFICATE-----\n(Apple WWDR G4)\n-----END CERTIFICATE-----" : appleWwdrPem ? "Click Show to edit" : "-----BEGIN CERTIFICATE-----\n(Apple WWDR G4)\n-----END CERTIFICATE-----"}
               rows={3}
               className="w-full rounded-md border bg-background px-3 py-2 text-xs font-mono resize-y focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
             />
@@ -304,10 +352,15 @@ export default function WalletPassesSettingsPage() {
           </GuideSection>
 
           {/* Actions */}
-          <div className="flex items-center gap-3 pt-1">
-            <Button size="sm" onClick={saveApple} disabled={appleSaving}>
-              {appleSaving && <Loader2 className="h-3.5 w-3.5 animate-spin mr-1.5" />}
-              Save Apple Credentials
+          <div className="flex items-center gap-3 pt-1 flex-wrap">
+            <Button size="sm" onClick={saveApple} disabled={appleSaving}
+              className={appleSaveSuccess ? "bg-green-600 hover:bg-green-700" : ""}>
+              {appleSaving
+                ? <Loader2 className="h-3.5 w-3.5 animate-spin mr-1.5" />
+                : appleSaveSuccess
+                  ? <Check className="h-3.5 w-3.5 mr-1.5" />
+                  : <Save className="h-3.5 w-3.5 mr-1.5" />}
+              {appleSaveSuccess ? "Saved!" : "Save Apple Credentials"}
             </Button>
             <TestConnectionPanel result={appleTestResult} loading={appleTestLoading} onTest={testApple} />
           </div>
@@ -346,11 +399,18 @@ export default function WalletPassesSettingsPage() {
           </div>
 
           <div className="space-y-1">
-            <Label className="text-xs">Service Account JSON</Label>
+            <div className="flex items-center justify-between">
+              <Label className="text-xs">Service Account JSON</Label>
+              <button onClick={() => setShowServiceAcct((v) => !v)} className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors">
+                {showServiceAcct ? <EyeOff className="h-3 w-3" /> : <Eye className="h-3 w-3" />}
+                {showServiceAcct ? "Hide" : "Show"}
+              </button>
+            </div>
             <textarea
-              value={googleServiceAcct}
-              onChange={(e) => setGoogleServiceAcct(e.target.value)}
-              placeholder={'{\n  "type": "service_account",\n  "project_id": "your-project",\n  …\n}'}
+              value={showServiceAcct ? googleServiceAcct : (googleServiceAcct ? "•".repeat(Math.min(googleServiceAcct.length, 60)) : "")}
+              onChange={(e) => { if (showServiceAcct) setGoogleServiceAcct(e.target.value); }}
+              onFocus={() => setShowServiceAcct(true)}
+              placeholder={showServiceAcct ? '{\n  "type": "service_account",\n  "project_id": "your-project",\n  …\n}' : googleServiceAcct ? "Click Show to edit" : '{\n  "type": "service_account",\n  …\n}'}
               rows={6}
               className="w-full rounded-md border bg-background px-3 py-2 text-xs font-mono resize-y focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
             />
@@ -370,10 +430,15 @@ export default function WalletPassesSettingsPage() {
           )}
 
           {/* Actions */}
-          <div className="flex items-center gap-3 pt-1">
-            <Button size="sm" onClick={saveGoogle} disabled={googleSaving}>
-              {googleSaving && <Loader2 className="h-3.5 w-3.5 animate-spin mr-1.5" />}
-              Save Google Credentials
+          <div className="flex items-center gap-3 pt-1 flex-wrap">
+            <Button size="sm" onClick={saveGoogle} disabled={googleSaving}
+              className={googleSaveSuccess ? "bg-green-600 hover:bg-green-700" : ""}>
+              {googleSaving
+                ? <Loader2 className="h-3.5 w-3.5 animate-spin mr-1.5" />
+                : googleSaveSuccess
+                  ? <Check className="h-3.5 w-3.5 mr-1.5" />
+                  : <Save className="h-3.5 w-3.5 mr-1.5" />}
+              {googleSaveSuccess ? "Saved!" : "Save Google Credentials"}
             </Button>
             <TestConnectionPanel result={googleTestResult} loading={googleTestLoading} onTest={testGoogle} />
           </div>
