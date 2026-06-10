@@ -15,5 +15,9 @@
   "engines": {
     "node": ">=20.0.0",
     "npm": ">=10.0.0"
+  },
+  "devDependencies": {
+    "@next/env": "^16.2.9",
+    "caniuse-lite": "^1.0.30001797"
   }
 }
