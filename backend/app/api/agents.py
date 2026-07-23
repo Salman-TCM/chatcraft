@@ -1548,13 +1548,13 @@ async def _tool_list_available_models(ctx: dict) -> str:
         "xai": "xai_api_key",
     }
     _PROVIDER_MODELS = {
-        "anthropic": ["claude-sonnet-4-6", "claude-opus-4-7", "claude-haiku-4-5-20251001"],
-        "openai": ["gpt-4o", "gpt-4o-mini", "gpt-5", "gpt-5-mini"],
-        "google": ["gemini-2.5-pro", "gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-pro"],
-        "groq": ["llama-3.3-70b-versatile", "llama-3.1-8b-instant", "mixtral-8x7b-32768"],
-        "deepseek": ["deepseek-chat", "deepseek-reasoner"],
-        "perplexity": ["sonar-pro", "sonar", "sonar-reasoning"],
-        "xai": ["grok-3", "grok-3-fast", "grok-3-mini"],
+        "anthropic": ["claude-sonnet-5", "claude-opus-4-8", "claude-fable-5", "claude-sonnet-4-6", "claude-opus-4-7", "claude-haiku-4-5-20251001"],
+        "openai": ["gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna", "gpt-4o", "gpt-4o-mini", "gpt-5", "gpt-5-mini"],
+        "google": ["gemini-3.1-pro", "gemini-3.6-flash", "gemini-2.5-pro", "gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-pro"],
+        "groq": ["openai/gpt-oss-120b", "openai/gpt-oss-20b", "qwen/qwen3.6-27b", "llama-3.3-70b-versatile", "llama-3.1-8b-instant"],
+        "deepseek": ["deepseek-v4-pro", "deepseek-v4-flash"],
+        "perplexity": ["sonar-pro", "sonar", "sonar-reasoning-pro", "sonar-deep-research"],
+        "xai": ["grok-4.5", "grok-4.3", "grok-3", "grok-3-fast", "grok-3-mini"],
     }
 
     async with AsyncSessionLocal() as session:
