@@ -15,15 +15,26 @@ import { apiClient } from "@/lib/api";
 
 // Keep in sync with backend features.py
 const ALL_FEATURES_LIST: { key: string; label: string }[] = [
-  { key: "wallet",         label: "Wallet & Loyalty" },
-  { key: "agent_builder",  label: "Agent Builder" },
+  { key: "inbox",          label: "Inbox" },
+  { key: "chatbots",       label: "Chatbots" },
+  { key: "contacts",       label: "Contacts" },
+  { key: "keywords",       label: "Keywords" },
+  { key: "campaigns",      label: "Campaigns" },
+  { key: "social",         label: "Social" },
   { key: "flows",          label: "Flows" },
   { key: "automations",    label: "Automations" },
+  { key: "sequences",      label: "Sequences" },
+  { key: "pipelines",      label: "Pipelines" },
+  { key: "forms",          label: "Forms" },
+  { key: "landing_pages",  label: "Landing Pages" },
+  { key: "stores",         label: "Stores" },
+  { key: "wallet",         label: "Wallet & Loyalty" },
   { key: "analytics",      label: "Analytics" },
   { key: "knowledge_base", label: "Knowledge Base" },
-  { key: "inbox",          label: "Inbox" },
-  { key: "forms",          label: "Forms" },
-  { key: "campaigns",      label: "Campaigns" },
+  { key: "agent_builder",  label: "Agent Builder" },
+  { key: "voice_lab",      label: "Voice Lab" },
+  { key: "browser_agent",  label: "Browser Agent" },
+  { key: "mcp_servers",    label: "MCP Servers" },
   { key: "white_label",    label: "White Label / Agency" },
 ];
 
