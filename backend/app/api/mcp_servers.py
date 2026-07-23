@@ -27,6 +27,15 @@ class MCPServerIn(BaseModel):
     is_active: bool = True
 
 
+class MCPServerPatch(BaseModel):
+    name: str | None = None
+    server_url: str | None = None
+    auth_type: str | None = None
+    auth_config: dict | None = None
+    chatbot_id: str | None = None
+    is_active: bool | None = None
+
+
 @router.get("")
 async def list_mcp_servers(current_user: CurrentUser, db: DBSession):
     result = await db.execute(
@@ -60,7 +69,7 @@ async def add_mcp_server(body: MCPServerIn, current_user: CurrentUser, db: DBSes
 
 @router.patch("/{server_id}")
 async def update_mcp_server(
-    server_id: str, body: MCPServerIn, current_user: CurrentUser, db: DBSession
+    server_id: str, body: MCPServerPatch, current_user: CurrentUser, db: DBSession
 ):
     result = await db.execute(
         select(MCPServerConfig).where(
@@ -72,13 +81,19 @@ async def update_mcp_server(
     if not server:
         raise HTTPException(status_code=404, detail="MCP server not found")
 
-    server.name = body.name
-    server.server_url = body.server_url
-    server.auth_type = body.auth_type
-    server.auth_config = body.auth_config
-    server.is_active = body.is_active
-    if body.chatbot_id:
+    if body.name is not None:
+        server.name = body.name
+    if body.server_url is not None:
+        server.server_url = body.server_url
+    if body.auth_type is not None:
+        server.auth_type = body.auth_type
+    if body.auth_config is not None:
+        server.auth_config = body.auth_config
+    if body.is_active is not None:
+        server.is_active = body.is_active
+    if body.chatbot_id is not None:
         server.chatbot_id = uuid.UUID(body.chatbot_id)
+
     await db.commit()
     await db.refresh(server)
     return {"success": True, "data": _serialize(server)}

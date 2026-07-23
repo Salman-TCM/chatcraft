@@ -1,34 +1,29 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
+import Link from "next/link";
 import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
+  Dialog, DialogContent, DialogHeader, DialogTitle,
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Switch } from "@/components/ui/switch";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
+  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
 import {
-  Bot, Globe, Code2, Chrome, Link2, Sheet, Mail, 
-  Smartphone, ShieldCheck, Loader2, Check, X,
-  Brain, Zap, Settings, Database,
+  Globe, Code2, Link2, Mail, Smartphone, ShieldCheck, Bot,
+  Loader2, Check, Brain, Zap, Settings, Plug,
+  Webhook, RefreshCw, Trash2, Plus, ExternalLink,
+  AlertCircle, ChevronDown, ChevronUp, Wrench, Sheet,
 } from "lucide-react";
 import { apiClient } from "@/lib/api";
+
+// ─── Types ────────────────────────────────────────────────────────────────────
 
 interface Agent {
   id: string;
@@ -43,12 +38,28 @@ interface Agent {
   webhook_url: string | null;
 }
 
+interface MCPServer {
+  id: string;
+  name: string;
+  server_url: string;
+  auth_type: string;
+  is_active: boolean;
+  created_at: string;
+}
+
+interface MCPTool {
+  name: string;
+  description?: string;
+}
+
 interface AgentConfigModalProps {
   agent: Agent;
   open: boolean;
   onClose: () => void;
   onUpdate: (agent: Agent) => void;
 }
+
+// ─── Constants ────────────────────────────────────────────────────────────────
 
 interface ToolConfig {
   key: string;
@@ -59,107 +70,110 @@ interface ToolConfig {
 }
 
 const TOOLS: ToolConfig[] = [
-  {
-    key: "web_search",
-    label: "Web Search",
-    description: "Search the internet for current information",
-    icon: Globe,
-    category: "research",
-  },
-  {
-    key: "browser",
-    label: "Browser",
-    description: "Visit and extract content from web pages",
-    icon: Chrome,
-    category: "research",
-  },
-  {
-    key: "code",
-    label: "Code Execution",
-    description: "Execute Python code for calculations and data processing",
-    icon: Code2,
-    category: "compute",
-  },
-  {
-    key: "http",
-    label: "HTTP Requests",
-    description: "Make API calls to external services",
-    icon: Link2,
-    category: "integration",
-  },
-  {
-    key: "sheets",
-    label: "Google Sheets",
-    description: "Read and write spreadsheet data",
-    icon: Sheet,
-    category: "integration",
-  },
-  {
-    key: "email",
-    label: "Email",
-    description: "Send emails via configured service",
-    icon: Mail,
-    category: "communication",
-  },
-  {
-    key: "sms",
-    label: "SMS",
-    description: "Send text messages via Twilio",
-    icon: Smartphone,
-    category: "communication",
-  },
-  {
-    key: "verification",
-    label: "Verification",
-    description: "Send and verify OTP codes",
-    icon: ShieldCheck,
-    category: "communication",
-  },
-  {
-    key: "agent_builder",
-    label: "Agent Builder",
-    description: "Create and manage other agents",
-    icon: Bot,
-    category: "meta",
-  },
+  { key: "web_search",   label: "Web Search",     description: "Search the internet for current information", icon: Globe,       category: "research" },
+  { key: "browser",      label: "Browser",        description: "Visit and extract content from web pages",    icon: Globe,       category: "research" },
+  { key: "code",         label: "Code Execution", description: "Execute Python code for data processing",     icon: Code2,       category: "compute" },
+  { key: "http",         label: "HTTP Requests",  description: "Make API calls to external services",         icon: Link2,       category: "integration" },
+  { key: "sheets",       label: "Google Sheets",  description: "Read and write spreadsheet data",             icon: Sheet,       category: "integration" },
+  { key: "email",        label: "Email",          description: "Send emails via configured service",          icon: Mail,        category: "communication" },
+  { key: "sms",          label: "SMS",            description: "Send text messages via Twilio",               icon: Smartphone,  category: "communication" },
+  { key: "verification", label: "Verification",   description: "Send and verify OTP codes",                   icon: ShieldCheck, category: "communication" },
+  { key: "agent_builder",label: "Agent Builder",  description: "Create and manage other agents",              icon: Bot,         category: "meta" },
 ];
 
 const MODELS = [
-  {
-    value: "claude-sonnet-4-6",
-    label: "Claude Sonnet 4.6",
-    description: "Optimal balance of capability and efficiency",
-    recommended: true,
-  },
-  {
-    value: "claude-opus-4-7",
-    label: "Claude Opus 4.7",
-    description: "Highest capability for complex reasoning",
-    recommended: false,
-  },
-  {
-    value: "claude-haiku-4-5-20251001",
-    label: "Claude Haiku 4.5",
-    description: "Fast and cost-effective for simple tasks",
-    recommended: false,
-  },
-  {
-    value: "gpt-4o",
-    label: "GPT-4o",
-    description: "OpenAI's flagship model with vision capabilities",
-    recommended: false,
-  },
-  {
-    value: "gpt-4o-mini",
-    label: "GPT-4o Mini",
-    description: "Smaller, faster GPT variant",
-    recommended: false,
-  },
+  { value: "claude-sonnet-4-6",         label: "Claude Sonnet 4.6",  note: "Recommended" },
+  { value: "claude-opus-4-7",           label: "Claude Opus 4.7",    note: "Most powerful" },
+  { value: "claude-haiku-4-5-20251001", label: "Claude Haiku 4.5",   note: "Fastest" },
+  { value: "gpt-4o",                    label: "GPT-4o",             note: null },
+  { value: "gpt-4o-mini",              label: "GPT-4o Mini",        note: null },
 ];
 
+const CATEGORY_LABELS: Record<string, string> = {
+  research: "Research",
+  compute: "Compute",
+  integration: "Integration",
+  communication: "Communication",
+  meta: "Meta",
+};
+
+// ─── MCP Server card inside modal ─────────────────────────────────────────────
+
+function MCPCard({
+  server, tools, loadingTools, onToggle, onDelete, onDiscover,
+}: {
+  server: MCPServer;
+  tools?: MCPTool[];
+  loadingTools: boolean;
+  onToggle: () => void;
+  onDelete: () => void;
+  onDiscover: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+
+  return (
+    <div className={`rounded-xl border transition-colors ${
+      server.is_active
+        ? "border-emerald-200 bg-emerald-50/40 dark:border-emerald-800 dark:bg-emerald-950/20"
+        : "border-border bg-muted/20"
+    }`}>
+      <div className="flex items-center gap-3 p-3">
+        <div className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg ${
+          server.is_active
+            ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/50 dark:text-emerald-400"
+            : "bg-muted text-muted-foreground"
+        }`}>
+          <Globe className="h-3.5 w-3.5" />
+        </div>
+
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-1.5 flex-wrap">
+            <p className="text-sm font-medium truncate">{server.name}</p>
+            {tools && tools.length > 0 && (
+              <Badge variant="outline" className="text-[10px] px-1 py-0 gap-0.5 h-4">
+                <Wrench className="h-2.5 w-2.5" />{tools.length}
+              </Badge>
+            )}
+          </div>
+          <p className="text-[11px] text-muted-foreground font-mono truncate">{server.server_url}</p>
+        </div>
+
+        <div className="flex items-center gap-1 shrink-0">
+          <Button size="icon" variant="ghost" className="h-6 w-6" onClick={onDiscover} disabled={loadingTools} title="Discover tools">
+            <RefreshCw className={`h-3 w-3 ${loadingTools ? "animate-spin" : ""}`} />
+          </Button>
+          {tools && tools.length > 0 && (
+            <Button size="icon" variant="ghost" className="h-6 w-6" onClick={() => setOpen((o) => !o)}>
+              {open ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
+            </Button>
+          )}
+          <Switch checked={server.is_active} onCheckedChange={onToggle} />
+          <Button size="icon" variant="ghost" className="h-6 w-6 text-destructive hover:text-destructive" onClick={onDelete}>
+            <Trash2 className="h-3 w-3" />
+          </Button>
+        </div>
+      </div>
+
+      {open && tools && tools.length > 0 && (
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5 px-3 pb-3 border-t pt-2">
+          {tools.map((t) => (
+            <div key={t.name} className="rounded-lg bg-background border px-2.5 py-2">
+              <p className="text-[11px] font-mono font-semibold text-primary truncate">{t.name}</p>
+              {t.description && (
+                <p className="text-[10px] text-muted-foreground mt-0.5 leading-snug line-clamp-2">{t.description}</p>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Main modal ───────────────────────────────────────────────────────────────
+
 export function AgentConfigModal({ agent, open, onClose, onUpdate }: AgentConfigModalProps) {
-  // Form state
-  const [formData, setFormData] = useState({
+  const [form, setForm] = useState({
     name: agent.name,
     description: agent.description || "",
     model: agent.model,
@@ -170,15 +184,24 @@ export function AgentConfigModal({ agent, open, onClose, onUpdate }: AgentConfig
     webhook_url: agent.webhook_url || "",
     tools: { ...agent.tools },
   });
+  const [saving, setSaving]           = useState(false);
+  const [errors, setErrors]           = useState<Record<string, string>>({});
+  const [activeTab, setActiveTab]     = useState("basic");
 
-  // UI state
-  const [saving, setSaving] = useState(false);
-  const [errors, setErrors] = useState<Record<string, string>>({});
-  const [activeTab, setActiveTab] = useState("basic");
+  const [mcpServers, setMcpServers]         = useState<MCPServer[]>([]);
+  const [mcpTools, setMcpTools]             = useState<Record<string, MCPTool[]>>({});
+  const [loadingMcpId, setLoadingMcpId]     = useState<string | null>(null);
+
+  const loadMcp = useCallback(async () => {
+    try {
+      const res = await apiClient.get("/api/v1/mcp-servers");
+      setMcpServers(res.data.data || []);
+    } catch {}
+  }, []);
 
   useEffect(() => {
     if (open) {
-      setFormData({
+      setForm({
         name: agent.name,
         description: agent.description || "",
         model: agent.model,
@@ -191,364 +214,373 @@ export function AgentConfigModal({ agent, open, onClose, onUpdate }: AgentConfig
       });
       setErrors({});
       setActiveTab("basic");
+      loadMcp();
     }
-  }, [agent, open]);
+  }, [agent, open, loadMcp]);
 
-  const validateForm = (): boolean => {
-    const newErrors: Record<string, string> = {};
-
-    if (!formData.name.trim()) {
-      newErrors.name = "Agent name is required";
-    }
-
-    if (formData.max_steps < 1 || formData.max_steps > 30) {
-      newErrors.max_steps = "Max steps must be between 1 and 30";
-    }
-
-    setErrors(newErrors);
-    return Object.keys(newErrors).length === 0;
+  const set = (field: string, value: unknown) => {
+    setForm((p) => ({ ...p, [field]: value }));
+    if (errors[field]) setErrors((p) => ({ ...p, [field]: "" }));
   };
 
+  const toggleTool = (key: string) =>
+    setForm((p) => ({ ...p, tools: { ...p.tools, [key]: !p.tools[key] } }));
+
   const handleSave = async () => {
-    if (!validateForm()) return;
+    const errs: Record<string, string> = {};
+    if (!form.name.trim()) errs.name = "Name is required";
+    if (form.max_steps < 1 || form.max_steps > 30) errs.max_steps = "Must be 1–30";
+    if (Object.keys(errs).length) { setErrors(errs); return; }
 
     setSaving(true);
     try {
-      const response = await apiClient.put(`/api/v1/agents/${agent.id}`, {
-        name: formData.name.trim(),
-        description: formData.description.trim() || null,
-        model: formData.model,
-        instructions: formData.instructions.trim() || null,
-        memory_enabled: formData.memory_enabled,
-        max_steps: formData.max_steps,
-        is_active: formData.is_active,
-        webhook_url: formData.webhook_url.trim() || null,
-        tools: formData.tools,
+      const res = await apiClient.put(`/api/v1/agents/${agent.id}`, {
+        name: form.name.trim(),
+        description: form.description.trim() || null,
+        model: form.model,
+        instructions: form.instructions.trim() || null,
+        memory_enabled: form.memory_enabled,
+        max_steps: form.max_steps,
+        is_active: form.is_active,
+        webhook_url: form.webhook_url.trim() || null,
+        tools: form.tools,
       });
-
-      onUpdate(response.data.data);
+      onUpdate(res.data.data);
       onClose();
-    } catch (error) {
-      console.error("Failed to update agent:", error);
-    } finally {
-      setSaving(false);
-    }
+    } catch {}
+    setSaving(false);
   };
 
-  const handleToolToggle = (toolKey: string) => {
-    setFormData(prev => ({
-      ...prev,
-      tools: {
-        ...prev.tools,
-        [toolKey]: !prev.tools[toolKey],
-      },
-    }));
+  const toggleMcp = async (server: MCPServer) => {
+    await apiClient.patch(`/api/v1/mcp-servers/${server.id}`, { is_active: !server.is_active });
+    loadMcp();
   };
 
-  const updateField = (field: string, value: any) => {
-    setFormData(prev => ({ ...prev, [field]: value }));
-    // Clear error when user starts typing
-    if (errors[field]) {
-      setErrors(prev => ({ ...prev, [field]: "" }));
-    }
+  const deleteMcp = async (id: string) => {
+    if (!confirm("Remove this MCP server?")) return;
+    await apiClient.delete(`/api/v1/mcp-servers/${id}`);
+    loadMcp();
   };
 
-  const groupedTools = TOOLS.reduce((acc, tool) => {
-    if (!acc[tool.category]) acc[tool.category] = [];
-    acc[tool.category].push(tool);
-    return acc;
-  }, {} as Record<string, ToolConfig[]>);
+  const discoverTools = async (id: string) => {
+    setLoadingMcpId(id);
+    try {
+      const res = await apiClient.get(`/api/v1/mcp-servers/${id}/tools`);
+      setMcpTools((t) => ({ ...t, [id]: res.data.data || [] }));
+    } catch {}
+    setLoadingMcpId(null);
+  };
 
-  const enabledToolsCount = Object.values(formData.tools).filter(Boolean).length;
+  const enabledCount   = Object.values(form.tools).filter(Boolean).length;
+  const activeMcpCount = mcpServers.filter((s) => s.is_active).length;
+  const groupedTools   = TOOLS.reduce<Record<string, ToolConfig[]>>((acc, t) => {
+    (acc[t.category] ??= []).push(t); return acc;
+  }, {});
 
   return (
     <Dialog open={open} onOpenChange={onClose}>
-      <DialogContent className="max-w-4xl max-h-[90vh] overflow-hidden flex flex-col">
-        <DialogHeader>
-          <DialogTitle className="flex items-center gap-2">
-            <Settings className="h-5 w-5" />
-            Configure Agent
+      <DialogContent className="max-w-2xl w-full max-h-[90vh] flex flex-col p-0 gap-0 overflow-hidden">
+        {/* Header */}
+        <DialogHeader className="px-5 pt-5 pb-0 shrink-0">
+          <DialogTitle className="flex items-center gap-2 text-base">
+            <Settings className="h-4 w-4" />
+            Configure — <span className="text-muted-foreground font-normal truncate max-w-[200px]">{form.name}</span>
           </DialogTitle>
-          <DialogDescription>
-            Modify your agent&apos;s settings, tools, and behavior
-          </DialogDescription>
         </DialogHeader>
 
-        <Tabs value={activeTab} onValueChange={setActiveTab} className="flex-1 overflow-hidden">
-          <TabsList className="grid grid-cols-4 w-full">
-            <TabsTrigger value="basic">Basic</TabsTrigger>
-            <TabsTrigger value="model">Model</TabsTrigger>
-            <TabsTrigger value="tools">
-              Tools {enabledToolsCount > 0 && (
-                <Badge variant="secondary" className="ml-1 h-4 px-1 text-xs">
-                  {enabledToolsCount}
-                </Badge>
-              )}
-            </TabsTrigger>
-            <TabsTrigger value="advanced">Advanced</TabsTrigger>
-          </TabsList>
+        {/* Tabs */}
+        <Tabs value={activeTab} onValueChange={setActiveTab} className="flex flex-col flex-1 overflow-hidden mt-4">
+          <div className="px-5 shrink-0">
+            <TabsList className="w-full h-9 gap-0.5 bg-muted p-1 rounded-lg overflow-x-auto flex">
+              <TabsTrigger value="basic"    className="flex-1 text-xs h-7 rounded-md data-[state=active]:bg-background data-[state=active]:shadow-sm">
+                <Settings className="h-3.5 w-3.5 mr-1 shrink-0" />Basic
+              </TabsTrigger>
+              <TabsTrigger value="model"   className="flex-1 text-xs h-7 rounded-md data-[state=active]:bg-background data-[state=active]:shadow-sm">
+                <Brain className="h-3.5 w-3.5 mr-1 shrink-0" />Model
+              </TabsTrigger>
+              <TabsTrigger value="tools"   className="flex-1 text-xs h-7 rounded-md data-[state=active]:bg-background data-[state=active]:shadow-sm">
+                <Zap className="h-3.5 w-3.5 mr-1 shrink-0" />Tools
+                {enabledCount > 0 && <Badge className="ml-1 h-4 px-1 text-[9px]">{enabledCount}</Badge>}
+              </TabsTrigger>
+              <TabsTrigger value="mcp"     className="flex-1 text-xs h-7 rounded-md data-[state=active]:bg-background data-[state=active]:shadow-sm">
+                <Plug className="h-3.5 w-3.5 mr-1 shrink-0" />MCP
+                {activeMcpCount > 0 && <Badge className="ml-1 h-4 px-1 text-[9px] bg-emerald-500">{activeMcpCount}</Badge>}
+              </TabsTrigger>
+              <TabsTrigger value="advanced" className="flex-1 text-xs h-7 rounded-md data-[state=active]:bg-background data-[state=active]:shadow-sm">
+                <Webhook className="h-3.5 w-3.5 mr-1 shrink-0" />
+                <span className="hidden sm:inline">Advanced</span>
+                <span className="sm:hidden">Adv</span>
+              </TabsTrigger>
+            </TabsList>
+          </div>
 
-          <div className="flex-1 overflow-y-auto mt-4">
-            <TabsContent value="basic" className="space-y-6 mt-0">
-              <div className="space-y-4">
-                <div className="space-y-2">
-                  <Label htmlFor="name">Name *</Label>
+          {/* Tab bodies — scrollable */}
+          <div className="flex-1 overflow-y-auto px-5 py-4 min-h-0">
+
+            {/* ── Basic ─────────────────────────────────────────────────────── */}
+            <TabsContent value="basic" className="mt-0 space-y-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div className="space-y-1.5">
+                  <Label className="text-xs">Name <span className="text-destructive">*</span></Label>
                   <Input
-                    id="name"
-                    value={formData.name}
-                    onChange={(e) => updateField("name", e.target.value)}
-                    placeholder="Enter agent name"
-                    className={errors.name ? "border-red-500" : ""}
+                    value={form.name}
+                    onChange={(e) => set("name", e.target.value)}
+                    placeholder="e.g. Support Agent"
+                    className={`text-sm ${errors.name ? "border-destructive" : ""}`}
                   />
-                  {errors.name && (
-                    <p className="text-sm text-red-500">{errors.name}</p>
-                  )}
+                  {errors.name && <p className="text-xs text-destructive">{errors.name}</p>}
                 </div>
-
-                <div className="space-y-2">
-                  <Label htmlFor="description">Description</Label>
-                  <Textarea
-                    id="description"
-                    value={formData.description}
-                    onChange={(e) => updateField("description", e.target.value)}
-                    placeholder="Describe what this agent does"
-                    className="min-h-[100px]"
-                  />
+                <div className="space-y-1.5">
+                  <Label className="text-xs">Status</Label>
+                  <div className={`flex h-9 items-center justify-between rounded-lg border px-3 ${form.is_active ? "border-emerald-200 bg-emerald-50/50" : ""}`}>
+                    <span className={`text-xs font-medium ${form.is_active ? "text-emerald-700" : "text-muted-foreground"}`}>
+                      {form.is_active ? "Active" : "Inactive"}
+                    </span>
+                    <Switch checked={form.is_active} onCheckedChange={(v) => set("is_active", v)} />
+                  </div>
                 </div>
+              </div>
 
-                <div className="space-y-2">
-                  <Label htmlFor="instructions">Instructions</Label>
-                  <Textarea
-                    id="instructions"
-                    value={formData.instructions}
-                    onChange={(e) => updateField("instructions", e.target.value)}
-                    placeholder="Define how the agent should behave"
-                    className="min-h-[200px] font-mono text-sm"
-                  />
-                  <p className="text-xs text-muted-foreground">
-                    Specify how the agent should use its tools and respond to users
+              <div className="space-y-1.5">
+                <Label className="text-xs">Description</Label>
+                <Textarea
+                  value={form.description}
+                  onChange={(e) => set("description", e.target.value)}
+                  placeholder="What does this agent do?"
+                  rows={2}
+                  className="text-sm resize-none"
+                />
+              </div>
+
+              <div className="space-y-1.5">
+                <Label className="text-xs">System Instructions</Label>
+                <Textarea
+                  value={form.instructions}
+                  onChange={(e) => set("instructions", e.target.value)}
+                  placeholder="You are a helpful assistant. Use the web_search tool when asked about current events..."
+                  rows={9}
+                  className="text-xs font-mono resize-none"
+                />
+                <p className="text-[11px] text-muted-foreground">
+                  Define the agent's persona, goals, and how it should use its tools.
+                </p>
+              </div>
+            </TabsContent>
+
+            {/* ── Model ─────────────────────────────────────────────────────── */}
+            <TabsContent value="model" className="mt-0 space-y-4">
+              <div className="space-y-1.5">
+                <Label className="text-xs">AI Model</Label>
+                <Select value={form.model} onValueChange={(v) => set("model", v)}>
+                  <SelectTrigger className="text-sm">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {MODELS.map((m) => (
+                      <SelectItem key={m.value} value={m.value} className="text-sm">
+                        {m.label}
+                        {m.note && <Badge variant="outline" className="ml-2 text-[10px] px-1 py-0">{m.note}</Badge>}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="space-y-2">
+                {MODELS.map((m) => (
+                  <button
+                    key={m.value}
+                    type="button"
+                    onClick={() => set("model", m.value)}
+                    className={`w-full flex items-center justify-between rounded-xl border px-4 py-3 text-left transition-colors ${
+                      form.model === m.value ? "border-primary bg-primary/5" : "hover:bg-muted/40"
+                    }`}
+                  >
+                    <div>
+                      <p className={`text-sm font-medium ${form.model === m.value ? "text-primary" : ""}`}>{m.label}</p>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      {m.note && <Badge variant="outline" className="text-[10px] px-1.5">{m.note}</Badge>}
+                      <div className={`h-4 w-4 rounded-full border-2 flex items-center justify-center ${
+                        form.model === m.value ? "border-primary bg-primary" : "border-muted-foreground/30"
+                      }`}>
+                        {form.model === m.value && <Check className="h-2.5 w-2.5 text-white" />}
+                      </div>
+                    </div>
+                  </button>
+                ))}
+              </div>
+
+              <div className="flex items-center justify-between rounded-xl border p-3.5">
+                <div>
+                  <p className="text-sm font-medium">Max Steps</p>
+                  <p className="text-xs text-muted-foreground">Tool-use iterations per run (1–30)</p>
+                </div>
+                <Input
+                  type="number" min={1} max={30}
+                  value={form.max_steps}
+                  onChange={(e) => set("max_steps", Math.max(1, Math.min(30, parseInt(e.target.value) || 1)))}
+                  className={`w-20 text-sm text-center ${errors.max_steps ? "border-destructive" : ""}`}
+                />
+              </div>
+
+              <div className="flex items-center justify-between rounded-xl border p-3.5">
+                <div>
+                  <p className="text-sm font-medium">Persistent Memory</p>
+                  <p className="text-xs text-muted-foreground">Remember context across conversations</p>
+                </div>
+                <Switch checked={form.memory_enabled} onCheckedChange={(v) => set("memory_enabled", v)} />
+              </div>
+            </TabsContent>
+
+            {/* ── Tools ─────────────────────────────────────────────────────── */}
+            <TabsContent value="tools" className="mt-0 space-y-4">
+              {enabledCount === 0 && (
+                <div className="flex items-center gap-2 rounded-lg bg-amber-50 border border-amber-200 px-3 py-2.5 text-xs text-amber-700 dark:bg-amber-950/20 dark:border-amber-900 dark:text-amber-400">
+                  <AlertCircle className="h-3.5 w-3.5 shrink-0" />
+                  No tools enabled — agent will rely on its knowledge only.
+                </div>
+              )}
+              {Object.entries(groupedTools).map(([cat, tools]) => (
+                <div key={cat}>
+                  <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-2">
+                    {CATEGORY_LABELS[cat]}
+                  </p>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    {tools.map((tool) => {
+                      const Icon = tool.icon;
+                      const on = !!form.tools[tool.key];
+                      return (
+                        <button
+                          key={tool.key}
+                          type="button"
+                          onClick={() => toggleTool(tool.key)}
+                          className={`flex items-center gap-2.5 rounded-xl border p-3 text-left transition-all ${
+                            on ? "border-primary/50 bg-primary/5" : "hover:border-muted-foreground/30 hover:bg-muted/30"
+                          }`}
+                        >
+                          <Icon className={`h-4 w-4 shrink-0 ${on ? "text-primary" : "text-muted-foreground"}`} />
+                          <div className="flex-1 min-w-0">
+                            <p className={`text-xs font-medium leading-tight ${on ? "text-primary" : ""}`}>{tool.label}</p>
+                            <p className="text-[10px] text-muted-foreground mt-0.5 leading-snug truncate">{tool.description}</p>
+                          </div>
+                          <div className={`h-4 w-4 shrink-0 rounded-full border-2 flex items-center justify-center ${
+                            on ? "border-primary bg-primary" : "border-muted-foreground/30"
+                          }`}>
+                            {on && <Check className="h-2.5 w-2.5 text-white" />}
+                          </div>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              ))}
+            </TabsContent>
+
+            {/* ── MCP ───────────────────────────────────────────────────────── */}
+            <TabsContent value="mcp" className="mt-0 space-y-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm font-medium">MCP Servers</p>
+                  <p className="text-[11px] text-muted-foreground mt-0.5">
+                    Active servers are automatically available to all agents
                   </p>
                 </div>
+                <Link href="/dashboard/settings/mcp" onClick={onClose}>
+                  <Button variant="outline" size="sm" className="text-xs h-7">
+                    <Plus className="h-3 w-3 mr-1" />Add
+                    <ExternalLink className="h-2.5 w-2.5 ml-1 opacity-60" />
+                  </Button>
+                </Link>
               </div>
-            </TabsContent>
 
-            <TabsContent value="model" className="space-y-6 mt-0">
-              <div className="space-y-4">
-                <div className="space-y-2">
-                  <Label>AI Model</Label>
-                  <Select value={formData.model} onValueChange={(value) => updateField("model", value)}>
-                    <SelectTrigger>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {MODELS.map((model) => (
-                        <SelectItem key={model.value} value={model.value}>
-                          <div className="flex items-center gap-2">
-                            <span>{model.label}</span>
-                            {model.recommended && (
-                              <Badge variant="secondary" className="text-xs">Recommended</Badge>
-                            )}
-                          </div>
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                  {MODELS.find(m => m.value === formData.model)?.description && (
-                    <p className="text-xs text-muted-foreground">
-                      {MODELS.find(m => m.value === formData.model)?.description}
+              {mcpServers.length === 0 ? (
+                <div className="flex flex-col items-center justify-center rounded-xl border border-dashed py-10 gap-3 text-center">
+                  <div className="flex h-10 w-10 items-center justify-center rounded-full bg-muted">
+                    <Globe className="h-4 w-4 text-muted-foreground" />
+                  </div>
+                  <div>
+                    <p className="text-sm font-medium">No MCP servers configured</p>
+                    <p className="text-xs text-muted-foreground mt-1 max-w-[220px]">
+                      Connect external tool servers to extend agent capabilities
                     </p>
-                  )}
+                  </div>
+                  <Link href="/dashboard/settings/mcp" onClick={onClose}>
+                    <Button size="sm" variant="outline" className="text-xs">
+                      <Plus className="h-3 w-3 mr-1" />Connect MCP Server
+                    </Button>
+                  </Link>
                 </div>
-
-                <Card>
-                  <CardHeader>
-                    <CardTitle className="text-sm">Model Comparison</CardTitle>
-                  </CardHeader>
-                  <CardContent className="space-y-3">
-                    {MODELS.map((model) => (
-                      <div
-                        key={model.value}
-                        className={`flex items-center justify-between p-2 rounded-lg border ${
-                          formData.model === model.value ? "border-blue-500 bg-blue-50" : ""
-                        }`}
-                      >
-                        <div>
-                          <p className="font-medium text-sm">{model.label}</p>
-                          <p className="text-xs text-muted-foreground">{model.description}</p>
-                        </div>
-                        {model.recommended && (
-                          <Badge variant="secondary">Recommended</Badge>
-                        )}
-                      </div>
-                    ))}
-                  </CardContent>
-                </Card>
-              </div>
-            </TabsContent>
-
-            <TabsContent value="tools" className="space-y-6 mt-0">
-              {Object.entries(groupedTools).map(([category, tools]) => (
-                <Card key={category}>
-                  <CardHeader>
-                    <CardTitle className="text-sm capitalize flex items-center gap-2">
-                      {category === "research" && <Globe className="h-4 w-4" />}
-                      {category === "compute" && <Code2 className="h-4 w-4" />}
-                      {category === "integration" && <Link2 className="h-4 w-4" />}
-                      {category === "communication" && <Mail className="h-4 w-4" />}
-                      {category === "meta" && <Bot className="h-4 w-4" />}
-                      {category} Tools
-                    </CardTitle>
-                  </CardHeader>
-                  <CardContent className="space-y-3">
-                    {tools.map((tool) => (
-                      <div
-                        key={tool.key}
-                        className="flex items-center justify-between p-3 rounded-lg border hover:bg-muted/50 transition-colors"
-                      >
-                        <div className="flex items-center gap-3">
-                          <tool.icon className="h-5 w-5 text-muted-foreground" />
-                          <div>
-                            <p className="font-medium text-sm">{tool.label}</p>
-                            <p className="text-xs text-muted-foreground">{tool.description}</p>
-                          </div>
-                        </div>
-                        <Switch
-                          checked={formData.tools[tool.key] || false}
-                          onCheckedChange={() => handleToolToggle(tool.key)}
-                        />
-                      </div>
-                    ))}
-                  </CardContent>
-                </Card>
-              ))}
-              
-              {enabledToolsCount === 0 && (
-                <Card className="border-amber-200 bg-amber-50">
-                  <CardContent className="pt-6">
-                    <p className="text-center text-amber-800">
-                      No tools enabled. Agent will only use its knowledge and instructions.
-                    </p>
-                  </CardContent>
-                </Card>
+              ) : (
+                <div className="space-y-2">
+                  <div className="flex items-center gap-1.5 rounded-lg bg-muted/50 px-3 py-2 text-[11px] text-muted-foreground">
+                    <AlertCircle className="h-3 w-3 shrink-0" />
+                    Toggle servers on/off — active ones inject tools into this agent automatically.
+                  </div>
+                  {mcpServers.map((s) => (
+                    <MCPCard
+                      key={s.id}
+                      server={s}
+                      tools={mcpTools[s.id]}
+                      loadingTools={loadingMcpId === s.id}
+                      onToggle={() => toggleMcp(s)}
+                      onDelete={() => deleteMcp(s.id)}
+                      onDiscover={() => discoverTools(s.id)}
+                    />
+                  ))}
+                  <p className="text-[11px] text-muted-foreground text-center pt-1">
+                    {activeMcpCount} of {mcpServers.length} server{mcpServers.length !== 1 ? "s" : ""} active
+                  </p>
+                </div>
               )}
             </TabsContent>
 
-            <TabsContent value="advanced" className="space-y-6 mt-0">
-              <div className="space-y-6">
-                <Card>
-                  <CardHeader>
-                    <CardTitle className="text-sm flex items-center gap-2">
-                      <Zap className="h-4 w-4" />
-                      Execution Settings
-                    </CardTitle>
-                  </CardHeader>
-                  <CardContent className="space-y-4">
-                    <div className="space-y-2">
-                      <Label htmlFor="max_steps">Maximum Steps (1-30)</Label>
-                      <Input
-                        id="max_steps"
-                        type="number"
-                        min={1}
-                        max={30}
-                        value={formData.max_steps}
-                        onChange={(e) => updateField("max_steps", parseInt(e.target.value) || 1)}
-                        className={errors.max_steps ? "border-red-500" : ""}
-                      />
-                      {errors.max_steps && (
-                        <p className="text-sm text-red-500">{errors.max_steps}</p>
-                      )}
-                      <p className="text-xs text-muted-foreground">
-                        Limits how many tool calls the agent can make in one conversation
-                      </p>
-                    </div>
+            {/* ── Advanced ──────────────────────────────────────────────────── */}
+            <TabsContent value="advanced" className="mt-0 space-y-4">
+              <div className="space-y-1.5">
+                <Label className="text-xs">Webhook URL</Label>
+                <Input
+                  value={form.webhook_url}
+                  onChange={(e) => set("webhook_url", e.target.value)}
+                  placeholder="https://your-server.com/agent-webhook"
+                  type="url"
+                  className="text-xs font-mono"
+                />
+                <p className="text-[11px] text-muted-foreground">
+                  Receive a POST after each run completes. Payload includes the full transcript.
+                </p>
+              </div>
 
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <p className="font-medium text-sm">Active Status</p>
-                        <p className="text-xs text-muted-foreground">
-                          {formData.is_active ? "Agent can accept requests" : "Agent is paused"}
-                        </p>
-                      </div>
-                      <Switch
-                        checked={formData.is_active}
-                        onCheckedChange={(checked) => updateField("is_active", checked)}
-                      />
-                    </div>
-                  </CardContent>
-                </Card>
-
-                <Card>
-                  <CardHeader>
-                    <CardTitle className="text-sm flex items-center gap-2">
-                      <Brain className="h-4 w-4" />
-                      Memory Settings
-                    </CardTitle>
-                  </CardHeader>
-                  <CardContent>
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <p className="font-medium text-sm">Persistent Memory</p>
-                        <p className="text-xs text-muted-foreground">
-                          {formData.memory_enabled 
-                            ? "Agent remembers context across conversations" 
-                            : "Each conversation starts fresh"
-                          }
-                        </p>
-                      </div>
-                      <Switch
-                        checked={formData.memory_enabled}
-                        onCheckedChange={(checked) => updateField("memory_enabled", checked)}
-                      />
-                    </div>
-                  </CardContent>
-                </Card>
-
-                <Card>
-                  <CardHeader>
-                    <CardTitle className="text-sm flex items-center gap-2">
-                      <Database className="h-4 w-4" />
-                      Integration Settings
-                    </CardTitle>
-                  </CardHeader>
-                  <CardContent className="space-y-4">
-                    <div className="space-y-2">
-                      <Label htmlFor="webhook_url">Webhook URL</Label>
-                      <Input
-                        id="webhook_url"
-                        value={formData.webhook_url}
-                        onChange={(e) => updateField("webhook_url", e.target.value)}
-                        placeholder="https://your-server.com/webhook"
-                      />
-                      <p className="text-xs text-muted-foreground">
-                        Receive POST notifications after each agent run
-                      </p>
-                    </div>
-                  </CardContent>
-                </Card>
+              <div className="rounded-xl border border-destructive/30 bg-destructive/5 p-4 space-y-2">
+                <p className="text-sm font-medium text-destructive">Danger Zone</p>
+                <p className="text-xs text-muted-foreground">This action is permanent and cannot be undone.</p>
+                <Button
+                  variant="destructive" size="sm"
+                  onClick={async () => {
+                    if (!confirm("Delete this agent? This cannot be undone.")) return;
+                    await apiClient.delete(`/api/v1/agents/${agent.id}`);
+                    onClose();
+                    window.location.href = "/dashboard/agents";
+                  }}
+                >
+                  <Trash2 className="h-3.5 w-3.5 mr-1.5" />Delete Agent
+                </Button>
               </div>
             </TabsContent>
           </div>
-        </Tabs>
 
-        <div className="flex justify-between items-center pt-4 border-t">
-          <Button variant="outline" onClick={onClose} disabled={saving}>
-            <X className="h-4 w-4 mr-2" />
-            Cancel
-          </Button>
-          <Button onClick={handleSave} disabled={saving}>
-            {saving ? (
-              <>
-                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                Saving...
-              </>
-            ) : (
-              <>
-                <Check className="h-4 w-4 mr-2" />
-                Save Changes
-              </>
-            )}
-          </Button>
-        </div>
+          {/* Footer */}
+          <div className="shrink-0 flex items-center justify-between border-t px-5 py-3 bg-background">
+            <Button variant="outline" size="sm" onClick={onClose} disabled={saving}>
+              Cancel
+            </Button>
+            <Button size="sm" onClick={handleSave} disabled={saving} className="min-w-[100px]">
+              {saving
+                ? <><Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />Saving…</>
+                : <><Check className="h-3.5 w-3.5 mr-1.5" />Save Changes</>}
+            </Button>
+          </div>
+        </Tabs>
       </DialogContent>
     </Dialog>
   );

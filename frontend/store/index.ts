@@ -9,6 +9,7 @@ export interface AuthUser {
   role: UserRole;
   avatarUrl: string | null;
   accessToken: string;
+  allowedFeatures: string[] | null;
 }
 
 export interface AgencyTheme {

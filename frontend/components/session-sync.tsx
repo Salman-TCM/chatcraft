@@ -21,6 +21,7 @@ export function SessionSync() {
         role: session.user.role as UserRole,
         avatarUrl: session.user.image ?? null,
         accessToken: session.user.accessToken,
+        allowedFeatures: session.user.allowedFeatures ?? null,
       });
     } else {
       clearAuth();
