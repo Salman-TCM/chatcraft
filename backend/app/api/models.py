@@ -27,6 +27,9 @@ _PROVIDER_META = [
         "provider": "anthropic",
         "label": "Anthropic",
         "models": [
+            {"id": "claude-sonnet-5", "name": "Claude Sonnet 5"},
+            {"id": "claude-opus-4-8", "name": "Claude Opus 4.8"},
+            {"id": "claude-fable-5", "name": "Claude Fable 5"},
             {"id": "claude-sonnet-4-6", "name": "Claude Sonnet 4.6"},
             {"id": "claude-opus-4-7", "name": "Claude Opus 4.7"},
             {"id": "claude-haiku-4-5", "name": "Claude Haiku 4.5"},
@@ -36,6 +39,9 @@ _PROVIDER_META = [
         "provider": "openai",
         "label": "OpenAI",
         "models": [
+            {"id": "gpt-5.6-sol", "name": "GPT-5.6 Sol"},
+            {"id": "gpt-5.6-terra", "name": "GPT-5.6 Terra"},
+            {"id": "gpt-5.6-luna", "name": "GPT-5.6 Luna"},
             {"id": "gpt-4o", "name": "GPT-4o"},
             {"id": "gpt-4o-mini", "name": "GPT-4o Mini"},
             {"id": "gpt-5", "name": "GPT-5"},
@@ -46,6 +52,8 @@ _PROVIDER_META = [
         "provider": "google",
         "label": "Google Gemini",
         "models": [
+            {"id": "gemini-3.1-pro", "name": "Gemini 3.1 Pro"},
+            {"id": "gemini-3.6-flash", "name": "Gemini 3.6 Flash"},
             {"id": "gemini-2.5-pro", "name": "Gemini 2.5 Pro"},
             {"id": "gemini-2.5-flash", "name": "Gemini 2.5 Flash"},
             {"id": "gemini-2.0-flash", "name": "Gemini 2.0 Flash"},
@@ -57,17 +65,19 @@ _PROVIDER_META = [
         "provider": "groq",
         "label": "Groq",
         "models": [
+            {"id": "openai/gpt-oss-120b", "name": "GPT-OSS 120B"},
+            {"id": "openai/gpt-oss-20b", "name": "GPT-OSS 20B"},
+            {"id": "qwen/qwen3.6-27b", "name": "Qwen 3.6 27B"},
             {"id": "llama-3.3-70b-versatile", "name": "Llama 3.3 70B"},
             {"id": "llama-3.1-8b-instant", "name": "Llama 3.1 8B Instant"},
-            {"id": "mixtral-8x7b-32768", "name": "Mixtral 8x7B"},
         ],
     },
     {
         "provider": "deepseek",
         "label": "DeepSeek",
         "models": [
-            {"id": "deepseek-chat", "name": "DeepSeek Chat"},
-            {"id": "deepseek-reasoner", "name": "DeepSeek Reasoner"},
+            {"id": "deepseek-v4-pro", "name": "DeepSeek V4 Pro"},
+            {"id": "deepseek-v4-flash", "name": "DeepSeek V4 Flash"},
         ],
     },
     {
@@ -76,13 +86,16 @@ _PROVIDER_META = [
         "models": [
             {"id": "sonar-pro", "name": "Sonar Pro"},
             {"id": "sonar", "name": "Sonar"},
-            {"id": "sonar-reasoning", "name": "Sonar Reasoning"},
+            {"id": "sonar-reasoning-pro", "name": "Sonar Reasoning Pro"},
+            {"id": "sonar-deep-research", "name": "Sonar Deep Research"},
         ],
     },
     {
         "provider": "xai",
         "label": "xAI (Grok)",
         "models": [
+            {"id": "grok-4.5", "name": "Grok 4.5"},
+            {"id": "grok-4.3", "name": "Grok 4.3"},
             {"id": "grok-3", "name": "Grok 3"},
             {"id": "grok-3-fast", "name": "Grok 3 Fast"},
             {"id": "grok-3-mini", "name": "Grok 3 Mini"},
