@@ -13,11 +13,17 @@ from app.services.llm.providers.openai import OpenAIProvider
 from app.services.llm.providers.openai_compat import OpenAICompatProvider
 
 _ANTHROPIC_MODELS = {
+    "claude-opus-4-8",
     "claude-opus-4-7",
+    "claude-sonnet-5",
     "claude-sonnet-4-6",
     "claude-haiku-4-5",
+    "claude-fable-5",
 }
 _OPENAI_MODELS = {
+    "gpt-5.6-sol",
+    "gpt-5.6-terra",
+    "gpt-5.6-luna",
     "gpt-4o",
     "gpt-4o-mini",
     "gpt-5",
@@ -29,12 +35,19 @@ _GEMINI_MODELS = {
     "gemini-2.0-flash",
     "gemini-2.5-pro",
     "gemini-2.5-flash",
+    "gemini-3.1-pro",
+    "gemini-3.6-flash",
 }
 _DEEPSEEK_MODELS = {
+    "deepseek-v4-flash",
+    "deepseek-v4-pro",
     "deepseek-chat",
     "deepseek-reasoner",
 }
 _GROQ_MODELS = {
+    "openai/gpt-oss-120b",
+    "openai/gpt-oss-20b",
+    "qwen/qwen3.6-27b",
     "llama-3.3-70b-versatile",
     "llama-3.1-8b-instant",
     "mixtral-8x7b-32768",
@@ -42,9 +55,13 @@ _GROQ_MODELS = {
 _PERPLEXITY_MODELS = {
     "sonar",
     "sonar-pro",
+    "sonar-reasoning-pro",
+    "sonar-deep-research",
     "sonar-reasoning",
 }
 _XAI_MODELS = {
+    "grok-4.5",
+    "grok-4.3",
     "grok-3",
     "grok-3-fast",
     "grok-3-mini",
