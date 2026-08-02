@@ -12,6 +12,7 @@ services:
 
   backend:
     volumes: []                             # no source-mount; run built image
+    ports: []                               # reached via internal network only (frontend proxy)
     environment:
       ENVIRONMENT: staging
       DEBUG: "false"
@@ -47,6 +48,7 @@ services:
 
   frontend:
     volumes: []
+    ports: []                               # reached via cloudflared over internal network only
     command: sh -c "cd frontend && npm run start"   # run built Next.js, not dev server
     environment:
       NODE_ENV: production
@@ -57,6 +59,7 @@ services:
           memory: 512M
 
   postgres:
+    ports: []                               # no host access needed; internal network only
     deploy:
       resources:
         limits:
@@ -64,11 +67,15 @@ services:
           memory: 512M
 
   redis:
+    ports: []                               # no host access needed; internal network only
     deploy:
       resources:
         limits:
           cpus: "0.25"
           memory: 128M
+
+  clamav:
+    ports: []                               # only used internally by backend
 
   # ---------------------------------------------------------------------------
   # Cloudflare Tunnel — exposes the frontend at tiertech.com.bd with no
