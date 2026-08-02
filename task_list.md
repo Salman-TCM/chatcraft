@@ -980,7 +980,7 @@
 - [x] Perplexity provider integration
 - [x] xAI Grok provider (text + image generation)
 - [x] GPT-5 / GPT-5 Mini support (GPT-5 Nano not yet released)
-- [ ] Gemini 3.x Pro/Flash support (not yet released)
+- [x] Gemini 3.x Pro/Flash support (gemini-3.1-pro GA, gemini-3.6-flash GA — released since this list was written)
 - [x] Claude Opus 4.7 / Haiku 4.5 complete support
 - [x] AI image generation (`/image` slash command — xAI Aurora / DALL-E 3)
 - [x] AI video generation (`/video` slash command — Google Veo 2 long-running operation)
