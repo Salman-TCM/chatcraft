@@ -69,3 +69,17 @@ services:
         limits:
           cpus: "0.25"
           memory: 128M
+
+  # ---------------------------------------------------------------------------
+  # Cloudflare Tunnel — exposes the frontend at tiertech.com.bd with no
+  # inbound ports opened on the host. Public hostname -> service mapping is
+  # configured in the Cloudflare Zero Trust dashboard (dashboard/token-based
+  # tunnel), not here.
+  # ---------------------------------------------------------------------------
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    restart: unless-stopped
+    command: tunnel --no-autoupdate run --token ${CLOUDFLARE_TUNNEL_TOKEN}
+    depends_on:
+      frontend:
+        condition: service_healthy
