@@ -6,6 +6,7 @@ import { Hero } from "@/components/marketing/hero";
 import { FeatureGrid } from "@/components/marketing/feature-grid";
 import { HowItWorks } from "@/components/marketing/how-it-works";
 import { Callout } from "@/components/marketing/callout";
+import { Integration } from "@/components/marketing/integration";
 import { Faq } from "@/components/marketing/faq";
 import { CtaBanner } from "@/components/marketing/cta-banner";
 import { Footer } from "@/components/marketing/footer";
@@ -17,6 +18,7 @@ export default function HomePage() {
     <div className="min-h-screen bg-background">
       <Nav />
       <Hero />
+      <Integration />
 
       <FeatureGrid
         id="features"

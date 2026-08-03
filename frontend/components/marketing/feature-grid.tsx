@@ -32,7 +32,7 @@ export function FeatureGrid({
       <div className="mx-auto max-w-6xl px-6">
         <div className="mx-auto max-w-2xl text-center">
           {eyebrow && (
-            <div className="mx-auto mb-4 inline-flex items-center gap-2 rounded-full border bg-background px-3 py-1 text-xs font-semibold uppercase tracking-wide text-emerald-600">
+            <div className="mx-auto mb-4 inline-flex items-center gap-2 border border-emerald-500/30 px-2.5 py-1 font-mono text-[11px] uppercase tracking-wider text-emerald-600">
               <span className="flex h-1.5 w-1.5 rounded-full bg-emerald-500" />
               {eyebrow}
             </div>
@@ -42,7 +42,7 @@ export function FeatureGrid({
         </div>
 
         <div className="mt-14 grid gap-px overflow-hidden rounded-xl border sm:grid-cols-2 lg:grid-cols-3">
-          {items.map((f) => (
+          {items.map((f, i) => (
             <Card
               key={f.title}
               className={cn(
@@ -50,7 +50,12 @@ export function FeatureGrid({
                 cardClassName
               )}
             >
-              <f.icon className="h-5 w-5 text-primary" strokeWidth={1.75} />
+              <div className="flex items-start justify-between">
+                <f.icon className="h-5 w-5 text-primary" strokeWidth={1.75} />
+                <span className="font-mono text-xs text-muted-foreground/50">
+                  {String(i + 1).padStart(2, "0")}
+                </span>
+              </div>
               <h3 className="mt-4 font-semibold">{f.title}</h3>
               <p className="mt-2 text-sm text-muted-foreground">{f.desc}</p>
             </Card>
