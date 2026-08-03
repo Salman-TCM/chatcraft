@@ -2,6 +2,7 @@
 
 import Image from "next/image";
 import { cn } from "@/lib/utils";
+import { APP_NAME } from "@/lib/constants";
 
 interface LogoProps {
   logoUrl?: string | null;
@@ -12,41 +13,43 @@ interface LogoProps {
 }
 
 const SIZES = {
-  sm: { image: 24, box: "h-6 w-6", text: "text-sm", wordmark: "text-sm" },
-  md: { image: 28, box: "h-7 w-7", text: "text-base", wordmark: "text-base" },
-  lg: { image: 36, box: "h-9 w-9", text: "text-lg", wordmark: "text-xl" },
+  sm: { icon: "h-5 w-5", wordmark: "text-sm" },
+  md: { icon: "h-6 w-6", wordmark: "text-base" },
+  lg: { icon: "h-7 w-7", wordmark: "text-xl" },
 } as const;
 
-export function Logo({ logoUrl, name = "ChatCraft AI", size = "md", iconOnly, className }: LogoProps) {
+export function Logo({ logoUrl, name = APP_NAME, size = "md", iconOnly, className }: LogoProps) {
   const dims = SIZES[size];
 
   if (logoUrl) {
+    const imageHeight = { sm: 24, md: 28, lg: 36 }[size];
     return (
       <Image
         src={logoUrl}
         alt={name}
-        height={dims.image}
-        width={dims.image * 4}
+        height={imageHeight}
+        width={imageHeight * 4}
         className={cn("object-contain", className)}
-        style={{ height: dims.image, width: "auto" }}
+        style={{ height: imageHeight, width: "auto" }}
       />
     );
   }
 
   return (
     <span className={cn("flex items-center gap-2", className)}>
-      <span
-        className={cn(
-          "flex items-center justify-center shrink-0 rounded-lg bg-gradient-brand font-bold text-primary-foreground",
-          dims.box,
-          dims.text
-        )}
-      >
-        {name[0]}
-      </span>
+      <LogoMark className={cn("shrink-0 text-primary", dims.icon)} />
       {!iconOnly && (
         <span className={cn("truncate font-semibold tracking-tight", dims.wordmark)}>{name}</span>
       )}
     </span>
+  );
+}
+
+function LogoMark({ className }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" className={className} aria-hidden="true">
+      <rect x="2.25" y="3.25" width="19.5" height="13.5" rx="3.75" fill="currentColor" />
+      <path d="M6.75 16.75v3.75c0 .5.57.78.96.48l4.79-4.23H6.75Z" fill="currentColor" />
+    </svg>
   );
 }

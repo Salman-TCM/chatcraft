@@ -1,6 +1,6 @@
 self.addEventListener("push", (event) => {
   const data = event.data ? event.data.json() : {};
-  const title = data.title || "ChatCraft AI";
+  const title = data.title || "Tiertech";
   const options = {
     body: data.body || "You have a new notification",
     icon: "/favicon.ico",

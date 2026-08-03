@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { Download, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { APP_NAME } from "@/lib/constants";
 
 interface BeforeInstallPromptEvent extends Event {
   prompt(): Promise<void>;
@@ -51,7 +52,7 @@ export function PwaRegister() {
     <div className="fixed bottom-4 left-1/2 z-50 -translate-x-1/2 flex items-center gap-3 rounded-xl border bg-background px-4 py-3 shadow-lg max-w-sm w-[calc(100%-2rem)]">
       <Download className="h-4 w-4 shrink-0 text-primary" />
       <p className="flex-1 text-sm">
-        Install <span className="font-semibold">ChatCraft AI</span> for quick access
+        Install <span className="font-semibold">{APP_NAME}</span> for quick access
       </p>
       <Button size="sm" className="h-7 text-xs shrink-0" onClick={handleInstall}>
         Install

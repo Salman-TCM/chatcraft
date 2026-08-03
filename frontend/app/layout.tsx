@@ -10,6 +10,7 @@ import { CookieConsent } from "@/components/cookie-consent";
 import { ThemeInjector } from "@/components/agency-theme";
 import { ThemeProvider } from "@/components/theme-provider";
 import { PwaRegister } from "@/components/pwa-register";
+import { APP_NAME } from "@/lib/constants";
 import "./globals.css";
 
 const inter = Inter({
@@ -34,7 +35,7 @@ export async function generateMetadata(): Promise<Metadata> {
   const headersList = await headers();
   const agencyThemeRaw = headersList.get("x-agency-theme");
   const agencyTheme = agencyThemeRaw ? JSON.parse(agencyThemeRaw) : null;
-  const platformName: string = agencyTheme?.name ?? "ChatCraft AI";
+  const platformName: string = agencyTheme?.name ?? APP_NAME;
   const base = new URL(process.env.NEXTAUTH_URL ?? "http://localhost:3000");
 
   return {
@@ -47,7 +48,7 @@ export async function generateMetadata(): Promise<Metadata> {
     authors: [{ name: platformName }],
     creator: platformName,
     metadataBase: base,
-    manifest: "/manifest.json",
+    manifest: "/manifest.webmanifest",
     appleWebApp: {
       capable: true,
       statusBarStyle: "default",

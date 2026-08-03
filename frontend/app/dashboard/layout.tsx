@@ -23,6 +23,7 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/comp
 import { hasFeatureAccess, type FeatureKey } from "@/lib/features";
 import { EASE_OUT, fadeIn } from "@/lib/motion";
 import { cn } from "@/lib/utils";
+import { APP_NAME } from "@/lib/constants";
 
 // ─── Nav structure ────────────────────────────────────────────────────────────
 type NavItem = { href: string; label: string; icon: React.ElementType; feature?: FeatureKey };
@@ -193,7 +194,7 @@ function SidebarContent({
 }) {
   const user = useAppStore((s) => s.user);
   const agencyTheme = useAppStore((s) => s.agencyTheme);
-  const platformName = agencyTheme?.name ?? "ChatCraft AI";
+  const platformName = agencyTheme?.name ?? APP_NAME;
 
   const canSee = (item: NavItem) =>
     !item.feature || hasFeatureAccess(user?.role, user?.allowedFeatures ?? null, item.feature);
@@ -471,7 +472,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   const [mobileOpen,    setMobileOpen]    = useState(false);
   const [sideCollapsed, setSideCollapsed] = useState(false);
   const agencyTheme = useAppStore((s) => s.agencyTheme);
-  const platformName = agencyTheme?.name ?? "ChatCraft AI";
+  const platformName = agencyTheme?.name ?? APP_NAME;
 
   return (
     <TooltipProvider delayDuration={200}>

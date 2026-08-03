@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { headers } from "next/headers";
+import { APP_NAME } from "@/lib/constants";
 
 const PLATFORM_URL = process.env.NEXTAUTH_URL ?? "http://localhost:3000";
 
@@ -9,7 +10,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   const agencyTheme = agencyThemeRaw ? JSON.parse(agencyThemeRaw) : null;
 
   const primaryColour = agencyTheme?.primaryColour ?? "#4F46E5";
-  const agencyName = agencyTheme?.name ?? "ChatCraft AI";
+  const agencyName = agencyTheme?.name ?? APP_NAME;
 
   // Determine the base URL for widget iframes — use current host so agency
   // custom domains serve their own themed iframes.

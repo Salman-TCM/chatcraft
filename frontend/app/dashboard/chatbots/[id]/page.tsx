@@ -22,6 +22,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
 import { apiClient } from "@/lib/api";
+import { APP_NAME } from "@/lib/constants";
 
 interface ProviderMeta {
   label: string;
@@ -476,7 +477,7 @@ export default function ChatbotSettingsPage() {
       <Section title="System Prompt">
         <div>
           <Label className="text-xs text-muted-foreground mb-1.5 block">
-            Custom instructions for the AI. Leave blank for the default ChatCraft prompt.
+            Custom instructions for the AI. Leave blank for the default {APP_NAME} prompt.
           </Label>
           <textarea
             value={settings.system_prompt}
@@ -615,7 +616,7 @@ function GoogleDocsSyncSection({ chatbotId }: { chatbotId: string }) {
     <Section title="Google Docs System Prompt">
       <div className="space-y-3">
         <Label className="text-xs text-muted-foreground block">
-          Link a Google Doc as the live system prompt. ChatCraft will sync it every 10 minutes and update the prompt automatically.
+          Link a Google Doc as the live system prompt. {APP_NAME} will sync it every 10 minutes and update the prompt automatically.
           The service account must have <strong>Viewer</strong> access to the document.
         </Label>
         <div className="flex gap-2">

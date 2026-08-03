@@ -1,7 +1,8 @@
 import {
   Bot, Zap, GitBranch, Mic, Wallet, Share2, Database, Plug,
-  ClipboardList, Megaphone, Monitor, MessageCircle,
+  ClipboardList, Megaphone, Monitor, MessageCircle, Link2, BrainCircuit, Rocket,
 } from "lucide-react";
+import { APP_NAME } from "@/lib/constants";
 
 export const FEATURES = [
   { icon: MessageCircle, title: "AI Chatbots", desc: "Deploy chatbots on Claude, GPT-5.6, Gemini 3.1, Grok, or your model of choice — swap providers anytime, no lock-in." },
@@ -22,9 +23,34 @@ export const AI_TOOLS = [
 ];
 
 export const STEPS = [
-  { n: "01", title: "Connect your channels", desc: "Link your website, WhatsApp, Instagram, and voice lines in minutes." },
-  { n: "02", title: "Train your AI", desc: "Upload your knowledge base and let ChatCraft learn your business." },
-  { n: "03", title: "Automate & grow", desc: "Launch flows, sequences, and campaigns that run without you." },
+  { n: "01", icon: Link2, title: "Connect your channels", desc: "Link your website, WhatsApp, Instagram, and voice lines in minutes." },
+  { n: "02", icon: BrainCircuit, title: "Train your AI", desc: `Upload your knowledge base and let ${APP_NAME} learn your business.` },
+  { n: "03", icon: Rocket, title: "Automate & grow", desc: "Launch flows, sequences, and campaigns that run without you." },
+];
+
+export const PROVIDERS = ["Claude", "GPT", "Gemini", "Grok", "Llama"];
+
+export const FAQS = [
+  {
+    q: "Is the free plan actually free?",
+    a: "Yes. The Free plan includes 20 messages per month and 1 chatbot with no credit card required. Upgrade to Pro whenever you outgrow it.",
+  },
+  {
+    q: "Can I switch AI models later?",
+    a: `Anytime. ${APP_NAME} is model-agnostic — point any chatbot at Claude, GPT, Gemini, Grok, or Llama without rebuilding your flows or losing your knowledge base.`,
+  },
+  {
+    q: "How long does setup take?",
+    a: "Most teams connect a channel and launch their first chatbot in under 5 minutes. Training on your existing docs and content takes a few minutes more.",
+  },
+  {
+    q: "What happens to my data?",
+    a: "Your conversations and knowledge base stay in your workspace and are never used to train shared models. See our Privacy Policy for details.",
+  },
+  {
+    q: "Do you offer a money-back guarantee?",
+    a: "Yes — every paid plan comes with a 14-day money-back guarantee, no questions asked.",
+  },
 ];
 
 export const STATS = [
