@@ -15,6 +15,7 @@ from sqlalchemy import select
 
 from app.core.dependencies import CurrentUser, DBSession
 from app.models.api_token import ApiToken
+from app.schemas.tokens import TokenCreateRequest
 
 router = APIRouter(prefix="/api/tokens", tags=["tokens"])
 
@@ -50,22 +51,13 @@ async def list_tokens(user: CurrentUser, db: DBSession) -> dict:
 
 
 @router.post("", response_model=dict, status_code=status.HTTP_201_CREATED)
-async def create_token(body: dict, user: CurrentUser, db: DBSession) -> dict:
-    name = (body.get("name") or "").strip()
-    if not name:
-        raise HTTPException(status_code=422, detail="name required")
+async def create_token(body: TokenCreateRequest, user: CurrentUser, db: DBSession) -> dict:
+    name = body.name.strip()
 
     expires_at: datetime | None = None
-    expires_in_days = body.get("expires_in_days")
-    if expires_in_days is not None:
-        try:
-            days = int(expires_in_days)
-            if days <= 0:
-                raise ValueError
-        except (ValueError, TypeError):
-            raise HTTPException(status_code=422, detail="expires_in_days must be a positive integer")
+    if body.expires_in_days is not None:
         from datetime import timedelta
-        expires_at = datetime.now(timezone.utc) + timedelta(days=days)
+        expires_at = datetime.now(timezone.utc) + timedelta(days=body.expires_in_days)
 
     raw = "cc_" + secrets.token_hex(32)
     token_hash = hashlib.sha256(raw.encode()).hexdigest()
