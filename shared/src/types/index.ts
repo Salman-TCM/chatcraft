@@ -13,11 +13,17 @@ export type DocumentStatus = "pending" | "processing" | "ready" | "error";
 
 export type LLMProvider = "anthropic" | "openai" | "google";
 
+export interface ApiFieldError {
+  field: string;
+  message: string;
+}
+
 export interface ApiResponse<T = unknown> {
   success: boolean;
   data?: T;
   error?: string;
   code?: string;
+  fields?: ApiFieldError[];
 }
 
 export interface PaginatedResponse<T = unknown> extends ApiResponse<T[]> {

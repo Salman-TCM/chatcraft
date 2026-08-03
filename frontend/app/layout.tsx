@@ -6,6 +6,7 @@ import { SessionSync } from "@/components/session-sync";
 import { TrialBanner } from "@/components/trial-banner";
 import { UpgradeModal } from "@/components/upgrade-modal";
 import { HardPaywallModal } from "@/components/hard-paywall-modal";
+import { Toaster } from "@/components/ui/toaster";
 import { CookieConsent } from "@/components/cookie-consent";
 import { ThemeInjector } from "@/components/agency-theme";
 import { ThemeProvider } from "@/components/theme-provider";
@@ -95,6 +96,7 @@ export default async function RootLayout({
             <HardPaywallModal />
             <CookieConsent />
             <PwaRegister />
+            <Toaster />
             {children}
           </SessionProvider>
         </ThemeProvider>

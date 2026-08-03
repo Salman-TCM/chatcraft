@@ -78,6 +78,21 @@ apiClient.interceptors.response.use(
       return Promise.reject(error);
     }
 
+    // Generic validation error (any other 422, or a 4xx tagged VALIDATION_ERROR):
+    // toast the message so components without their own error handling still
+    // surface *something*, but still reject so forms can map field-level errors.
+    if (
+      typeof window !== "undefined" &&
+      (status === 422 || code === "VALIDATION_ERROR") &&
+      status !== 401 &&
+      status !== 429
+    ) {
+      const { toast } = await import("@/hooks/use-toast");
+      const { getErrorMessage } = await import("@/lib/errors");
+      toast({ variant: "destructive", title: "Validation error", description: getErrorMessage(error) });
+      return Promise.reject(error);
+    }
+
     return Promise.reject(error);
   }
 );
