@@ -37,6 +37,11 @@ from app.core.features import AUTOMATIONS
 from app.models.automation import (
     Automation, AutomationRun, Keyword, Sequence, SequenceEnrollment,
 )
+from app.schemas.automations import (
+    AutomationCreate, AutomationUpdate,
+    KeywordCreate, KeywordUpdate,
+    SequenceCreate, SequenceEnrollRequest, SequenceUpdate,
+)
 
 router = APIRouter(prefix="/api/v1", tags=["automations"], dependencies=[Depends(require_feature(AUTOMATIONS))])
 
@@ -113,19 +118,16 @@ async def list_automations(
 
 
 @router.post("/automations", response_model=dict, status_code=status.HTTP_201_CREATED)
-async def create_automation(body: dict, user: CurrentUser, db: DBSession) -> dict:
-    name = (body.get("name") or "").strip()
-    if not name:
-        raise HTTPException(status_code=422, detail="name required")
+async def create_automation(body: AutomationCreate, user: CurrentUser, db: DBSession) -> dict:
     a = Automation(
         user_id=user.id,
-        name=name,
-        description=body.get("description"),
-        trigger_type=body.get("trigger_type", "new_contact"),
-        trigger_config=body.get("trigger_config", {}),
-        action_type=body.get("action_type", "send_message"),
-        action_config=body.get("action_config", {}),
-        enabled=body.get("enabled", True),
+        name=body.name.strip(),
+        description=body.description,
+        trigger_type=body.trigger_type,
+        trigger_config=body.trigger_config,
+        action_type=body.action_type,
+        action_config=body.action_config,
+        enabled=body.enabled,
     )
     db.add(a)
     await db.commit()
@@ -142,13 +144,12 @@ async def get_automation(auto_id: uuid.UUID, user: CurrentUser, db: DBSession) -
 
 
 @router.patch("/automations/{auto_id}", response_model=dict)
-async def update_automation(auto_id: uuid.UUID, body: dict, user: CurrentUser, db: DBSession) -> dict:
+async def update_automation(auto_id: uuid.UUID, body: AutomationUpdate, user: CurrentUser, db: DBSession) -> dict:
     a = await db.get(Automation, auto_id)
     if not a or a.user_id != user.id:
         raise HTTPException(status_code=404, detail="Automation not found")
-    for field in ("name", "description", "trigger_type", "trigger_config", "action_type", "action_config", "enabled"):
-        if field in body:
-            setattr(a, field, body[field])
+    for field, value in body.model_dump(exclude_unset=True).items():
+        setattr(a, field, value)
     await db.commit()
     await db.refresh(a)
     return {"success": True, "data": _auto_dict(a)}
@@ -224,18 +225,15 @@ async def list_sequences(user: CurrentUser, db: DBSession) -> dict:
 
 
 @router.post("/sequences", response_model=dict, status_code=status.HTTP_201_CREATED)
-async def create_sequence(body: dict, user: CurrentUser, db: DBSession) -> dict:
-    name = (body.get("name") or "").strip()
-    if not name:
-        raise HTTPException(status_code=422, detail="name required")
+async def create_sequence(body: SequenceCreate, user: CurrentUser, db: DBSession) -> dict:
     s = Sequence(
         user_id=user.id,
-        chatbot_id=body.get("chatbot_id"),
-        name=name,
-        description=body.get("description"),
-        auto_enroll=body.get("auto_enroll", False),
-        reply_behavior=body.get("reply_behavior", "stop"),
-        steps=body.get("steps", []),
+        chatbot_id=body.chatbot_id,
+        name=body.name.strip(),
+        description=body.description,
+        auto_enroll=body.auto_enroll,
+        reply_behavior=body.reply_behavior,
+        steps=body.steps,
     )
     db.add(s)
     await db.commit()
@@ -252,13 +250,12 @@ async def get_sequence(seq_id: uuid.UUID, user: CurrentUser, db: DBSession) -> d
 
 
 @router.patch("/sequences/{seq_id}", response_model=dict)
-async def update_sequence(seq_id: uuid.UUID, body: dict, user: CurrentUser, db: DBSession) -> dict:
+async def update_sequence(seq_id: uuid.UUID, body: SequenceUpdate, user: CurrentUser, db: DBSession) -> dict:
     s = await db.get(Sequence, seq_id)
     if not s or s.user_id != user.id:
         raise HTTPException(status_code=404, detail="Sequence not found")
-    for field in ("name", "description", "chatbot_id", "auto_enroll", "reply_behavior", "steps"):
-        if field in body:
-            setattr(s, field, body[field])
+    for field, value in body.model_dump(exclude_unset=True).items():
+        setattr(s, field, value)
     await db.commit()
     await db.refresh(s)
     return {"success": True, "data": _seq_dict(s)}
@@ -275,15 +272,12 @@ async def delete_sequence(seq_id: uuid.UUID, user: CurrentUser, db: DBSession) -
 
 
 @router.post("/sequences/{seq_id}/enroll", response_model=dict, status_code=status.HTTP_201_CREATED)
-async def enroll_contact(seq_id: uuid.UUID, body: dict, user: CurrentUser, db: DBSession) -> dict:
+async def enroll_contact(seq_id: uuid.UUID, body: SequenceEnrollRequest, user: CurrentUser, db: DBSession) -> dict:
     s = await db.get(Sequence, seq_id)
     if not s or s.user_id != user.id:
         raise HTTPException(status_code=404, detail="Sequence not found")
 
-    contact_id_str = body.get("contact_id", "")
-    if not contact_id_str:
-        raise HTTPException(status_code=422, detail="contact_id required")
-    contact_id = uuid.UUID(contact_id_str)
+    contact_id = body.contact_id
 
     # Upsert enrollment
     existing = await db.execute(
@@ -399,20 +393,17 @@ async def list_keywords(
 
 
 @router.post("/keywords", response_model=dict, status_code=status.HTTP_201_CREATED)
-async def create_keyword(body: dict, user: CurrentUser, db: DBSession) -> dict:
-    kws = body.get("keywords", [])
-    if not kws:
-        raise HTTPException(status_code=422, detail="keywords array required")
+async def create_keyword(body: KeywordCreate, user: CurrentUser, db: DBSession) -> dict:
     k = Keyword(
         user_id=user.id,
-        chatbot_id=body.get("chatbot_id"),
-        keywords=kws,
-        match_type=body.get("match_type", "contains"),
-        response_type=body.get("response_type", "text"),
-        response_text=body.get("response_text"),
-        flow_id=body.get("flow_id"),
-        is_active=body.get("is_active", True),
-        priority=body.get("priority", 0),
+        chatbot_id=body.chatbot_id,
+        keywords=body.keywords,
+        match_type=body.match_type,
+        response_type=body.response_type,
+        response_text=body.response_text,
+        flow_id=body.flow_id,
+        is_active=body.is_active,
+        priority=body.priority,
     )
     db.add(k)
     await db.commit()
@@ -429,13 +420,12 @@ async def get_keyword(kw_id: uuid.UUID, user: CurrentUser, db: DBSession) -> dic
 
 
 @router.patch("/keywords/{kw_id}", response_model=dict)
-async def update_keyword(kw_id: uuid.UUID, body: dict, user: CurrentUser, db: DBSession) -> dict:
+async def update_keyword(kw_id: uuid.UUID, body: KeywordUpdate, user: CurrentUser, db: DBSession) -> dict:
     k = await db.get(Keyword, kw_id)
     if not k or k.user_id != user.id:
         raise HTTPException(status_code=404, detail="Keyword not found")
-    for field in ("keywords", "match_type", "response_type", "response_text", "flow_id", "is_active", "priority", "chatbot_id"):
-        if field in body:
-            setattr(k, field, body[field])
+    for field, value in body.model_dump(exclude_unset=True).items():
+        setattr(k, field, value)
     await db.commit()
     await db.refresh(k)
     return {"success": True, "data": _kw_dict(k)}
