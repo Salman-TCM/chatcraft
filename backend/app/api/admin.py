@@ -12,7 +12,7 @@ from sqlalchemy import func, or_, select
 from sqlalchemy.orm import selectinload
 
 from app.core.dependencies import CurrentUser, DBSession, RequireAdmin
-from app.core.features import ALL_FEATURES, ALL_FEATURE_KEYS
+from app.core.features import ALL_FEATURES
 from app.core.security import create_access_token
 from app.models.chatbot_config import ChatbotConfig
 from app.models.conversation import Conversation
@@ -21,6 +21,11 @@ from app.models.payment import Payment, PaymentStatus
 from app.models.subscription import Subscription, SubscriptionPlan, SubscriptionState
 from app.models.usage_log import UsageLog
 from app.models.user import User, UserRole
+from app.schemas.admin import (
+    UpdatePlatformSettingsRequest,
+    UpdateUserFeaturesRequest,
+    UpdateUserRequest,
+)
 
 router = APIRouter(prefix="/api/admin", tags=["admin"], dependencies=[RequireAdmin])
 
@@ -309,7 +314,7 @@ async def get_user(user_id: uuid.UUID, db: DBSession) -> dict:
 @router.patch("/users/{user_id}", response_model=dict)
 async def update_user(
     user_id: uuid.UUID,
-    body: dict,
+    body: UpdateUserRequest,
     db: DBSession,
     caller: CurrentUser,
 ) -> dict:
@@ -329,22 +334,24 @@ async def update_user(
             detail="Only superadmins can modify superadmin accounts",
         )
 
+    updates = body.model_dump(exclude_unset=True)
+
     # Prevent any user from stripping their own elevated role
-    if str(u.id) == str(caller.id) and body.get("role") and body["role"] not in ("admin", "superadmin"):
+    if str(u.id) == str(caller.id) and updates.get("role") and updates["role"] not in ("admin", "superadmin"):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Cannot demote your own account",
         )
 
-    if "role" in body:
+    if "role" in updates:
         # Only superadmin can grant the superadmin role
-        if body["role"] == "superadmin" and caller.role != UserRole.superadmin:
+        if updates["role"] == "superadmin" and caller.role != UserRole.superadmin:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Only superadmins can grant the superadmin role",
             )
         old_role = u.role.value
-        u.role = UserRole(body["role"])
+        u.role = UserRole(updates["role"])
         db.add(AdminActionLog(
             admin_user_id=caller.id,
             admin_email=caller.email,
@@ -352,12 +359,12 @@ async def update_user(
             target_user_id=u.id,
             target_email=u.email,
             old_value=old_role,
-            new_value=body["role"],
+            new_value=updates["role"],
         ))
 
-    if "email_verified" in body:
+    if "email_verified" in updates:
         old_ev = str(u.email_verified)
-        u.email_verified = bool(body["email_verified"])
+        u.email_verified = bool(updates["email_verified"])
         db.add(AdminActionLog(
             admin_user_id=caller.id,
             admin_email=caller.email,
@@ -369,10 +376,10 @@ async def update_user(
         ))
 
     # Override subscription plan/status
-    if ("plan" in body or "subscription_status" in body) and u.subscription:
-        if "plan" in body:
+    if ("plan" in updates or "subscription_status" in updates) and u.subscription:
+        if "plan" in updates:
             old_plan = u.subscription.plan.value
-            u.subscription.plan = SubscriptionPlan(body["plan"])
+            u.subscription.plan = SubscriptionPlan(updates["plan"])
             db.add(AdminActionLog(
                 admin_user_id=caller.id,
                 admin_email=caller.email,
@@ -380,10 +387,10 @@ async def update_user(
                 target_user_id=u.id,
                 target_email=u.email,
                 old_value=old_plan,
-                new_value=body["plan"],
+                new_value=updates["plan"],
             ))
-        if "subscription_status" in body:
-            u.subscription.status = SubscriptionState(body["subscription_status"])
+        if "subscription_status" in updates:
+            u.subscription.status = SubscriptionState(updates["subscription_status"])
 
     await db.commit()
     await db.refresh(u)
@@ -553,12 +560,12 @@ async def get_platform_settings(db: DBSession) -> dict:
 
 
 @router.patch("/settings", response_model=dict)
-async def update_platform_settings(body: dict, db: DBSession, caller: CurrentUser) -> dict:
+async def update_platform_settings(
+    body: UpdatePlatformSettingsRequest, db: DBSession, caller: CurrentUser
+) -> dict:
     from app.models.platform_settings import PlatformSetting
 
-    for key, value in body.items():
-        if key not in _DEFAULT_SETTINGS:
-            continue
+    for key, value in body.model_dump(exclude_unset=True).items():
         result = await db.execute(select(PlatformSetting).where(PlatformSetting.key == key))
         row = result.scalar_one_or_none()
         if row:
@@ -775,7 +782,7 @@ async def get_user_features(user_id: uuid.UUID, db: DBSession) -> dict:
 @router.patch("/users/{user_id}/features", response_model=dict)
 async def update_user_features(
     user_id: uuid.UUID,
-    body: dict,
+    body: UpdateUserFeaturesRequest,
     db: DBSession,
     caller: CurrentUser,
 ) -> dict:
@@ -791,20 +798,8 @@ async def update_user_features(
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
 
-    if "allowed_features" not in body:
-        raise HTTPException(status_code=422, detail="allowed_features field required")
-
-    features = body["allowed_features"]
-
+    features = body.allowed_features
     if features is not None:
-        if not isinstance(features, list):
-            raise HTTPException(status_code=422, detail="allowed_features must be a list or null")
-        invalid = [f for f in features if f not in ALL_FEATURE_KEYS]
-        if invalid:
-            raise HTTPException(
-                status_code=422,
-                detail=f"Unknown feature keys: {invalid}. Valid keys: {sorted(ALL_FEATURE_KEYS)}",
-            )
         features = list(set(features))  # deduplicate
 
     user.allowed_features = features
