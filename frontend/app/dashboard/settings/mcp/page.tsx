@@ -1,6 +1,9 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { Controller, useForm } from "react-hook-form";
+import { zodResolver } from "@hookform/resolvers/zod";
+import { z } from "zod";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -29,6 +32,8 @@ import {
 import { Switch } from "@/components/ui/switch";
 import { Plus, Trash2, Wrench, Globe, RefreshCw } from "lucide-react";
 import { apiClient } from "@/lib/api";
+import { toast } from "@/hooks/use-toast";
+import { getErrorMessage, getFieldErrors } from "@/lib/errors";
 
 interface MCPServer {
   id: string;
@@ -46,11 +51,55 @@ interface MCPTool {
   inputSchema?: object;
 }
 
-const defaultForm = {
+const mcpServerSchema = z
+  .object({
+    name: z.string().min(1, "Name is required"),
+    server_url: z
+      .string()
+      .min(1, "Server URL is required")
+      .url("Enter a valid URL"),
+    auth_type: z.enum(["none", "bearer", "header"]),
+    auth_config: z.object({
+      token: z.string().optional(),
+      header_name: z.string().optional(),
+      header_value: z.string().optional(),
+    }),
+    chatbot_id: z.string().optional(),
+    is_active: z.boolean(),
+  })
+  .superRefine((data, ctx) => {
+    if (data.auth_type === "bearer" && !data.auth_config.token?.trim()) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Token is required for bearer authentication",
+        path: ["auth_config", "token"],
+      });
+    }
+    if (data.auth_type === "header") {
+      if (!data.auth_config.header_name?.trim()) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "Header name is required",
+          path: ["auth_config", "header_name"],
+        });
+      }
+      if (!data.auth_config.header_value?.trim()) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "Header value is required",
+          path: ["auth_config", "header_value"],
+        });
+      }
+    }
+  });
+
+type MCPServerFormData = z.infer<typeof mcpServerSchema>;
+
+const defaultFormValues: MCPServerFormData = {
   name: "",
   server_url: "",
   auth_type: "none",
-  auth_config: {} as Record<string, string>,
+  auth_config: { token: "", header_name: "", header_value: "" },
   chatbot_id: "",
   is_active: true,
 };
@@ -59,10 +108,24 @@ export default function MCPServersPage() {
   const [servers, setServers] = useState<MCPServer[]>([]);
   const [loading, setLoading] = useState(true);
   const [open, setOpen] = useState(false);
-  const [form, setForm] = useState({ ...defaultForm });
-  const [saving, setSaving] = useState(false);
   const [tools, setTools] = useState<Record<string, MCPTool[]>>({});
   const [loadingTools, setLoadingTools] = useState<string | null>(null);
+
+  const {
+    register,
+    handleSubmit,
+    control,
+    watch,
+    reset,
+    setValue,
+    setError,
+    formState: { errors, isSubmitting },
+  } = useForm<MCPServerFormData>({
+    resolver: zodResolver(mcpServerSchema),
+    defaultValues: defaultFormValues,
+  });
+
+  const authType = watch("auth_type");
 
   useEffect(() => {
     load();
@@ -73,34 +136,81 @@ export default function MCPServersPage() {
     try {
       const res = await apiClient.get("/api/v1/mcp-servers");
       setServers(res.data.data || []);
-    } catch {}
+    } catch (err) {
+      toast({
+        variant: "destructive",
+        title: "Failed to load MCP servers",
+        description: getErrorMessage(err),
+      });
+    }
     setLoading(false);
   }
 
-  async function handleSave(e: React.FormEvent) {
-    e.preventDefault();
-    setSaving(true);
+  async function onSubmit(data: MCPServerFormData) {
+    const auth_config: Record<string, string> =
+      data.auth_type === "bearer"
+        ? { token: data.auth_config.token ?? "" }
+        : data.auth_type === "header"
+          ? {
+              header_name: data.auth_config.header_name ?? "",
+              header_value: data.auth_config.header_value ?? "",
+            }
+          : {};
+
     try {
-      await apiClient.post("/api/v1/mcp-servers", form);
+      await apiClient.post("/api/v1/mcp-servers", {
+        name: data.name,
+        server_url: data.server_url,
+        auth_type: data.auth_type,
+        auth_config,
+        chatbot_id: data.chatbot_id || undefined,
+        is_active: data.is_active,
+      });
       setOpen(false);
-      setForm({ ...defaultForm });
+      reset(defaultFormValues);
+      toast({ variant: "success", title: "MCP server added" });
       await load();
-    } catch {}
-    setSaving(false);
+    } catch (err) {
+      const fieldErrors = getFieldErrors(err);
+      Object.entries(fieldErrors).forEach(([field, message]) => {
+        setError(field as keyof MCPServerFormData, { message });
+      });
+      toast({
+        variant: "destructive",
+        title: "Failed to save MCP server",
+        description: getErrorMessage(err),
+      });
+    }
   }
 
   async function handleDelete(id: string) {
     if (!confirm("Remove this MCP server?")) return;
-    await apiClient.delete(`/api/v1/mcp-servers/${id}`);
-    await load();
+    try {
+      await apiClient.delete(`/api/v1/mcp-servers/${id}`);
+      await load();
+    } catch (err) {
+      toast({
+        variant: "destructive",
+        title: "Failed to remove MCP server",
+        description: getErrorMessage(err),
+      });
+    }
   }
 
   async function handleToggle(server: MCPServer) {
-    await apiClient.patch(`/api/v1/mcp-servers/${server.id}`, {
-      ...server,
-      is_active: !server.is_active,
-    });
-    await load();
+    try {
+      await apiClient.patch(`/api/v1/mcp-servers/${server.id}`, {
+        ...server,
+        is_active: !server.is_active,
+      });
+      await load();
+    } catch (err) {
+      toast({
+        variant: "destructive",
+        title: "Failed to update MCP server",
+        description: getErrorMessage(err),
+      });
+    }
   }
 
   async function discoverTools(serverId: string) {
@@ -108,8 +218,21 @@ export default function MCPServersPage() {
     try {
       const res = await apiClient.get(`/api/v1/mcp-servers/${serverId}/tools`);
       setTools((t) => ({ ...t, [serverId]: res.data.data || [] }));
-    } catch {}
+    } catch (err) {
+      toast({
+        variant: "destructive",
+        title: "Failed to discover tools",
+        description: getErrorMessage(err),
+      });
+    }
     setLoadingTools(null);
+  }
+
+  function handleOpenChange(next: boolean) {
+    setOpen(next);
+    if (next) {
+      reset(defaultFormValues);
+    }
   }
 
   return (
@@ -121,7 +244,7 @@ export default function MCPServersPage() {
             Connect Model Context Protocol servers to extend AI capabilities with external tools
           </p>
         </div>
-        <Dialog open={open} onOpenChange={setOpen}>
+        <Dialog open={open} onOpenChange={handleOpenChange}>
           <DialogTrigger asChild>
             <Button>
               <Plus className="h-4 w-4 mr-2" /> Add Server
@@ -131,90 +254,105 @@ export default function MCPServersPage() {
             <DialogHeader>
               <DialogTitle>Add MCP Server</DialogTitle>
             </DialogHeader>
-            <form onSubmit={handleSave} className="space-y-4">
+            <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
               <div className="space-y-1">
                 <Label>Name</Label>
                 <Input
-                  value={form.name}
-                  onChange={(e) => setForm({ ...form, name: e.target.value })}
+                  {...register("name")}
                   placeholder="e.g. My Custom Tools"
-                  required
                 />
+                {errors.name && (
+                  <p className="text-sm text-destructive">{errors.name.message}</p>
+                )}
               </div>
               <div className="space-y-1">
                 <Label>Server URL</Label>
                 <Input
-                  value={form.server_url}
-                  onChange={(e) => setForm({ ...form, server_url: e.target.value })}
+                  {...register("server_url")}
                   placeholder="https://mcp.example.com/rpc"
-                  required
                 />
+                {errors.server_url && (
+                  <p className="text-sm text-destructive">{errors.server_url.message}</p>
+                )}
               </div>
               <div className="space-y-1">
                 <Label>Authentication</Label>
-                <Select
-                  value={form.auth_type}
-                  onValueChange={(v) => setForm({ ...form, auth_type: v, auth_config: {} })}
-                >
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="none">None</SelectItem>
-                    <SelectItem value="bearer">Bearer Token</SelectItem>
-                    <SelectItem value="header">Custom Header</SelectItem>
-                  </SelectContent>
-                </Select>
+                <Controller
+                  control={control}
+                  name="auth_type"
+                  render={({ field }) => (
+                    <Select
+                      value={field.value}
+                      onValueChange={(v) => {
+                        field.onChange(v as MCPServerFormData["auth_type"]);
+                        setValue("auth_config", {
+                          token: "",
+                          header_name: "",
+                          header_value: "",
+                        });
+                      }}
+                    >
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="none">None</SelectItem>
+                        <SelectItem value="bearer">Bearer Token</SelectItem>
+                        <SelectItem value="header">Custom Header</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  )}
+                />
               </div>
 
-              {form.auth_type === "bearer" && (
+              {authType === "bearer" && (
                 <div className="space-y-1">
                   <Label>Token</Label>
                   <Input
                     type="password"
-                    value={form.auth_config.token || ""}
-                    onChange={(e) =>
-                      setForm({ ...form, auth_config: { token: e.target.value } })
-                    }
+                    {...register("auth_config.token")}
                     placeholder="Bearer token"
                   />
+                  {errors.auth_config?.token && (
+                    <p className="text-sm text-destructive">
+                      {errors.auth_config.token.message}
+                    </p>
+                  )}
                 </div>
               )}
 
-              {form.auth_type === "header" && (
+              {authType === "header" && (
                 <div className="grid grid-cols-2 gap-2">
                   <div className="space-y-1">
                     <Label>Header Name</Label>
                     <Input
-                      value={form.auth_config.header_name || ""}
-                      onChange={(e) =>
-                        setForm({
-                          ...form,
-                          auth_config: { ...form.auth_config, header_name: e.target.value },
-                        })
-                      }
+                      {...register("auth_config.header_name")}
                       placeholder="X-API-Key"
                     />
+                    {errors.auth_config?.header_name && (
+                      <p className="text-sm text-destructive">
+                        {errors.auth_config.header_name.message}
+                      </p>
+                    )}
                   </div>
                   <div className="space-y-1">
                     <Label>Header Value</Label>
                     <Input
                       type="password"
-                      value={form.auth_config.header_value || ""}
-                      onChange={(e) =>
-                        setForm({
-                          ...form,
-                          auth_config: { ...form.auth_config, header_value: e.target.value },
-                        })
-                      }
+                      {...register("auth_config.header_value")}
                       placeholder="secret"
                     />
+                    {errors.auth_config?.header_value && (
+                      <p className="text-sm text-destructive">
+                        {errors.auth_config.header_value.message}
+                      </p>
+                    )}
                   </div>
                 </div>
               )}
 
-              <Button type="submit" className="w-full" disabled={saving}>
-                {saving ? "Adding..." : "Add Server"}
+              <Button type="submit" className="w-full" disabled={isSubmitting}>
+                {isSubmitting ? "Adding..." : "Add Server"}
               </Button>
             </form>
           </DialogContent>
