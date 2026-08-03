@@ -27,6 +27,8 @@ interface Agent {
   description: string | null;
   model: string;
   tools: Record<string, boolean>;
+  instructions: string | null;
+  webhook_url: string | null;
   is_published: boolean;
   is_active: boolean;
   max_steps: number;

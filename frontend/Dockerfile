@@ -29,9 +29,9 @@ FROM node:20-alpine AS builder
 
 WORKDIR /app
 
-# Copy installed modules from deps stage
+# Copy installed modules from deps stage (npm workspaces hoists everything
+# into the root node_modules; there is no separate frontend/node_modules)
 COPY --from=deps /app/node_modules ./node_modules
-COPY --from=deps /app/frontend/node_modules ./frontend/node_modules
 
 # Copy source
 COPY shared/ ./shared/
@@ -91,4 +91,4 @@ ENV NEXT_TELEMETRY_DISABLED=1
 HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
     CMD curl -f http://localhost:3000/ || exit 1
 
-CMD ["node", "frontend/server.js"]
+CMD ["node", "server.js"]

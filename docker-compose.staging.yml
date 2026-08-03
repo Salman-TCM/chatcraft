@@ -11,8 +11,8 @@
 services:
 
   backend:
-    volumes: []                             # no source-mount; run built image
-    ports: []                               # reached via internal network only (frontend proxy)
+    volumes: !reset []                      # no source-mount; run built image
+    ports: !reset []                        # reached via internal network only (frontend proxy)
     environment:
       ENVIRONMENT: staging
       DEBUG: "false"
@@ -25,7 +25,7 @@ services:
           memory: 1G
 
   celery_worker:
-    volumes: []
+    volumes: !reset []
     environment:
       ENVIRONMENT: staging
       DEBUG: "false"
@@ -36,7 +36,7 @@ services:
           memory: 512M
 
   celery_beat:
-    volumes: []
+    volumes: !reset []
     environment:
       ENVIRONMENT: staging
       DEBUG: "false"
@@ -47,9 +47,22 @@ services:
           memory: 256M
 
   frontend:
-    volumes: []
-    ports: []                               # reached via cloudflared over internal network only
-    command: sh -c "cd frontend && npm run start"   # run built Next.js, not dev server
+    build:
+      # TODO: the Dockerfile's "final" stage (output: standalone) has a file-
+      # tracing bug that copies zero node_modules into the bundle — root
+      # cause not yet found. Running from "builder" (full source + full
+      # node_modules already present there) until that's diagnosed.
+      target: builder
+      args:
+        NEXT_PUBLIC_API_URL:                ${NEXT_PUBLIC_API_URL}
+        NEXT_PUBLIC_APP_URL:                 ${NEXT_PUBLIC_APP_URL}
+        NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY:  ${STRIPE_PUBLISHABLE_KEY:-}
+        NEXT_PUBLIC_POSTHOG_KEY:             ${NEXT_PUBLIC_POSTHOG_KEY:-}
+        NEXT_PUBLIC_POSTHOG_HOST:            ${NEXT_PUBLIC_POSTHOG_HOST:-}
+        NEXT_PUBLIC_SENTRY_DSN:              ${NEXT_PUBLIC_SENTRY_DSN:-}
+    volumes: !reset []
+    ports: !reset []                        # reached via cloudflared over internal network only
+    command: npm run start                  # builder stage's WORKDIR is already /app/frontend
     environment:
       NODE_ENV: production
     deploy:
@@ -59,7 +72,7 @@ services:
           memory: 512M
 
   postgres:
-    ports: []                               # no host access needed; internal network only
+    ports: !reset []                        # no host access needed; internal network only
     deploy:
       resources:
         limits:
@@ -67,7 +80,7 @@ services:
           memory: 512M
 
   redis:
-    ports: []                               # no host access needed; internal network only
+    ports: !reset []                        # no host access needed; internal network only
     deploy:
       resources:
         limits:
@@ -75,7 +88,7 @@ services:
           memory: 128M
 
   clamav:
-    ports: []                               # only used internally by backend
+    ports: !reset []                        # only used internally by backend
 
   # ---------------------------------------------------------------------------
   # Cloudflare Tunnel — exposes the frontend at tiertech.com.bd with no
