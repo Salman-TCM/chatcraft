@@ -4,6 +4,7 @@ from decimal import Decimal
 
 from pydantic import BaseModel, Field
 
+from app.core.plan_limits import DEFAULT_MODEL
 from app.models.message import MessageFeedback
 from app.services.llm.costs import supported_models
 
@@ -12,7 +13,7 @@ from app.services.llm.costs import supported_models
 
 class ChatbotCreateRequest(BaseModel):
     name: str = Field(..., min_length=1, max_length=255)
-    default_model: str = Field("claude-sonnet-4-6", max_length=100)
+    default_model: str = Field(DEFAULT_MODEL, max_length=100)
     fallback_model: str | None = Field(None, max_length=100)
     allow_model_switch: bool = False
     system_prompt: str | None = Field(None, max_length=8000)

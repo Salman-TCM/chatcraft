@@ -14,6 +14,7 @@ from pydantic import BaseModel
 from sqlalchemy import select
 
 from app.core.dependencies import CurrentUser, DBSession
+from app.core.plan_limits import is_model_allowed
 from app.models.user_api_key import UserApiKey, PROVIDERS
 from app.services.llm.key_store import encrypt_key, decrypt_key
 
@@ -71,8 +72,18 @@ class UpsertKeyRequest(BaseModel):
 
 
 @router.get("/providers")
-async def list_providers() -> dict:
-    return {"success": True, "data": PROVIDER_META}
+async def list_providers(user: CurrentUser) -> dict:
+    data = {
+        provider: {
+            **meta,
+            "models": [
+                {"id": model_id, "allowed": is_model_allowed(user.role, model_id)}
+                for model_id in meta["models"]
+            ],
+        }
+        for provider, meta in PROVIDER_META.items()
+    }
+    return {"success": True, "data": data}
 
 
 @router.get("")

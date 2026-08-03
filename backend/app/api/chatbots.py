@@ -6,9 +6,24 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.dependencies import CurrentUser, DBSession, RedisClient
 from app.core.pagination import LimitParam, PageParam, count_query, page_meta, paginate
+from app.core.plan_limits import chatbot_cap, is_model_allowed
 from app.models.chatbot_config import ChatbotConfig
+from app.models.user import User
 from app.schemas.chat import ChatbotCreateRequest, ChatbotResponse, ChatbotUpdateRequest
 from app.services import storage as storage_svc
+
+
+def _assert_model_allowed(user: User, model: str | None) -> None:
+    if model and not is_model_allowed(user.role, model):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={
+                "success": False,
+                "error": f"The {model} model isn't available on your current plan. Upgrade to Pro to use it.",
+                "code": "MODEL_NOT_ALLOWED",
+                "model": model,
+            },
+        )
 
 router = APIRouter(prefix="/api/chatbots", tags=["chatbots"])
 
@@ -41,6 +56,25 @@ async def create_chatbot(
     user: CurrentUser,
     db: DBSession,
 ) -> dict:
+    cap = chatbot_cap(user.role)
+    if cap is not None:
+        existing = await count_query(
+            db, select(ChatbotConfig).where(ChatbotConfig.user_id == user.id)
+        )
+        if existing >= cap:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail={
+                    "success": False,
+                    "error": f"Your plan allows up to {cap} chatbot{'s' if cap != 1 else ''}. Upgrade to Pro for unlimited chatbots.",
+                    "code": "CHATBOT_LIMIT_REACHED",
+                    "limit": cap,
+                },
+            )
+
+    _assert_model_allowed(user, body.default_model)
+    _assert_model_allowed(user, body.fallback_model)
+
     bot = ChatbotConfig(
         user_id=user.id,
         name=body.name,
@@ -74,6 +108,8 @@ async def update_chatbot(
     redis: RedisClient,
 ) -> dict:
     bot = await _get_owned_bot(chatbot_id, user.id, db)
+    _assert_model_allowed(user, body.default_model)
+    _assert_model_allowed(user, body.fallback_model)
     for field, value in body.model_dump(exclude_unset=True).items():
         setattr(bot, field, value)
     await db.commit()

@@ -2,6 +2,8 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
+import { useSession } from "next-auth/react";
 import {
   Bot,
   ExternalLink,
@@ -19,6 +21,9 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { apiClient } from "@/lib/api";
 
+// Mirrors app.core.plan_limits.chatbot_cap on the backend — keep in sync.
+const FREE_CHATBOT_CAP = 1;
+
 interface Chatbot {
   id: string;
   name: string;
@@ -29,6 +34,8 @@ interface Chatbot {
 
 export default function ChatbotsPage() {
   const router = useRouter();
+  const { data: session } = useSession();
+  const isFree = session?.user?.role === "free";
   const [chatbots, setChatbots] = useState<Chatbot[]>([]);
   const [loading, setLoading] = useState(true);
   const [creating, setCreating] = useState(false);
@@ -83,12 +90,19 @@ export default function ChatbotsPage() {
           <h1 className="text-2xl font-semibold">Chatbots</h1>
           <p className="text-sm text-muted-foreground mt-0.5">
             {chatbots.length} chatbot{chatbots.length !== 1 ? "s" : ""}
+            {isFree && chatbots.length >= FREE_CHATBOT_CAP && " · Free plan limit reached"}
           </p>
         </div>
-        <Button onClick={() => setShowCreate(true)} className="gap-2">
-          <Plus className="h-4 w-4" />
-          New Chatbot
-        </Button>
+        {isFree && chatbots.length >= FREE_CHATBOT_CAP ? (
+          <Button asChild className="gap-2">
+            <Link href="/pricing">Upgrade for unlimited chatbots</Link>
+          </Button>
+        ) : (
+          <Button onClick={() => setShowCreate(true)} className="gap-2">
+            <Plus className="h-4 w-4" />
+            New Chatbot
+          </Button>
+        )}
       </div>
 
       {/* Create form */}
