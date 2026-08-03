@@ -29,6 +29,13 @@ from app.models.chatbot_function import ChatbotFunction, WidgetFunctionAssignmen
 from app.models.widget_config import WidgetConfig
 from app.schemas.auth import MeResponse, UserResponse
 from app.schemas.chat import ChatbotResponse
+from app.schemas.manage import (
+    CreateFunctionRequest,
+    EnableAiChannelRequest,
+    SetWidgetFunctionsRequest,
+    UpdateFunctionRequest,
+    UpdateWidgetRequest,
+)
 
 router = APIRouter(tags=["manage"])
 
@@ -100,20 +107,10 @@ async def get_widget(widget_id: uuid.UUID, user: CurrentUser, db: DBSession) -> 
 
 
 @router.put("/api/manage/widgets/{widget_id}", response_model=dict)
-async def update_widget(widget_id: uuid.UUID, body: dict, user: CurrentUser, db: DBSession) -> dict:
+async def update_widget(widget_id: uuid.UUID, body: UpdateWidgetRequest, user: CurrentUser, db: DBSession) -> dict:
     bot = await _owned_bot(widget_id, user.id, db)
-    updatable = {
-        "name", "default_model", "fallback_model", "allow_model_switch",
-        "system_prompt", "published", "ai_paused",
-        "primary_colour", "secondary_colour", "background_colour",
-        "font_family", "welcome_message", "placeholder_text",
-        "bubble_style", "dark_mode",
-        "tts_enabled", "stt_enabled", "auto_play_tts",
-        "voice_id", "voice_stability", "voice_similarity_boost",
-    }
-    for k, v in body.items():
-        if k in updatable:
-            setattr(bot, k, v)
+    for k, v in body.model_dump(exclude_unset=True).items():
+        setattr(bot, k, v)
     await db.commit()
     await db.refresh(bot)
     result = await db.execute(
@@ -148,11 +145,11 @@ async def unpause_widget(widget_id: uuid.UUID, user: CurrentUser, db: DBSession)
 
 
 @router.post("/api/manage/widgets/{widget_id}/enable-ai", response_model=dict)
-async def enable_ai_channel(widget_id: uuid.UUID, body: dict, user: CurrentUser, db: DBSession) -> dict:
+async def enable_ai_channel(widget_id: uuid.UUID, body: EnableAiChannelRequest, user: CurrentUser, db: DBSession) -> dict:
     """Toggle AI on/off for a specific channel or all channels."""
     bot = await _owned_bot(widget_id, user.id, db)
-    channel = (body.get("channel") or "all").lower()
-    enabled = bool(body.get("enabled", True))
+    channel = body.channel
+    enabled = body.enabled
 
     if channel == "all":
         bot.ai_paused = not enabled
@@ -230,10 +227,10 @@ async def list_widget_functions(bot_id: uuid.UUID, user: CurrentUser, db: DBSess
 
 
 @router.put("/api/manage/widgets/{bot_id}/functions", response_model=dict)
-async def set_widget_functions(bot_id: uuid.UUID, body: dict, user: CurrentUser, db: DBSession) -> dict:
+async def set_widget_functions(bot_id: uuid.UUID, body: SetWidgetFunctionsRequest, user: CurrentUser, db: DBSession) -> dict:
     """Replace the full set of assigned functions for a widget."""
     bot = await _owned_bot(bot_id, user.id, db)
-    function_ids: list[uuid.UUID] = [uuid.UUID(fid) for fid in (body.get("function_ids") or [])]
+    function_ids = body.function_ids
 
     # Delete existing assignments
     existing = await db.execute(
@@ -265,18 +262,15 @@ async def list_functions(user: CurrentUser, db: DBSession) -> dict:
 
 
 @router.post("/api/manage/functions", response_model=dict, status_code=status.HTTP_201_CREATED)
-async def create_function(body: dict, user: CurrentUser, db: DBSession) -> dict:
-    name = (body.get("name") or "").strip()
-    if not name:
-        raise HTTPException(status_code=422, detail="name required")
+async def create_function(body: CreateFunctionRequest, user: CurrentUser, db: DBSession) -> dict:
     fn = ChatbotFunction(
         user_id=user.id,
-        name=name,
-        description=body.get("description", ""),
-        parameters_schema=body.get("parameters_schema", {}),
-        output_message=body.get("output_message"),
-        save_to_contact=bool(body.get("save_to_contact", False)),
-        save_field_key=body.get("save_field_key"),
+        name=body.name,
+        description=body.description,
+        parameters_schema=body.parameters_schema,
+        output_message=body.output_message,
+        save_to_contact=body.save_to_contact,
+        save_field_key=body.save_field_key,
     )
     db.add(fn)
     await db.commit()
@@ -291,11 +285,10 @@ async def get_function(fn_id: uuid.UUID, user: CurrentUser, db: DBSession) -> di
 
 
 @router.put("/api/manage/functions/{fn_id}", response_model=dict)
-async def update_function(fn_id: uuid.UUID, body: dict, user: CurrentUser, db: DBSession) -> dict:
+async def update_function(fn_id: uuid.UUID, body: UpdateFunctionRequest, user: CurrentUser, db: DBSession) -> dict:
     fn = await _owned_fn(fn_id, user.id, db)
-    for field in ("name", "description", "parameters_schema", "output_message", "save_to_contact", "save_field_key", "is_active"):
-        if field in body:
-            setattr(fn, field, body[field])
+    for k, v in body.model_dump(exclude_unset=True).items():
+        setattr(fn, k, v)
     await db.commit()
     await db.refresh(fn)
     return {"success": True, "data": _fn_dict(fn)}
