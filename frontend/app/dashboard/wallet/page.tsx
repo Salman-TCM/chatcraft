@@ -7,11 +7,16 @@ import {
   Check, AlertCircle, Upload, Lock, Link2, QrCode, RotateCcw,
   Clock, Camera, ScanLine, ExternalLink, Search,
 } from "lucide-react";
+import { useForm } from "react-hook-form";
+import { zodResolver } from "@hookform/resolvers/zod";
+import { z } from "zod";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { apiClient } from "@/lib/api";
+import { toast } from "@/hooks/use-toast";
+import { getErrorMessage, getFieldErrors } from "@/lib/errors";
 import { QRCodeCanvas } from "qrcode.react";
 
 // ── Interfaces ─────────────────────────────────────────────────────────────────
@@ -76,7 +81,21 @@ const JOIN_FIELDS = [
   { key: "phone",       label: "Phone"       },
   { key: "birthday",    label: "Birthday"    },
   { key: "postal_code", label: "Postal code" },
-];
+] as const;
+
+// ── Program create/edit form validation ────────────────────────────────────────
+const PROGRAM_TYPE_VALUES = [
+  "membership", "punch_card", "points", "coupon",
+  "event_ticket", "prepaid_balance", "business_card",
+] as const;
+const JOIN_FIELD_VALUES = ["name", "email", "phone", "birthday", "postal_code"] as const;
+
+const programFormSchema = z.object({
+  name: z.string().min(1, "Program name is required"),
+  type: z.enum(PROGRAM_TYPE_VALUES),
+  join_form_fields: z.array(z.enum(JOIN_FIELD_VALUES)),
+});
+type ProgramFormData = z.infer<typeof programFormSchema>;
 const TOOL_LABELS: Record<string, string> = {
   web_search: "web search", send_email: "email", send_sms: "SMS",
   create_contact: "contacts", update_contact: "contact updates",
@@ -439,13 +458,19 @@ export default function WalletPage() {
   const [showModal,      setShowModal]      = useState(false);
   const [editingProgram, setEditingProgram] = useState<WalletProgram | null>(null);
   const [modalStep,      setModalStep]      = useState<ModalStep>("setup");
-  const [progName,       setProgName]       = useState("");
+  const programForm = useForm<ProgramFormData>({
+    resolver: zodResolver(programFormSchema),
+    defaultValues: { name: "", type: "" as ProgramFormData["type"], join_form_fields: ["name", "email"] },
+  });
+  const { watch: watchProgram, setValue: setProgramValue, trigger: triggerProgram,
+          setError: setProgramError, formState: { errors: programErrors } } = programForm;
+  const progName   = watchProgram("name");
+  const progType   = watchProgram("type");
+  const joinFields = watchProgram("join_form_fields");
   const [progDesc,       setProgDesc]       = useState("");
-  const [progType,       setProgType]       = useState("");
   const [progConfig,     setProgConfig]     = useState<Record<string, string>>({});
   const [progBrand,      setProgBrand]      = useState<Record<string, string>>({});
   const [progAgentId,    setProgAgentId]    = useState("");
-  const [joinFields,     setJoinFields]     = useState<string[]>(["name", "email"]);
   const [receiptScanConfig, setReceiptScanConfig] = useState<Record<string, string>>({});
   const [nameTouched,    setNameTouched]    = useState(false);
   const [configTouched,  setConfigTouched]  = useState<Set<string>>(new Set());
@@ -500,8 +525,16 @@ export default function WalletPage() {
     } else {
       setTypesError(true);
     }
-    if (progsRes.status === "fulfilled") setPrograms(progsRes.value.data.data ?? []);
-    if (agentsRes.status === "fulfilled") setAgents(agentsRes.value.data.data ?? []);
+    if (progsRes.status === "fulfilled") {
+      setPrograms(progsRes.value.data.data ?? []);
+    } else {
+      toast({ variant: "destructive", title: "Failed to load programs", description: getErrorMessage(progsRes.reason) });
+    }
+    if (agentsRes.status === "fulfilled") {
+      setAgents(agentsRes.value.data.data ?? []);
+    } else {
+      toast({ variant: "destructive", title: "Failed to load AI agents", description: getErrorMessage(agentsRes.reason) });
+    }
     setLoading(false);
   }, []);
 
@@ -514,13 +547,16 @@ export default function WalletPage() {
     try {
       const res = await apiClient.get(`/api/wallet/programs/${program.id}/cards?limit=100`);
       setCards(res.data.data ?? []);
-    } catch {}
+    } catch (err) {
+      toast({ variant: "destructive", title: "Failed to load cards", description: getErrorMessage(err) });
+    }
     setCardsLoading(false);
   }
 
   function resetModal() {
-    setProgName(""); setProgDesc(""); setProgType(""); setProgConfig({}); setProgBrand({});
-    setProgAgentId(""); setJoinFields(["name", "email"]); setReceiptScanConfig({});
+    programForm.reset({ name: "", type: "" as ProgramFormData["type"], join_form_fields: ["name", "email"] });
+    setProgDesc(""); setProgConfig({}); setProgBrand({});
+    setProgAgentId(""); setReceiptScanConfig({});
     setNameTouched(false); setConfigTouched(new Set());
     setModalStep("setup");
   }
@@ -533,11 +569,15 @@ export default function WalletPage() {
 
   function openEdit(p: WalletProgram) {
     setEditingProgram(p);
-    setProgName(p.name); setProgDesc(p.description ?? "");
-    setProgType(p.type);
+    programForm.reset({
+      name: p.name,
+      type: p.type as ProgramFormData["type"],
+      join_form_fields: (p.join_form_fields || ["name", "email"]) as ProgramFormData["join_form_fields"],
+    });
+    setProgDesc(p.description ?? "");
     setProgConfig(Object.fromEntries(Object.entries(p.config).map(([k, v]) => [k, String(v)])));
     setProgBrand({ ...p.brand_overrides });
-    setProgAgentId(""); setJoinFields(p.join_form_fields || ["name", "email"]);
+    setProgAgentId("");
     setReceiptScanConfig(
       Object.fromEntries(Object.entries(p.receipt_scanning_config || {}).map(([k, v]) => [k, String(v)]))
     );
@@ -546,8 +586,7 @@ export default function WalletPage() {
     setShowModal(true);
   }
 
-  async function saveProgram() {
-    if (!progName.trim() || !progType) return;
+  async function saveProgram(data: ProgramFormData) {
     setSaving(true);
     try {
       const rsConfig: Record<string, unknown> = {};
@@ -560,12 +599,12 @@ export default function WalletPage() {
         else rsConfig[k] = v;
       }
       const payload = {
-        name: progName.trim(),
+        name: data.name.trim(),
         description: progDesc.trim() || null,
-        type: progType,
+        type: data.type,
         config: progConfig,
         brand_overrides: progBrand,
-        join_form_fields: joinFields,
+        join_form_fields: data.join_form_fields,
         receipt_scanning_config: rsConfig,
         ...(progAgentId ? { chatbot_id: progAgentId } : {}),
       };
@@ -576,7 +615,19 @@ export default function WalletPage() {
       }
       setShowModal(false);
       await load();
-    } catch {}
+    } catch (err) {
+      const fieldErrors = getFieldErrors(err);
+      for (const [field, message] of Object.entries(fieldErrors)) {
+        if (field === "name" || field === "type" || field === "join_form_fields") {
+          setProgramError(field as keyof ProgramFormData, { message });
+        }
+      }
+      toast({
+        variant: "destructive",
+        title: editingProgram ? "Failed to update program" : "Failed to create program",
+        description: getErrorMessage(err),
+      });
+    }
     setSaving(false);
   }
 
@@ -585,11 +636,14 @@ export default function WalletPage() {
     try {
       await apiClient.delete(`/api/wallet/programs/${id}`);
       setPrograms((p) => p.filter((pg) => pg.id !== id));
-    } catch {}
+    } catch (err) {
+      toast({ variant: "destructive", title: "Failed to delete program", description: getErrorMessage(err) });
+    }
   }
 
   async function issueCard() {
     if (!activeProgram) return;
+    if (issueEmailError) return;
     setIssuingCard(true);
     try {
       await apiClient.post(`/api/wallet/programs/${activeProgram.id}/cards`, {
@@ -598,7 +652,9 @@ export default function WalletPage() {
       setShowIssueModal(false);
       setIssueName(""); setIssueEmail(""); setIssuePhone("");
       await loadCards(activeProgram);
-    } catch {}
+    } catch (err) {
+      toast({ variant: "destructive", title: "Failed to issue card", description: getErrorMessage(err) });
+    }
     setIssuingCard(false);
   }
 
@@ -607,20 +663,32 @@ export default function WalletPage() {
     try {
       await apiClient.delete(`/api/wallet/cards/${serial}`);
       setCards((p) => p.map((c) => c.serial === serial ? { ...c, status: "revoked" } : c));
-    } catch {}
+    } catch (err) {
+      toast({ variant: "destructive", title: "Failed to revoke card", description: getErrorMessage(err) });
+    }
   }
 
   async function runAction() {
     if (!actionCard || !selectedAction) return;
+    if (actionValueError) return;
     setRunningAction(true);
     try {
+      const meta = ACTION_LABELS[selectedAction];
+      const isNumericValue = !!meta?.hasValue && selectedAction !== "set_tier";
+      const value = !meta?.hasValue
+        ? undefined
+        : isNumericValue
+          ? Number(actionValue)
+          : actionValue.trim();
       const res = await apiClient.post(`/api/wallet/cards/${actionCard.serial}/action`, {
-        action: selectedAction, value: actionValue || undefined,
+        action: selectedAction, value,
       });
       setCards((p) => p.map((c) => c.serial === actionCard.serial ? res.data.data : c));
       setActionCard(res.data.data);
       setSelectedAction(""); setActionValue("");
-    } catch {}
+    } catch (err) {
+      toast({ variant: "destructive", title: "Failed to apply action", description: getErrorMessage(err) });
+    }
     setRunningAction(false);
   }
 
@@ -637,8 +705,9 @@ export default function WalletPage() {
       setPushResult({ sent, message: `Sent to ${sent} device${sent !== 1 ? "s" : ""}` });
       setPushMessage("");
       setTimeout(() => { setPushTarget(null); setPushResult(null); }, 2500);
-    } catch {
-      setPushResult({ sent: 0, message: "Failed to send — check device registrations." });
+    } catch (err) {
+      setPushResult({ sent: 0, message: getErrorMessage(err) });
+      toast({ variant: "destructive", title: "Failed to send push notification", description: getErrorMessage(err) });
     }
     setSendingPush(false);
   }
@@ -649,7 +718,9 @@ export default function WalletPage() {
     try {
       const res = await apiClient.get(`/api/wallet/cards/${serial}/events?limit=20`);
       setCardEvents((p) => ({ ...p, [serial]: res.data.data ?? [] }));
-    } catch {}
+    } catch (err) {
+      toast({ variant: "destructive", title: "Failed to load card events", description: getErrorMessage(err) });
+    }
     setLoadingEvents((p) => ({ ...p, [serial]: false }));
   }
 
@@ -673,7 +744,9 @@ export default function WalletPage() {
     try {
       const res = await apiClient.post(`/api/wallet/programs/${activeProgram.id}/rotate-join-token`);
       setActiveProgram((p) => p ? { ...p, join_token: res.data.data.join_token, join_url: res.data.data.join_url } : p);
-    } catch {}
+    } catch (err) {
+      toast({ variant: "destructive", title: "Failed to rotate join link", description: getErrorMessage(err) });
+    }
     setRotatingToken(false);
   }
 
@@ -684,7 +757,9 @@ export default function WalletPage() {
     try {
       const res = await apiClient.post(`/api/wallet/programs/${activeProgram.id}/rotate-scanner-token`);
       setActiveProgram((p) => p ? { ...p, scanner_token: res.data.data.scanner_token, scanner_url: res.data.data.scanner_url } : p);
-    } catch {}
+    } catch (err) {
+      toast({ variant: "destructive", title: "Failed to rotate scanner link", description: getErrorMessage(err) });
+    }
     setRotatingScannerToken(false);
   }
 
@@ -724,10 +799,23 @@ export default function WalletPage() {
 
   const selectedAgent   = agents.find((a) => a.id === progAgentId) ?? null;
   const typeInfo        = programTypes.find((t) => t.value === progType);
-  const nameError       = nameTouched && !progName.trim() ? "Program name is required" : undefined;
+  const nameError       = nameTouched ? (programErrors.name?.message ?? (!progName.trim() ? "Program name is required" : undefined)) : undefined;
   const descOverLimit   = progDesc.length > 200;
-  const setupCanAdvance = !!progType && !!progName.trim() && !descOverLimit;
   const apiBase         = process.env.NEXT_PUBLIC_API_URL ?? "";
+
+  // Card action value validation — numeric for punch/points/balance actions, non-empty string for e.g. set_tier
+  const actionMeta       = selectedAction ? ACTION_LABELS[selectedAction] : undefined;
+  const actionIsNumeric  = !!actionMeta?.hasValue && selectedAction !== "set_tier";
+  const actionValueError = !actionMeta?.hasValue
+    ? undefined
+    : actionIsNumeric
+      ? (actionValue.trim() === "" || isNaN(Number(actionValue)) || Number(actionValue) < 0
+          ? "Enter a valid non-negative number" : undefined)
+      : (actionValue.trim() === "" ? `${actionMeta.valueLabel ?? "Value"} is required` : undefined);
+
+  // Issue-card form — all fields optional, just check well-formedness of what's entered
+  const issueEmailError = issueEmail.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(issueEmail.trim())
+    ? "Enter a valid email address" : undefined;
 
   // ── Setup step ─────────────────────────────────────────────────────────────
   function renderSetup() {
@@ -760,7 +848,10 @@ export default function WalletPage() {
             ) : (
             <div className="grid grid-cols-2 gap-2">
               {programTypes.map((t) => (
-                <button key={t.value} onClick={() => { setProgType(t.value); setProgConfig({}); }}
+                <button key={t.value} onClick={() => {
+                  setProgramValue("type", t.value as ProgramFormData["type"], { shouldValidate: true });
+                  setProgConfig({});
+                }}
                   className={`text-left rounded-xl border-2 px-3 py-3 transition-all duration-150 ${
                     progType === t.value ? "border-primary bg-primary/5 shadow-sm" : "border-border hover:border-border/60 hover:bg-muted/30"}`}>
                   <div className="text-xl mb-1">{t.icon}</div>
@@ -775,8 +866,9 @@ export default function WalletPage() {
 
         {progType && (
           <div className="space-y-4">
-            <ValidatedInput label="Program name" value={progName} onChange={setProgName}
-              onBlur={() => setNameTouched(true)}
+            <ValidatedInput label="Program name" value={progName}
+              onChange={(v) => setProgramValue("name", v, { shouldValidate: nameTouched })}
+              onBlur={() => { setNameTouched(true); triggerProgram("name"); }}
               placeholder={progType === "punch_card" ? "e.g. Coffee Club" : progType === "points" ? "e.g. Rewards Program" : "e.g. Program name"}
               touched={nameTouched} error={nameError} />
 
@@ -907,9 +999,12 @@ export default function WalletPage() {
               const required = f.key === "name";
               return (
                 <button key={f.key} disabled={required} title={required ? "Name is always required" : undefined}
-                  onClick={() => setJoinFields((prev) =>
-                    enabled && !required ? prev.filter((k) => k !== f.key) : [...prev, f.key]
-                  )}
+                  onClick={() => {
+                    const next = enabled && !required
+                      ? joinFields.filter((k) => k !== f.key)
+                      : [...joinFields, f.key as ProgramFormData["join_form_fields"][number]];
+                    setProgramValue("join_form_fields", next, { shouldValidate: true });
+                  }}
                   className={`rounded-full px-3 py-1 text-sm border transition-colors ${
                     enabled ? "bg-primary/10 text-primary border-primary/30 font-medium" : "border-border text-muted-foreground hover:border-primary/40"
                   } ${required ? "cursor-not-allowed" : ""}`}>
@@ -1164,7 +1259,9 @@ export default function WalletPage() {
                                       const win = window.open();
                                       if (win) win.document.write(`<img src="data:image/jpeg;base64,${img}" style="max-width:100%">`);
                                     }
-                                  } catch {}
+                                  } catch (err) {
+                                    toast({ variant: "destructive", title: "Failed to load receipt image", description: getErrorMessage(err) });
+                                  }
                                 }}
                                 className="text-primary hover:underline shrink-0"
                               >
@@ -1205,7 +1302,10 @@ export default function WalletPage() {
                 </div>
                 <div className="space-y-1.5">
                   <Label className="text-sm">Email</Label>
-                  <Input type="email" value={issueEmail} onChange={(e) => setIssueEmail(e.target.value)} placeholder="jane@example.com" />
+                  <Input type="email" value={issueEmail} onChange={(e) => setIssueEmail(e.target.value)}
+                    placeholder="jane@example.com"
+                    className={issueEmailError ? "border-destructive focus-visible:ring-destructive" : ""} />
+                  {issueEmailError && <p className="text-xs text-destructive">{issueEmailError}</p>}
                 </div>
                 <div className="space-y-1.5">
                   <Label className="text-sm">Phone</Label>
@@ -1214,7 +1314,7 @@ export default function WalletPage() {
               </div>
               <div className="flex justify-end gap-2 p-4 border-t">
                 <Button variant="outline" onClick={() => setShowIssueModal(false)}>Cancel</Button>
-                <Button onClick={issueCard} disabled={issuingCard}>
+                <Button onClick={issueCard} disabled={issuingCard || !!issueEmailError}>
                   {issuingCard && <Loader2 className="h-4 w-4 animate-spin mr-1.5" />}
                   Issue card
                 </Button>
@@ -1250,7 +1350,11 @@ export default function WalletPage() {
                 {selectedAction && ACTION_LABELS[selectedAction]?.hasValue && (
                   <div className="space-y-1.5">
                     <Label className="text-sm">{ACTION_LABELS[selectedAction].valueLabel}</Label>
-                    <Input value={actionValue} onChange={(e) => setActionValue(e.target.value)} placeholder="e.g. 100" />
+                    <Input value={actionValue} onChange={(e) => setActionValue(e.target.value)}
+                      type={actionIsNumeric ? "number" : "text"} min={actionIsNumeric ? 0 : undefined}
+                      placeholder={actionIsNumeric ? "e.g. 100" : "e.g. Gold"}
+                      className={actionValueError ? "border-destructive focus-visible:ring-destructive" : ""} />
+                    {actionValueError && <p className="text-xs text-destructive">{actionValueError}</p>}
                   </div>
                 )}
                 {Object.keys(actionCard.state).length > 0 && (
@@ -1263,7 +1367,7 @@ export default function WalletPage() {
               </div>
               <div className="flex justify-end gap-2 p-4 border-t">
                 <Button variant="outline" onClick={() => setActionCard(null)}>Cancel</Button>
-                <Button onClick={runAction} disabled={runningAction || !selectedAction}>
+                <Button onClick={runAction} disabled={runningAction || !selectedAction || !!actionValueError}>
                   {runningAction && <Loader2 className="h-4 w-4 animate-spin mr-1.5" />}
                   Apply
                 </Button>
@@ -1469,12 +1573,16 @@ export default function WalletPage() {
                   <Button variant="outline" size="sm" onClick={() => setModalStep("setup")}>← Back</Button>
                 )}
                 {modalStep === "setup" ? (
-                  <Button size="sm" onClick={() => { setNameTouched(true); if (setupCanAdvance) setModalStep("appearance"); }}
+                  <Button size="sm" onClick={async () => {
+                    setNameTouched(true);
+                    const valid = await triggerProgram(["name", "type"]);
+                    if (valid) setModalStep("appearance");
+                  }}
                     disabled={!progType} title={!progType ? "Select a program type first" : !progName.trim() ? "Enter a program name" : undefined}>
                     Next: Appearance →
                   </Button>
                 ) : (
-                  <Button size="sm" onClick={saveProgram} disabled={saving || !progName.trim()}>
+                  <Button size="sm" onClick={programForm.handleSubmit(saveProgram)} disabled={saving || !progName.trim()}>
                     {saving && <Loader2 className="h-4 w-4 animate-spin mr-1.5" />}
                     {editingProgram ? "Save changes" : "Create program"}
                   </Button>
