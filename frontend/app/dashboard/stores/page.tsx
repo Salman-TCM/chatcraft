@@ -5,11 +5,16 @@ import {
   ShoppingBag, Plus, Loader2, Pencil, Trash2, Package, ShoppingCart,
   RefreshCw, X, ExternalLink, DollarSign,
 } from "lucide-react";
+import { useForm } from "react-hook-form";
+import { zodResolver } from "@hookform/resolvers/zod";
+import { z } from "zod";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { apiClient } from "@/lib/api";
+import { toast } from "@/hooks/use-toast";
+import { getErrorMessage, getFieldErrors } from "@/lib/errors";
 
 interface Store {
   id: string;
@@ -49,7 +54,10 @@ interface Purchase {
   created_at: string;
 }
 
-const CURRENCIES = ["USD", "EUR", "GBP", "CAD", "AUD", "SGD", "AED", "INR"];
+// Kept in sync with StoreCreate/StoreUpdate's `currency` Literal union on the
+// backend (backend/app/schemas/commerce.py).
+const CURRENCIES = ["USD", "EUR", "GBP", "CAD", "AUD", "SGD", "AED", "INR"] as const;
+const VIEW_MODES = ["grid", "list"] as const;
 const STATUS_COLORS: Record<string, string> = {
   succeeded: "bg-green-100 text-green-700",
   pending: "bg-yellow-100 text-yellow-700",
@@ -58,6 +66,58 @@ const STATUS_COLORS: Record<string, string> = {
 };
 
 type StoreView = "list" | "settings" | "products" | "purchases";
+
+const storeSchema = z.object({
+  name: z.string().trim().min(1, "Store name is required"),
+  description: z.string().max(2000, "Description must be 2000 characters or less").optional(),
+  currency: z.enum(CURRENCIES),
+  primary_color: z
+    .string()
+    .regex(/^#[0-9A-Fa-f]{6}$/, "Must be a valid hex color, e.g. #6366f1"),
+  default_view_mode: z.enum(VIEW_MODES),
+  google_sheet_id: z.string().optional(),
+});
+type StoreFormData = z.infer<typeof storeSchema>;
+
+const STORE_DEFAULT_VALUES: StoreFormData = {
+  name: "",
+  description: "",
+  currency: "USD",
+  primary_color: "#6366f1",
+  default_view_mode: "grid",
+  google_sheet_id: "",
+};
+
+const productSchema = z.object({
+  name: z.string().trim().min(1, "Product name is required"),
+  description: z.string().optional(),
+  price: z.preprocess(
+    (v) => (v === "" || v === undefined || v === null ? undefined : v),
+    z.coerce
+      .number({ required_error: "Price is required", invalid_type_error: "Price must be a number" })
+      .min(0, "Price must be 0 or greater")
+  ),
+  compare_at_price: z.preprocess(
+    (v) => (v === "" || v === undefined || v === null ? undefined : v),
+    z.coerce.number().min(0, "Must be 0 or greater").optional()
+  ),
+  image_url: z.string().optional(),
+  category: z.string().optional(),
+  sku: z.string().optional(),
+  in_stock: z.boolean(),
+});
+type ProductFormData = z.infer<typeof productSchema>;
+
+const PRODUCT_DEFAULT_VALUES: ProductFormData = {
+  name: "",
+  description: "",
+  price: 0,
+  compare_at_price: undefined,
+  image_url: "",
+  category: "",
+  sku: "",
+  in_stock: true,
+};
 
 export default function StoresPage() {
   const [stores, setStores] = useState<Store[]>([]);
@@ -72,33 +132,46 @@ export default function StoresPage() {
   // Store form
   const [showStoreModal, setShowStoreModal] = useState(false);
   const [editingStore, setEditingStore] = useState<Store | null>(null);
-  const [storeName, setStoreName] = useState("");
-  const [storeDesc, setStoreDesc] = useState("");
-  const [storeCurrency, setStoreCurrency] = useState("USD");
-  const [storeColor, setStoreColor] = useState("#6366f1");
-  const [storeViewMode, setStoreViewMode] = useState("grid");
-  const [storeSheetId, setStoreSheetId] = useState("");
   const [savingStore, setSavingStore] = useState(false);
+
+  const {
+    register: registerStore,
+    handleSubmit: handleStoreSubmit,
+    watch: watchStore,
+    reset: resetStore,
+    setValue: setStoreValue,
+    setError: setStoreError,
+    formState: { errors: storeErrors },
+  } = useForm<StoreFormData>({
+    resolver: zodResolver(storeSchema),
+    defaultValues: STORE_DEFAULT_VALUES,
+  });
+  const storeColor = watchStore("primary_color");
 
   // Product form
   const [showProductModal, setShowProductModal] = useState(false);
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
-  const [prodName, setProdName] = useState("");
-  const [prodDesc, setProdDesc] = useState("");
-  const [prodPrice, setProdPrice] = useState("");
-  const [prodCompare, setProdCompare] = useState("");
-  const [prodImage, setProdImage] = useState("");
-  const [prodCategory, setProdCategory] = useState("");
-  const [prodSku, setProdSku] = useState("");
-  const [prodInStock, setProdInStock] = useState(true);
   const [savingProduct, setSavingProduct] = useState(false);
+
+  const {
+    register: registerProduct,
+    handleSubmit: handleProductSubmit,
+    reset: resetProduct,
+    setError: setProductError,
+    formState: { errors: productErrors },
+  } = useForm<ProductFormData>({
+    resolver: zodResolver(productSchema),
+    defaultValues: PRODUCT_DEFAULT_VALUES,
+  });
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
       const res = await apiClient.get("/api/v1/stores?limit=100");
       setStores(res.data.data ?? []);
-    } catch {}
+    } catch (err) {
+      toast({ variant: "destructive", title: "Failed to load stores", description: getErrorMessage(err) });
+    }
     setLoading(false);
   }, []);
 
@@ -111,7 +184,9 @@ export default function StoresPage() {
     try {
       const res = await apiClient.get(`/api/v1/stores/${store.id}/products?limit=200`);
       setProducts(res.data.data ?? []);
-    } catch {}
+    } catch (err) {
+      toast({ variant: "destructive", title: "Failed to load products", description: getErrorMessage(err) });
+    }
     setSubLoading(false);
   }
 
@@ -122,36 +197,40 @@ export default function StoresPage() {
     try {
       const res = await apiClient.get(`/api/v1/stores/${store.id}/purchases?limit=100`);
       setPurchases(res.data.data ?? []);
-    } catch {}
+    } catch (err) {
+      toast({ variant: "destructive", title: "Failed to load purchases", description: getErrorMessage(err) });
+    }
     setSubLoading(false);
   }
 
   function openCreateStore() {
     setEditingStore(null);
-    setStoreName(""); setStoreDesc(""); setStoreCurrency("USD");
-    setStoreColor("#6366f1"); setStoreViewMode("grid"); setStoreSheetId("");
+    resetStore(STORE_DEFAULT_VALUES);
     setShowStoreModal(true);
   }
 
   function openEditStore(s: Store) {
     setEditingStore(s);
-    setStoreName(s.name); setStoreDesc(s.description ?? "");
-    setStoreCurrency(s.currency); setStoreColor(s.primary_color);
-    setStoreViewMode(s.default_view_mode);
-    setStoreSheetId(s.google_sheet_id ?? "");
+    resetStore({
+      name: s.name,
+      description: s.description ?? "",
+      currency: (CURRENCIES as readonly string[]).includes(s.currency) ? (s.currency as StoreFormData["currency"]) : "USD",
+      primary_color: s.primary_color,
+      default_view_mode: (s.default_view_mode === "list" ? "list" : "grid"),
+      google_sheet_id: s.google_sheet_id ?? "",
+    });
     setShowStoreModal(true);
   }
 
-  async function saveStore() {
-    if (!storeName.trim()) return;
+  async function onSubmitStore(data: StoreFormData) {
     setSavingStore(true);
     const payload = {
-      name: storeName.trim(),
-      description: storeDesc || null,
-      currency: storeCurrency,
-      primary_color: storeColor,
-      default_view_mode: storeViewMode,
-      google_sheet_id: storeSheetId || null,
+      name: data.name.trim(),
+      description: data.description?.trim() || null,
+      currency: data.currency,
+      primary_color: data.primary_color,
+      default_view_mode: data.default_view_mode,
+      google_sheet_id: data.google_sheet_id?.trim() || null,
     };
     try {
       if (editingStore) {
@@ -161,7 +240,17 @@ export default function StoresPage() {
       }
       setShowStoreModal(false);
       await load();
-    } catch {}
+    } catch (err) {
+      toast({
+        variant: "destructive",
+        title: editingStore ? "Failed to save changes" : "Failed to create store",
+        description: getErrorMessage(err),
+      });
+      const fieldErrors = getFieldErrors(err);
+      for (const [field, message] of Object.entries(fieldErrors)) {
+        setStoreError(field as keyof StoreFormData, { message });
+      }
+    }
     setSavingStore(false);
   }
 
@@ -170,17 +259,19 @@ export default function StoresPage() {
     try {
       await apiClient.delete(`/api/v1/stores/${id}`);
       setStores((p) => p.filter((s) => s.id !== id));
-    } catch {}
+    } catch (err) {
+      toast({ variant: "destructive", title: "Failed to delete store", description: getErrorMessage(err) });
+    }
   }
 
   async function syncSheet(storeId: string) {
     setSyncing(true);
     try {
       const res = await apiClient.post(`/api/v1/stores/${storeId}/sync`);
-      alert(`Synced ${res.data.data.synced} product(s) from Google Sheet.`);
+      toast({ title: "Sheet synced", description: `Synced ${res.data.data.synced} product(s) from Google Sheet.` });
       if (activeStore?.id === storeId) await loadProducts(activeStore);
-    } catch (e: any) {
-      alert(e?.response?.data?.detail ?? "Sync failed");
+    } catch (err) {
+      toast({ variant: "destructive", title: "Sync failed", description: getErrorMessage(err) });
     }
     setSyncing(false);
   }
@@ -188,32 +279,37 @@ export default function StoresPage() {
   // Product helpers
   function openCreateProduct() {
     setEditingProduct(null);
-    setProdName(""); setProdDesc(""); setProdPrice(""); setProdCompare("");
-    setProdImage(""); setProdCategory(""); setProdSku(""); setProdInStock(true);
+    resetProduct(PRODUCT_DEFAULT_VALUES);
     setShowProductModal(true);
   }
 
   function openEditProduct(p: Product) {
     setEditingProduct(p);
-    setProdName(p.name); setProdDesc(p.description ?? "");
-    setProdPrice(String(p.price)); setProdCompare(p.compare_at_price ? String(p.compare_at_price) : "");
-    setProdImage(p.image_url ?? ""); setProdCategory(p.category ?? "");
-    setProdSku(p.sku ?? ""); setProdInStock(p.in_stock);
+    resetProduct({
+      name: p.name,
+      description: p.description ?? "",
+      price: p.price,
+      compare_at_price: p.compare_at_price ?? undefined,
+      image_url: p.image_url ?? "",
+      category: p.category ?? "",
+      sku: p.sku ?? "",
+      in_stock: p.in_stock,
+    });
     setShowProductModal(true);
   }
 
-  async function saveProduct() {
-    if (!activeStore || !prodName.trim() || !prodPrice) return;
+  async function onSubmitProduct(data: ProductFormData) {
+    if (!activeStore) return;
     setSavingProduct(true);
     const payload = {
-      name: prodName.trim(),
-      description: prodDesc || null,
-      price: parseFloat(prodPrice),
-      compare_at_price: prodCompare ? parseFloat(prodCompare) : null,
-      image_url: prodImage || null,
-      category: prodCategory || null,
-      sku: prodSku || null,
-      in_stock: prodInStock,
+      name: data.name.trim(),
+      description: data.description?.trim() || null,
+      price: data.price,
+      compare_at_price: data.compare_at_price ?? null,
+      image_url: data.image_url?.trim() || null,
+      category: data.category?.trim() || null,
+      sku: data.sku?.trim() || null,
+      in_stock: data.in_stock,
     };
     try {
       if (editingProduct) {
@@ -223,7 +319,17 @@ export default function StoresPage() {
       }
       setShowProductModal(false);
       await loadProducts(activeStore);
-    } catch {}
+    } catch (err) {
+      toast({
+        variant: "destructive",
+        title: editingProduct ? "Failed to save changes" : "Failed to add product",
+        description: getErrorMessage(err),
+      });
+      const fieldErrors = getFieldErrors(err);
+      for (const [field, message] of Object.entries(fieldErrors)) {
+        setProductError(field as keyof ProductFormData, { message });
+      }
+    }
     setSavingProduct(false);
   }
 
@@ -232,7 +338,9 @@ export default function StoresPage() {
     try {
       await apiClient.delete(`/api/v1/stores/${activeStore.id}/products/${productId}`);
       setProducts((p) => p.filter((pr) => pr.id !== productId));
-    } catch {}
+    } catch (err) {
+      toast({ variant: "destructive", title: "Failed to delete product", description: getErrorMessage(err) });
+    }
   }
 
   const publicBase = typeof window !== "undefined" ? window.location.origin : "";
@@ -324,44 +432,59 @@ export default function StoresPage() {
               <div className="flex-1 overflow-y-auto p-4 space-y-3">
                 <div className="space-y-1">
                   <Label>Name *</Label>
-                  <Input value={prodName} onChange={(e) => setProdName(e.target.value)} placeholder="Product name" />
+                  <Input {...registerProduct("name")} placeholder="Product name" />
+                  {productErrors.name && (
+                    <p className="text-sm text-destructive">{productErrors.name.message}</p>
+                  )}
                 </div>
                 <div className="space-y-1">
                   <Label>Description</Label>
-                  <Input value={prodDesc} onChange={(e) => setProdDesc(e.target.value)} placeholder="Short description" />
+                  <Input {...registerProduct("description")} placeholder="Short description" />
+                  {productErrors.description && (
+                    <p className="text-sm text-destructive">{productErrors.description.message}</p>
+                  )}
                 </div>
                 <div className="grid grid-cols-2 gap-3">
                   <div className="space-y-1">
                     <Label>Price * ({activeStore.currency})</Label>
-                    <Input type="number" step="0.01" min="0" value={prodPrice} onChange={(e) => setProdPrice(e.target.value)} placeholder="0.00" />
+                    <Input type="number" step="0.01" min="0" {...registerProduct("price")} placeholder="0.00" />
+                    {productErrors.price && (
+                      <p className="text-sm text-destructive">{productErrors.price.message}</p>
+                    )}
                   </div>
                   <div className="space-y-1">
                     <Label>Compare-at Price</Label>
-                    <Input type="number" step="0.01" min="0" value={prodCompare} onChange={(e) => setProdCompare(e.target.value)} placeholder="0.00" />
+                    <Input type="number" step="0.01" min="0" {...registerProduct("compare_at_price")} placeholder="0.00" />
+                    {productErrors.compare_at_price && (
+                      <p className="text-sm text-destructive">{productErrors.compare_at_price.message}</p>
+                    )}
                   </div>
                 </div>
                 <div className="space-y-1">
                   <Label>Image URL</Label>
-                  <Input value={prodImage} onChange={(e) => setProdImage(e.target.value)} placeholder="https://..." />
+                  <Input {...registerProduct("image_url")} placeholder="https://..." />
+                  {productErrors.image_url && (
+                    <p className="text-sm text-destructive">{productErrors.image_url.message}</p>
+                  )}
                 </div>
                 <div className="grid grid-cols-2 gap-3">
                   <div className="space-y-1">
                     <Label>Category</Label>
-                    <Input value={prodCategory} onChange={(e) => setProdCategory(e.target.value)} placeholder="e.g. Shirts" />
+                    <Input {...registerProduct("category")} placeholder="e.g. Shirts" />
                   </div>
                   <div className="space-y-1">
                     <Label>SKU</Label>
-                    <Input value={prodSku} onChange={(e) => setProdSku(e.target.value)} placeholder="SKU-001" />
+                    <Input {...registerProduct("sku")} placeholder="SKU-001" />
                   </div>
                 </div>
                 <div className="flex items-center gap-2">
-                  <input type="checkbox" id="in-stock" checked={prodInStock} onChange={(e) => setProdInStock(e.target.checked)} className="h-4 w-4" />
+                  <input type="checkbox" id="in-stock" {...registerProduct("in_stock")} className="h-4 w-4" />
                   <Label htmlFor="in-stock" className="cursor-pointer">In stock</Label>
                 </div>
               </div>
               <div className="flex justify-end gap-2 p-4 border-t">
                 <Button variant="outline" onClick={() => setShowProductModal(false)}>Cancel</Button>
-                <Button onClick={saveProduct} disabled={savingProduct || !prodName.trim() || !prodPrice}>
+                <Button onClick={handleProductSubmit(onSubmitProduct)} disabled={savingProduct}>
                   {savingProduct ? <Loader2 className="h-4 w-4 animate-spin mr-1" /> : null}
                   {editingProduct ? "Save Changes" : "Add Product"}
                 </Button>
@@ -507,45 +630,65 @@ export default function StoresPage() {
             <div className="flex-1 overflow-y-auto p-4 space-y-3">
               <div className="space-y-1">
                 <Label>Store Name *</Label>
-                <Input value={storeName} onChange={(e) => setStoreName(e.target.value)} placeholder="e.g. My Shop" />
+                <Input {...registerStore("name")} placeholder="e.g. My Shop" />
+                {storeErrors.name && (
+                  <p className="text-sm text-destructive">{storeErrors.name.message}</p>
+                )}
               </div>
               <div className="space-y-1">
                 <Label>Description</Label>
-                <Input value={storeDesc} onChange={(e) => setStoreDesc(e.target.value)} placeholder="Optional description" />
+                <Input {...registerStore("description")} placeholder="Optional description" />
+                {storeErrors.description && (
+                  <p className="text-sm text-destructive">{storeErrors.description.message}</p>
+                )}
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <div className="space-y-1">
                   <Label>Currency</Label>
-                  <select value={storeCurrency} onChange={(e) => setStoreCurrency(e.target.value)}
+                  <select {...registerStore("currency")}
                     className="w-full h-9 rounded-md border bg-background px-2 text-sm">
                     {CURRENCIES.map((c) => <option key={c} value={c}>{c}</option>)}
                   </select>
+                  {storeErrors.currency && (
+                    <p className="text-sm text-destructive">{storeErrors.currency.message}</p>
+                  )}
                 </div>
                 <div className="space-y-1">
                   <Label>Default View</Label>
-                  <select value={storeViewMode} onChange={(e) => setStoreViewMode(e.target.value)}
+                  <select {...registerStore("default_view_mode")}
                     className="w-full h-9 rounded-md border bg-background px-2 text-sm">
                     <option value="grid">Grid</option>
                     <option value="list">List</option>
                   </select>
+                  {storeErrors.default_view_mode && (
+                    <p className="text-sm text-destructive">{storeErrors.default_view_mode.message}</p>
+                  )}
                 </div>
               </div>
               <div className="space-y-1">
                 <Label>Primary Color</Label>
                 <div className="flex gap-2 items-center">
-                  <input type="color" value={storeColor} onChange={(e) => setStoreColor(e.target.value)} className="h-9 w-14 rounded border cursor-pointer" />
-                  <Input value={storeColor} onChange={(e) => setStoreColor(e.target.value)} className="font-mono text-sm" />
+                  <input
+                    type="color"
+                    value={/^#[0-9A-Fa-f]{6}$/.test(storeColor) ? storeColor : "#6366f1"}
+                    onChange={(e) => setStoreValue("primary_color", e.target.value, { shouldValidate: true, shouldDirty: true })}
+                    className="h-9 w-14 rounded border cursor-pointer"
+                  />
+                  <Input {...registerStore("primary_color")} className="font-mono text-sm" />
                 </div>
+                {storeErrors.primary_color && (
+                  <p className="text-sm text-destructive">{storeErrors.primary_color.message}</p>
+                )}
               </div>
               <div className="space-y-1">
                 <Label>Google Sheet ID <span className="text-muted-foreground font-normal">(for catalog sync)</span></Label>
-                <Input value={storeSheetId} onChange={(e) => setStoreSheetId(e.target.value)} placeholder="1BxiMVs0XRA5nFMdKvBdBZjgmUUqptlbs74OgVE2upms" />
+                <Input {...registerStore("google_sheet_id")} placeholder="1BxiMVs0XRA5nFMdKvBdBZjgmUUqptlbs74OgVE2upms" />
                 <p className="text-xs text-muted-foreground">Sheet must be published publicly. Columns: name, price, description, category, image_url, sku, in_stock</p>
               </div>
             </div>
             <div className="flex justify-end gap-2 p-4 border-t">
               <Button variant="outline" onClick={() => setShowStoreModal(false)}>Cancel</Button>
-              <Button onClick={saveStore} disabled={savingStore || !storeName.trim()}>
+              <Button onClick={handleStoreSubmit(onSubmitStore)} disabled={savingStore}>
                 {savingStore ? <Loader2 className="h-4 w-4 animate-spin mr-1" /> : null}
                 {editingStore ? "Save Changes" : "Create Store"}
               </Button>
