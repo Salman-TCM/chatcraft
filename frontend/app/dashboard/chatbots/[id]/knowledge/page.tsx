@@ -25,6 +25,8 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
 import { apiClient } from "@/lib/api";
+import { toast } from "@/hooks/use-toast";
+import { getErrorMessage } from "@/lib/errors";
 
 type DocStatus = "pending" | "processing" | "done" | "failed";
 type DocType = "pdf" | "docx" | "txt" | "csv" | "url" | "text";
@@ -88,6 +90,8 @@ export default function KnowledgePage() {
     try {
       const { data } = await apiClient.get(`/api/kb/${id}/documents`);
       setDocs(data.data);
+    } catch (err) {
+      toast({ variant: "destructive", title: "Failed to load documents", description: getErrorMessage(err) });
     } finally {
       setLoading(false);
     }
@@ -99,11 +103,15 @@ export default function KnowledgePage() {
     const form = new FormData();
     form.append("file", files[0]);
     try {
-      const { data } = await apiClient.post(`/api/kb/${id}/upload`, form, {
-        headers: { "Content-Type": "multipart/form-data" },
-      });
+      // Don't set Content-Type manually — axios/the browser needs to generate
+      // it themselves so the multipart boundary is included; a hardcoded
+      // "multipart/form-data" header has no boundary and the backend can't
+      // parse the body, so the upload silently fails.
+      const { data } = await apiClient.post(`/api/kb/${id}/upload`, form);
       setDocs((prev) => [data.data, ...prev]);
       setAddMode(null);
+    } catch (err) {
+      toast({ variant: "destructive", title: "Failed to upload file", description: getErrorMessage(err) });
     } finally {
       setUploading(false);
       if (fileRef.current) fileRef.current.value = "";
@@ -122,6 +130,8 @@ export default function KnowledgePage() {
       setUrlValue("");
       setUrlName("");
       setAddMode(null);
+    } catch (err) {
+      toast({ variant: "destructive", title: "Failed to add URL", description: getErrorMessage(err) });
     } finally {
       setIngestingUrl(false);
     }
@@ -139,6 +149,8 @@ export default function KnowledgePage() {
       setTextName("");
       setTextContent("");
       setAddMode(null);
+    } catch (err) {
+      toast({ variant: "destructive", title: "Failed to add text", description: getErrorMessage(err) });
     } finally {
       setIngestingText(false);
     }
@@ -150,6 +162,8 @@ export default function KnowledgePage() {
     try {
       await apiClient.delete(`/api/kb/${id}/documents/${docId}`);
       setDocs((prev) => prev.filter((d) => d.id !== docId));
+    } catch (err) {
+      toast({ variant: "destructive", title: "Failed to delete document", description: getErrorMessage(err) });
     } finally {
       setDeleting(null);
     }
@@ -166,6 +180,8 @@ export default function KnowledgePage() {
         threshold: 0.3,
       });
       setSearchResults(data.data);
+    } catch (err) {
+      toast({ variant: "destructive", title: "Search failed", description: getErrorMessage(err) });
     } finally {
       setSearching(false);
     }
