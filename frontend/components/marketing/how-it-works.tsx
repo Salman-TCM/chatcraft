@@ -30,8 +30,8 @@ export function HowItWorks() {
             <motion.div key={step.n} variants={fadeUp} className="relative text-center sm:text-left">
               <div className="relative z-10 inline-flex items-center gap-2 bg-background pr-3 sm:pl-0">
                 <step.icon className="h-4 w-4 text-primary" strokeWidth={1.75} />
-                <span className="text-xs font-semibold tracking-widest text-primary/60">
-                  STEP {step.n}
+                <span className="font-mono text-xs tracking-widest text-primary/60">
+                  step_{step.n}
                 </span>
               </div>
               <h3 className="mt-3 font-semibold">{step.title}</h3>

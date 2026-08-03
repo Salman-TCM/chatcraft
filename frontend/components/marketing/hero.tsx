@@ -6,6 +6,7 @@ import { motion } from "framer-motion";
 import { Button } from "@/components/ui/button";
 import { fadeUp, staggerChildren } from "@/lib/motion";
 import { APP_NAME } from "@/lib/constants";
+import { CornerFrame } from "./corner-frame";
 import { PROVIDERS, STATS } from "./content";
 
 export function Hero() {
@@ -22,13 +23,16 @@ export function Hero() {
         >
           <motion.div
             variants={fadeUp}
-            className="mx-auto mb-6 inline-flex items-center gap-2 rounded-full border bg-secondary px-3 py-1 text-xs font-medium text-muted-foreground lg:mx-0"
+            className="mx-auto mb-6 inline-flex items-center gap-2 border border-primary/25 px-2.5 py-1 font-mono text-[11px] uppercase tracking-wider text-primary lg:mx-0"
           >
             <span className="flex h-1.5 w-1.5 rounded-full bg-emerald-500" />
-            Now with Claude Sonnet 5, GPT-5.6 & Gemini 3.1
+            now shipping: claude sonnet 5 / gpt-5.6 / gemini 3.1
           </motion.div>
 
-          <motion.h1 variants={fadeUp} className="text-4xl font-bold tracking-tight sm:text-6xl">
+          <motion.h1
+            variants={fadeUp}
+            className="text-4xl font-bold leading-[1.05] tracking-tight sm:text-6xl"
+          >
             Run your entire business
             <br />
             on one <span className="text-primary">AI platform</span>
@@ -64,11 +68,11 @@ export function Hero() {
 
           <motion.div
             variants={fadeUp}
-            className="mt-8 flex flex-wrap items-center justify-center gap-x-5 gap-y-2 lg:justify-start"
+            className="mt-8 flex flex-wrap items-center justify-center gap-y-2 font-mono text-xs uppercase tracking-wide text-muted-foreground/70 lg:justify-start"
           >
-            <span className="text-xs font-medium text-muted-foreground">Works with</span>
+            <span className="text-muted-foreground">runs on</span>
             {PROVIDERS.map((p) => (
-              <span key={p} className="text-sm font-semibold text-muted-foreground/70">
+              <span key={p} className="ml-4 border-l border-border pl-4">
                 {p}
               </span>
             ))}
@@ -87,10 +91,10 @@ export function Hero() {
 
       {/* Stats bar */}
       <div className="border-y bg-secondary/50">
-        <div className="mx-auto grid max-w-5xl grid-cols-2 gap-6 px-6 py-10 sm:grid-cols-4">
+        <div className="mx-auto grid max-w-5xl grid-cols-2 divide-x divide-border sm:grid-cols-4">
           {STATS.map((s) => (
-            <div key={s.label} className="text-center">
-              <div className="text-2xl font-bold tracking-tight text-primary sm:text-3xl">
+            <div key={s.label} className="px-4 py-8 text-center sm:text-left">
+              <div className="font-mono text-2xl font-medium tracking-tight text-primary sm:text-3xl">
                 {s.value}
               </div>
               <div className="mt-1 text-xs text-muted-foreground sm:text-sm">{s.label}</div>
@@ -105,28 +109,28 @@ export function Hero() {
 function ChatMockup() {
   return (
     <div className="relative">
-      <div aria-hidden className="absolute -bottom-3 -right-3 h-full w-full rounded-2xl border" />
+      <CornerFrame />
 
-      <div className="relative rounded-2xl border bg-card p-5 shadow-lg">
+      <div className="relative rounded-lg border bg-card p-5 shadow-lg">
         <div className="mb-4 flex items-center justify-between border-b pb-3">
-          <span className="text-xs font-medium text-muted-foreground">Live chat preview</span>
-          <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
+          <span className="font-mono text-xs text-muted-foreground">live_chat.preview</span>
+          <span className="flex items-center gap-1.5 font-mono text-xs text-muted-foreground">
             <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
-            Online
+            online
           </span>
         </div>
 
         <div className="flex flex-col gap-3">
-          <div className="max-w-[80%] rounded-2xl rounded-tl-sm bg-secondary px-3 py-2 text-sm">
+          <div className="max-w-[80%] rounded-lg bg-secondary px-3 py-2 text-sm">
             Hey! Do you ship internationally, and how long does delivery take?
           </div>
-          <div className="ml-auto max-w-[80%] rounded-2xl rounded-tr-sm bg-primary px-3 py-2 text-sm text-primary-foreground">
+          <div className="ml-auto max-w-[80%] rounded-lg bg-primary px-3 py-2 text-sm text-primary-foreground">
             Yes — we ship worldwide. Most orders arrive in 3–5 business days. Want me to check a specific country?
           </div>
-          <div className="max-w-[80%] rounded-2xl rounded-tl-sm bg-secondary px-3 py-2 text-sm">
+          <div className="max-w-[80%] rounded-lg bg-secondary px-3 py-2 text-sm">
             Canada please
           </div>
-          <div className="flex items-center gap-1 rounded-2xl rounded-tl-sm bg-secondary px-3 py-2.5">
+          <div className="flex items-center gap-1 rounded-lg bg-secondary px-3 py-2.5">
             <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-muted-foreground [animation-delay:-0.3s]" />
             <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-muted-foreground [animation-delay:-0.15s]" />
             <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-muted-foreground" />
