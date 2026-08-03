@@ -13,13 +13,16 @@ import {
 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { signOut } from "next-auth/react";
+import { AnimatePresence, motion } from "framer-motion";
 import { useAppStore } from "@/store";
 import { ImpersonationBanner } from "@/components/impersonation-banner";
-import { PlatformLogo } from "@/components/platform-logo";
+import { Logo } from "@/components/branding/logo";
+import { ThemeToggle } from "@/components/theme-toggle";
+import { Avatar, AvatarFallback } from "@/components/ui/avatar";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { hasFeatureAccess, type FeatureKey } from "@/lib/features";
-
-// ─── Brand colour ─────────────────────────────────────────────────────────────
-const INDIGO = "#3B52D4";
+import { EASE_OUT, fadeIn } from "@/lib/motion";
+import { cn } from "@/lib/utils";
 
 // ─── Nav structure ────────────────────────────────────────────────────────────
 type NavItem = { href: string; label: string; icon: React.ElementType; feature?: FeatureKey };
@@ -102,20 +105,28 @@ function NavLink({
 
   if (collapsed) {
     return (
-      <Link
-        href={item.href}
-        onClick={onClick}
-        title={item.label}
-        className="relative flex h-8 w-8 items-center justify-center rounded-lg transition-colors mx-auto"
-        style={isActive ? { backgroundColor: INDIGO } : undefined}
-      >
-        <Icon className="h-4 w-4 shrink-0" style={isActive ? { color: "#fff" } : undefined} />
-        {badge !== undefined && badge > 0 && (
-          <span className="absolute -top-1 -right-1 flex h-3.5 min-w-[0.875rem] items-center justify-center rounded-full bg-red-500 px-0.5 text-[9px] font-semibold text-white leading-none">
-            {badge > 99 ? "99+" : badge}
-          </span>
-        )}
-      </Link>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <Link
+            href={item.href}
+            onClick={onClick}
+            className={cn(
+              "relative flex h-8 w-8 items-center justify-center rounded-lg mx-auto transition-colors",
+              isActive
+                ? "bg-primary text-primary-foreground"
+                : "text-muted-foreground hover:bg-accent hover:text-foreground"
+            )}
+          >
+            <Icon className="h-4 w-4 shrink-0" />
+            {badge !== undefined && badge > 0 && (
+              <span className="absolute -top-1 -right-1 flex h-3.5 min-w-[0.875rem] items-center justify-center rounded-full bg-red-500 px-0.5 text-[9px] font-semibold text-white leading-none">
+                {badge > 99 ? "99+" : badge}
+              </span>
+            )}
+          </Link>
+        </TooltipTrigger>
+        <TooltipContent side="right">{item.label}</TooltipContent>
+      </Tooltip>
     );
   }
 
@@ -123,20 +134,15 @@ function NavLink({
     <Link
       href={item.href}
       onClick={onClick}
-      className="flex items-center gap-2 rounded-lg py-[7px] px-2 text-xs font-medium transition-colors"
-      style={isActive ? { backgroundColor: INDIGO, color: "#fff" } : undefined}
-      data-inactive={!isActive || undefined}
+      className={cn(
+        "flex items-center gap-2 rounded-lg py-[7px] px-2 text-xs font-medium transition-colors",
+        isActive
+          ? "bg-primary text-primary-foreground"
+          : "text-foreground/70 hover:bg-accent hover:text-foreground"
+      )}
     >
-      <Icon
-        className="h-3.5 w-3.5 shrink-0"
-        style={isActive ? { color: "#fff" } : undefined}
-      />
-      <span
-        className={`flex-1 truncate ${isActive ? "text-white" : "text-foreground/70 group-hover:text-foreground"}`}
-        style={isActive ? { color: "#fff" } : undefined}
-      >
-        {item.label}
-      </span>
+      <Icon className="h-3.5 w-3.5 shrink-0" />
+      <span className="flex-1 truncate">{item.label}</span>
       {badge !== undefined && badge > 0 && (
         <span className="ml-auto flex h-4 min-w-[1rem] items-center justify-center rounded-full bg-red-500 px-1 text-[10px] font-semibold text-white leading-none">
           {badge > 99 ? "99+" : badge}
@@ -187,7 +193,6 @@ function SidebarContent({
 }) {
   const user = useAppStore((s) => s.user);
   const agencyTheme = useAppStore((s) => s.agencyTheme);
-  const brandColour = agencyTheme?.primaryColour ?? INDIGO;
   const platformName = agencyTheme?.name ?? "ChatCraft AI";
 
   const canSee = (item: NavItem) =>
@@ -252,12 +257,7 @@ function SidebarContent({
       <aside className="flex h-full w-12 flex-col bg-secondary border-r transition-all duration-200">
         {/* Brand mark */}
         <div className="flex h-12 shrink-0 items-center justify-center">
-          <div
-            className="flex h-7 w-7 items-center justify-center rounded-lg text-sm font-bold text-white"
-            style={{ backgroundColor: brandColour }}
-          >
-            {platformName[0]}
-          </div>
+          <Logo logoUrl={agencyTheme?.logo} name={platformName} size="sm" iconOnly />
         </div>
 
         {/* Expand button */}
@@ -291,10 +291,12 @@ function SidebarContent({
               <ShieldAlert className="h-4 w-4" />
             </Link>
           )}
-          <div className="flex h-8 w-8 mx-auto items-center justify-center rounded-full text-[11px] font-semibold text-white"
-            style={{ backgroundColor: brandColour }} title={user?.name ?? user?.email ?? ""}>
-            {initials}
-          </div>
+          <Avatar className="h-8 w-8 mx-auto" title={user?.name ?? user?.email ?? ""}>
+            <AvatarFallback className="bg-primary text-[11px] font-semibold text-primary-foreground">
+              {initials}
+            </AvatarFallback>
+          </Avatar>
+          <ThemeToggle className="h-8 w-8 mx-auto text-muted-foreground hover:text-foreground" />
           <button title="Sign out" onClick={() => signOut({ callbackUrl: "/login" })}
             className="flex h-8 w-8 mx-auto items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground transition-colors">
             <LogOut className="h-3.5 w-3.5" />
@@ -309,19 +311,7 @@ function SidebarContent({
 
       {/* ── Brand header ─────────────────────────────────────────────────────── */}
       <div className="flex h-12 shrink-0 items-center gap-2.5 px-3">
-        {agencyTheme?.logo ? (
-          <PlatformLogo logoUrl={agencyTheme.logo} platformName={platformName} height={28} />
-        ) : (
-          <>
-            <div
-              className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-sm font-bold text-white"
-              style={{ backgroundColor: brandColour }}
-            >
-              {platformName[0]}
-            </div>
-            <span className="text-sm font-semibold tracking-tight flex-1 truncate">{platformName}</span>
-          </>
-        )}
+        <Logo logoUrl={agencyTheme?.logo} name={platformName} size="md" className="flex-1 min-w-0" />
         {/* Collapse button */}
         <button
           title="Collapse sidebar"
@@ -438,12 +428,11 @@ function SidebarContent({
 
         {/* User row */}
         <div className="flex items-center gap-2 px-3 py-2.5">
-          <div
-            className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-[11px] font-semibold text-white"
-            style={{ backgroundColor: brandColour }}
-          >
-            {initials}
-          </div>
+          <Avatar className="h-7 w-7 shrink-0">
+            <AvatarFallback className="bg-primary text-[11px] font-semibold text-primary-foreground">
+              {initials}
+            </AvatarFallback>
+          </Avatar>
           <div className="min-w-0 flex-1">
             <p className="text-xs font-medium leading-tight truncate">
               {user?.name ?? user?.email ?? "—"}
@@ -462,6 +451,7 @@ function SidebarContent({
               {sysAlerts}
             </button>
           )}
+          <ThemeToggle className="h-7 w-7 shrink-0 text-muted-foreground hover:text-foreground" />
           <button
             title="Sign out"
             onClick={() => signOut({ callbackUrl: "/login" })}
@@ -481,67 +471,68 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   const [mobileOpen,    setMobileOpen]    = useState(false);
   const [sideCollapsed, setSideCollapsed] = useState(false);
   const agencyTheme = useAppStore((s) => s.agencyTheme);
-  const brandColour = agencyTheme?.primaryColour ?? INDIGO;
   const platformName = agencyTheme?.name ?? "ChatCraft AI";
 
   return (
-    <div className="flex h-screen overflow-hidden bg-background">
-      <ImpersonationBanner />
+    <TooltipProvider delayDuration={200}>
+      <div className="flex h-screen overflow-hidden bg-background">
+        <ImpersonationBanner />
 
-      {/* Desktop sidebar */}
-      <div className="hidden md:flex shrink-0">
-        <SidebarContent
-          pathname={pathname}
-          onNavigate={() => {}}
-          collapsed={sideCollapsed}
-          onToggleCollapse={() => setSideCollapsed((c) => !c)}
-        />
-      </div>
-
-      {/* Mobile overlay */}
-      {mobileOpen && (
-        <div className="fixed inset-0 z-40 md:hidden">
-          <div
-            className="absolute inset-0 bg-black/50 backdrop-blur-sm"
-            onClick={() => setMobileOpen(false)}
+        {/* Desktop sidebar */}
+        <div className="hidden md:flex shrink-0">
+          <SidebarContent
+            pathname={pathname}
+            onNavigate={() => {}}
+            collapsed={sideCollapsed}
+            onToggleCollapse={() => setSideCollapsed((c) => !c)}
           />
-          <div className="relative z-50 h-full">
-            <SidebarContent pathname={pathname} onNavigate={() => setMobileOpen(false)} />
-          </div>
-        </div>
-      )}
-
-      {/* Main */}
-      <div className="flex flex-1 flex-col overflow-hidden">
-        {/* Mobile topbar */}
-        <div className="flex h-12 shrink-0 items-center gap-3 border-b bg-secondary px-4 md:hidden">
-          <button
-            className="rounded-md p-1.5 hover:bg-muted transition-colors"
-            onClick={() => setMobileOpen((o) => !o)}
-          >
-            {mobileOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
-          </button>
-          <div className="flex items-center gap-2">
-            {agencyTheme?.logo ? (
-              <PlatformLogo logoUrl={agencyTheme.logo} platformName={platformName} height={24} />
-            ) : (
-              <>
-                <div
-                  className="flex h-6 w-6 items-center justify-center rounded text-xs font-bold text-white"
-                  style={{ backgroundColor: brandColour }}
-                >
-                  {platformName[0]}
-                </div>
-                <span className="text-sm font-semibold">{platformName}</span>
-              </>
-            )}
-          </div>
         </div>
 
-        <div className="flex-1 overflow-y-auto">
-          {children}
+        {/* Mobile overlay */}
+        <AnimatePresence>
+          {mobileOpen && (
+            <motion.div
+              className="fixed inset-0 z-40 md:hidden"
+              initial="hidden"
+              animate="show"
+              exit="hidden"
+              variants={fadeIn}
+            >
+              <div
+                className="absolute inset-0 bg-black/50 backdrop-blur-sm"
+                onClick={() => setMobileOpen(false)}
+              />
+              <motion.div
+                className="relative z-50 h-full"
+                initial={{ x: -24, opacity: 0 }}
+                animate={{ x: 0, opacity: 1 }}
+                exit={{ x: -24, opacity: 0 }}
+                transition={{ duration: 0.2, ease: EASE_OUT }}
+              >
+                <SidebarContent pathname={pathname} onNavigate={() => setMobileOpen(false)} />
+              </motion.div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+
+        {/* Main */}
+        <div className="flex flex-1 flex-col overflow-hidden">
+          {/* Mobile topbar */}
+          <div className="flex h-12 shrink-0 items-center gap-3 border-b bg-secondary px-4 md:hidden">
+            <button
+              className="rounded-md p-1.5 hover:bg-muted transition-colors"
+              onClick={() => setMobileOpen((o) => !o)}
+            >
+              {mobileOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
+            </button>
+            <Logo logoUrl={agencyTheme?.logo} name={platformName} size="sm" />
+          </div>
+
+          <div className="flex-1 overflow-y-auto">
+            {children}
+          </div>
         </div>
       </div>
-    </div>
+    </TooltipProvider>
   );
 }

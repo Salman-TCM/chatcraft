@@ -2,6 +2,7 @@
 
 import { useEffect } from "react";
 import { useAppStore } from "@/store";
+import { hexToHslTriple } from "@/lib/color";
 
 interface AgencyTheme {
   primaryColour?: string;
@@ -17,9 +18,10 @@ export function ThemeInjector({ theme }: { theme: AgencyTheme | null }) {
     setAgencyTheme(theme);
 
     if (theme?.primaryColour) {
-      const root = document.documentElement;
-      root.style.setProperty("--brand-primary", theme.primaryColour);
-      root.style.setProperty("--brand-primary-hover", theme.primaryColour);
+      const hsl = hexToHslTriple(theme.primaryColour);
+      if (hsl) {
+        document.documentElement.style.setProperty("--brand-primary", hsl);
+      }
     }
 
     if (theme?.favicon) {
