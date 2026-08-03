@@ -3,8 +3,10 @@
 import { useEffect, useRef, useState } from "react";
 import { useParams, useSearchParams } from "next/navigation";
 import { Send } from "lucide-react";
+import { APP_NAME } from "@/lib/constants";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
+const APP_URL = process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000";
 const GUEST_KEY = (id: string) => `chatcraft_guest_id_${id}`;
 const CONV_KEY  = (id: string) => `chatcraft_conv_id_${id}`;
 
@@ -465,12 +467,12 @@ export default function WidgetPage() {
         >
           Powered by{" "}
           <a
-            href="https://chatcraft.ai"
+            href={APP_URL}
             target="_blank"
             rel="noopener noreferrer"
             style={{ color: mutedColor }}
           >
-            ChatCraft AI
+            {APP_NAME}
           </a>
         </div>
       )}

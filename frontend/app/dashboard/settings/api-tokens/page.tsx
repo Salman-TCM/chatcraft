@@ -7,6 +7,7 @@ import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { apiClient } from "@/lib/api";
+import { APP_NAME } from "@/lib/constants";
 
 interface ApiToken {
   id: string;
@@ -97,7 +98,7 @@ export default function ApiTokensPage() {
             <Key className="h-6 w-6" /> API Tokens
           </h1>
           <p className="text-sm text-muted-foreground mt-1">
-            Bearer tokens for programmatic access to the ChatCraft API.
+            Bearer tokens for programmatic access to the {APP_NAME} API.
           </p>
         </div>
         <Button onClick={() => setShowForm(s => !s)} size="sm">

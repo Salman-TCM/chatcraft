@@ -18,6 +18,8 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
+import { Logo } from "@/components/branding/logo";
+import { APP_NAME } from "@/lib/constants";
 
 const schema = z
   .object({
@@ -81,8 +83,9 @@ export default function RegisterPage() {
 
   if (success) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-background px-4">
-        <Card className="w-full max-w-md text-center">
+      <div className="relative flex min-h-screen items-center justify-center overflow-hidden bg-background px-4">
+        <div className="bg-hero-glow pointer-events-none absolute inset-x-0 top-0 -z-10 h-[500px]" />
+        <Card className="w-full max-w-md text-center shadow-lg">
           <CardHeader className="space-y-1">
             <CardTitle className="text-2xl font-bold">Check your email</CardTitle>
             <CardDescription>
@@ -101,12 +104,18 @@ export default function RegisterPage() {
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-background px-4">
-      <Card className="w-full max-w-md">
+    <div className="relative flex min-h-screen items-center justify-center overflow-hidden bg-background px-4">
+      <div className="bg-hero-glow pointer-events-none absolute inset-x-0 top-0 -z-10 h-[500px]" />
+
+      <Link href="/" className="absolute left-6 top-6 hidden items-center gap-2 sm:flex">
+        <Logo size="sm" />
+      </Link>
+
+      <Card className="w-full max-w-md shadow-lg">
         <CardHeader className="space-y-1">
           <CardTitle className="text-2xl font-bold">Create an account</CardTitle>
           <CardDescription>
-            Start your free ChatCraft AI account today
+            Start your free {APP_NAME} account today
           </CardDescription>
         </CardHeader>
 

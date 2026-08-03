@@ -41,13 +41,17 @@ export function FeatureGrid({
           <p className="mt-4 text-muted-foreground">{description}</p>
         </div>
 
-        <div className="mt-14 grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
+        <div className="mt-14 grid gap-px overflow-hidden rounded-xl border sm:grid-cols-2 lg:grid-cols-3">
           {items.map((f) => (
-            <Card key={f.title} variant="interactive" className={cn("border p-6", cardClassName)}>
-              <div className="mb-4 flex h-10 w-10 items-center justify-center rounded-lg bg-primary/10">
-                <f.icon className="h-5 w-5 text-primary" />
-              </div>
-              <h3 className="font-semibold">{f.title}</h3>
+            <Card
+              key={f.title}
+              className={cn(
+                "rounded-none border-0 p-6 shadow-none transition-colors hover:bg-secondary/40",
+                cardClassName
+              )}
+            >
+              <f.icon className="h-5 w-5 text-primary" strokeWidth={1.75} />
+              <h3 className="mt-4 font-semibold">{f.title}</h3>
               <p className="mt-2 text-sm text-muted-foreground">{f.desc}</p>
             </Card>
           ))}
