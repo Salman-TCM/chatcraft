@@ -5,11 +5,16 @@ import {
   FileText, Plus, Loader2, Pencil, Trash2, Eye, Copy, GripVertical,
   X, ChevronDown, ChevronUp, ExternalLink,
 } from "lucide-react";
+import { useForm } from "react-hook-form";
+import { zodResolver } from "@hookform/resolvers/zod";
+import { z } from "zod";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { apiClient } from "@/lib/api";
+import { toast } from "@/hooks/use-toast";
+import { getErrorMessage, getFieldErrors } from "@/lib/errors";
 
 interface FieldDef {
   id: string;
@@ -58,6 +63,30 @@ function newField(): FieldDef {
   return { id: crypto.randomUUID(), type: "text", label: "", placeholder: "", required: false };
 }
 
+const DEFAULT_SUCCESS_MESSAGE = "Thank you! We'll be in touch.";
+
+const formMetadataSchema = z.object({
+  name: z
+    .string()
+    .trim()
+    .min(1, "Form name is required")
+    .max(255, "Form name must be 255 characters or less"),
+  description: z
+    .string()
+    .max(2000, "Description must be 2000 characters or less")
+    .optional(),
+  success_message: z
+    .string()
+    .max(500, "Success message must be 500 characters or less")
+    .optional(),
+  submit_button_text: z
+    .string()
+    .max(100, "Button text must be 100 characters or less")
+    .optional(),
+});
+
+type FormMetadata = z.infer<typeof formMetadataSchema>;
+
 export default function FormsPage() {
   const [forms, setForms] = useState<Form[]>([]);
   const [loading, setLoading] = useState(true);
@@ -68,20 +97,39 @@ export default function FormsPage() {
   const [subLoading, setSubLoading] = useState(false);
   const [saving, setSaving] = useState(false);
 
-  // Form builder state
-  const [formName, setFormName] = useState("");
-  const [formDesc, setFormDesc] = useState("");
-  const [successMsg, setSuccessMsg] = useState("Thank you! We'll be in touch.");
-  const [btnText, setBtnText] = useState("Submit");
+  // Form builder state — dynamic field definitions stay plain state; the
+  // top-level metadata (name, description, etc.) is validated via react-hook-form.
   const [fields, setFields] = useState<FieldDef[]>([newField()]);
   const [expandedField, setExpandedField] = useState<string | null>(null);
+
+  const {
+    register,
+    handleSubmit,
+    reset,
+    setError,
+    formState: { errors },
+  } = useForm<FormMetadata>({
+    resolver: zodResolver(formMetadataSchema),
+    defaultValues: {
+      name: "",
+      description: "",
+      success_message: DEFAULT_SUCCESS_MESSAGE,
+      submit_button_text: "Submit",
+    },
+  });
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
       const res = await apiClient.get("/api/v1/forms?limit=100");
       setForms(res.data.data ?? []);
-    } catch {}
+    } catch (err) {
+      toast({
+        variant: "destructive",
+        title: "Failed to load forms",
+        description: getErrorMessage(err),
+      });
+    }
     setLoading(false);
   }, []);
 
@@ -89,10 +137,12 @@ export default function FormsPage() {
 
   function openCreate() {
     setEditing(null);
-    setFormName("");
-    setFormDesc("");
-    setSuccessMsg("Thank you! We'll be in touch.");
-    setBtnText("Submit");
+    reset({
+      name: "",
+      description: "",
+      success_message: DEFAULT_SUCCESS_MESSAGE,
+      submit_button_text: "Submit",
+    });
     setFields([newField()]);
     setExpandedField(null);
     setShowModal(true);
@@ -100,23 +150,24 @@ export default function FormsPage() {
 
   function openEdit(f: Form) {
     setEditing(f);
-    setFormName(f.name);
-    setFormDesc(f.description ?? "");
-    setSuccessMsg(f.success_message);
-    setBtnText(f.submit_button_text);
+    reset({
+      name: f.name,
+      description: f.description ?? "",
+      success_message: f.success_message,
+      submit_button_text: f.submit_button_text,
+    });
     setFields(f.fields.length ? f.fields : [newField()]);
     setExpandedField(null);
     setShowModal(true);
   }
 
-  async function save() {
-    if (!formName.trim()) return;
+  async function onSubmit(data: FormMetadata) {
     setSaving(true);
     const payload = {
-      name: formName.trim(),
-      description: formDesc || null,
-      success_message: successMsg,
-      submit_button_text: btnText,
+      name: data.name.trim(),
+      description: data.description?.trim() || null,
+      success_message: data.success_message?.trim() || DEFAULT_SUCCESS_MESSAGE,
+      submit_button_text: data.submit_button_text?.trim() || "Submit",
       fields,
     };
     try {
@@ -127,7 +178,17 @@ export default function FormsPage() {
       }
       setShowModal(false);
       await load();
-    } catch {}
+    } catch (err) {
+      toast({
+        variant: "destructive",
+        title: editing ? "Failed to save changes" : "Failed to create form",
+        description: getErrorMessage(err),
+      });
+      const fieldErrors = getFieldErrors(err);
+      for (const [field, message] of Object.entries(fieldErrors)) {
+        setError(field as keyof FormMetadata, { message });
+      }
+    }
     setSaving(false);
   }
 
@@ -136,7 +197,13 @@ export default function FormsPage() {
     try {
       await apiClient.delete(`/api/v1/forms/${id}`);
       setForms((p) => p.filter((f) => f.id !== id));
-    } catch {}
+    } catch (err) {
+      toast({
+        variant: "destructive",
+        title: "Failed to delete form",
+        description: getErrorMessage(err),
+      });
+    }
   }
 
   async function loadSubmissions(f: Form) {
@@ -146,7 +213,13 @@ export default function FormsPage() {
     try {
       const res = await apiClient.get(`/api/v1/forms/${f.id}/submissions?limit=100`);
       setSubmissions(res.data.data ?? []);
-    } catch {}
+    } catch (err) {
+      toast({
+        variant: "destructive",
+        title: "Failed to load submissions",
+        description: getErrorMessage(err),
+      });
+    }
     setSubLoading(false);
   }
 
@@ -156,7 +229,13 @@ export default function FormsPage() {
 ${f.fields.map((fd) => `  <!-- ${fd.label} -->\n  <input name="${fd.id}" type="${fd.type}" placeholder="${fd.placeholder ?? fd.label}" ${fd.required ? "required" : ""} />`).join("\n")}
   <button type="submit">${f.submit_button_text}</button>
 </form>`;
-    navigator.clipboard.writeText(code).catch(() => {});
+    navigator.clipboard.writeText(code).catch((err) => {
+      toast({
+        variant: "destructive",
+        title: "Failed to copy embed code",
+        description: getErrorMessage(err),
+      });
+    });
   }
 
   // Field builder helpers
@@ -292,19 +371,31 @@ ${f.fields.map((fd) => `  <!-- ${fd.label} -->\n  <input name="${fd.id}" type="$
               <div className="grid grid-cols-2 gap-3">
                 <div className="col-span-2 space-y-1">
                   <Label>Form Name *</Label>
-                  <Input value={formName} onChange={(e) => setFormName(e.target.value)} placeholder="e.g. Lead Capture" />
+                  <Input {...register("name")} placeholder="e.g. Lead Capture" />
+                  {errors.name && (
+                    <p className="text-sm text-destructive">{errors.name.message}</p>
+                  )}
                 </div>
                 <div className="col-span-2 space-y-1">
                   <Label>Description</Label>
-                  <Input value={formDesc} onChange={(e) => setFormDesc(e.target.value)} placeholder="Optional description" />
+                  <Input {...register("description")} placeholder="Optional description" />
+                  {errors.description && (
+                    <p className="text-sm text-destructive">{errors.description.message}</p>
+                  )}
                 </div>
                 <div className="space-y-1">
                   <Label>Success Message</Label>
-                  <Input value={successMsg} onChange={(e) => setSuccessMsg(e.target.value)} />
+                  <Input {...register("success_message")} />
+                  {errors.success_message && (
+                    <p className="text-sm text-destructive">{errors.success_message.message}</p>
+                  )}
                 </div>
                 <div className="space-y-1">
                   <Label>Button Text</Label>
-                  <Input value={btnText} onChange={(e) => setBtnText(e.target.value)} />
+                  <Input {...register("submit_button_text")} />
+                  {errors.submit_button_text && (
+                    <p className="text-sm text-destructive">{errors.submit_button_text.message}</p>
+                  )}
                 </div>
               </div>
 
@@ -396,7 +487,7 @@ ${f.fields.map((fd) => `  <!-- ${fd.label} -->\n  <input name="${fd.id}" type="$
 
             <div className="flex justify-end gap-2 p-4 border-t">
               <Button variant="outline" onClick={() => setShowModal(false)}>Cancel</Button>
-              <Button onClick={save} disabled={saving || !formName.trim()}>
+              <Button onClick={handleSubmit(onSubmit)} disabled={saving}>
                 {saving ? <Loader2 className="h-4 w-4 animate-spin mr-1" /> : null}
                 {editing ? "Save Changes" : "Create Form"}
               </Button>
