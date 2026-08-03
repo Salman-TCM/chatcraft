@@ -32,11 +32,18 @@ from sqlalchemy import func, select
 
 from app.core.dependencies import CurrentUser, DBSession
 from app.models.broadcast import BroadcastCampaign, CommentAutomation, SocialAccount, SocialPost
+from app.schemas.broadcast import (
+    ConnectAccountRequest,
+    CreateCampaignRequest,
+    CreateCommentAutomationRequest,
+    CreatePostRequest,
+    GenerateCaptionRequest,
+    TestCampaignRequest,
+    UpdateCampaignRequest,
+    UpdateCommentAutomationRequest,
+)
 
 router = APIRouter(tags=["broadcast", "social"])
-
-CHANNELS = ["email", "sms", "telegram", "whatsapp", "messenger", "push", "phone"]
-PLATFORMS = ["facebook", "instagram", "x"]
 
 
 # ── Helpers ────────────────────────────────────────────────────────────────────
@@ -136,24 +143,17 @@ async def list_campaigns(
 
 
 @router.post("/api/v1/broadcasts", response_model=dict, status_code=status.HTTP_201_CREATED)
-async def create_campaign(body: dict, user: CurrentUser, db: DBSession) -> dict:
-    name = (body.get("name") or "").strip()
-    channel = (body.get("channel") or "").strip()
-    if not name:
-        raise HTTPException(status_code=422, detail="name required")
-    if channel not in CHANNELS:
-        raise HTTPException(status_code=422, detail=f"channel must be one of: {CHANNELS}")
-
+async def create_campaign(body: CreateCampaignRequest, user: CurrentUser, db: DBSession) -> dict:
     campaign = BroadcastCampaign(
         user_id=user.id,
-        name=name,
-        channel=channel,
+        name=body.name.strip(),
+        channel=body.channel,
         status="draft",
-        message_template=body.get("message_template", ""),
-        html_content=body.get("html_content"),
-        subject=body.get("subject"),
-        target_filter=body.get("target_filter", {}),
-        scheduled_at=_parse_dt(body.get("scheduled_at")),
+        message_template=body.message_template,
+        html_content=body.html_content,
+        subject=body.subject,
+        target_filter=body.target_filter,
+        scheduled_at=_parse_dt(body.scheduled_at),
     )
     db.add(campaign)
     await db.commit()
@@ -167,15 +167,17 @@ async def get_campaign(campaign_id: uuid.UUID, user: CurrentUser, db: DBSession)
 
 
 @router.patch("/api/v1/broadcasts/{campaign_id}", response_model=dict)
-async def update_campaign(campaign_id: uuid.UUID, body: dict, user: CurrentUser, db: DBSession) -> dict:
+async def update_campaign(campaign_id: uuid.UUID, body: UpdateCampaignRequest, user: CurrentUser, db: DBSession) -> dict:
     campaign = await _get_campaign(campaign_id, user.id, db)
     if campaign.status == "sending":
         raise HTTPException(status_code=409, detail="Cannot edit a campaign that is currently sending")
-    for field in ("name", "message_template", "html_content", "subject", "target_filter"):
-        if field in body:
-            setattr(campaign, field, body[field])
-    if "scheduled_at" in body:
-        campaign.scheduled_at = _parse_dt(body["scheduled_at"])
+    updates = body.model_dump(exclude_unset=True)
+    scheduled_at_set = "scheduled_at" in updates
+    scheduled_at = updates.pop("scheduled_at", None)
+    for field, value in updates.items():
+        setattr(campaign, field, value)
+    if scheduled_at_set:
+        campaign.scheduled_at = _parse_dt(scheduled_at)
     await db.commit()
     await db.refresh(campaign)
     return {"success": True, "data": _campaign_dict(campaign)}
@@ -221,12 +223,10 @@ async def send_campaign(campaign_id: uuid.UUID, user: CurrentUser, db: DBSession
 
 
 @router.post("/api/v1/broadcasts/{campaign_id}/test", response_model=dict)
-async def test_campaign(campaign_id: uuid.UUID, body: dict, user: CurrentUser, db: DBSession) -> dict:
+async def test_campaign(campaign_id: uuid.UUID, body: TestCampaignRequest, user: CurrentUser, db: DBSession) -> dict:
     """Send a test message to a single address/phone/chat ID."""
     campaign = await _get_campaign(campaign_id, user.id, db)
-    to: str = (body.get("to") or "").strip()
-    if not to:
-        raise HTTPException(status_code=422, detail="to is required")
+    to: str = body.to.strip()
 
     sample_vars = {"first_name": "Test", "last_name": "User", "email": to}
     msg = campaign.message_template or ""
@@ -311,20 +311,17 @@ async def list_accounts(user: CurrentUser, db: DBSession) -> dict:
 
 
 @router.post("/api/v1/social/accounts", response_model=dict, status_code=status.HTTP_201_CREATED)
-async def connect_account(body: dict, user: CurrentUser, db: DBSession) -> dict:
-    platform = (body.get("platform") or "").strip()
-    if platform not in PLATFORMS:
-        raise HTTPException(status_code=422, detail=f"platform must be one of: {PLATFORMS}")
+async def connect_account(body: ConnectAccountRequest, user: CurrentUser, db: DBSession) -> dict:
     account = SocialAccount(
         user_id=user.id,
-        platform=platform,
-        account_id=body.get("account_id", ""),
-        access_token=body.get("access_token", ""),
-        name=body.get("name", ""),
-        avatar_url=body.get("avatar_url"),
-        page_id=body.get("page_id"),
-        page_access_token=body.get("page_access_token"),
-        token_expires_at=_parse_dt(body.get("token_expires_at")),
+        platform=body.platform,
+        account_id=body.account_id,
+        access_token=body.access_token,
+        name=body.name,
+        avatar_url=body.avatar_url,
+        page_id=body.page_id,
+        page_access_token=body.page_access_token,
+        token_expires_at=_parse_dt(body.token_expires_at),
     )
     db.add(account)
     await db.commit()
@@ -363,27 +360,23 @@ async def list_posts(
 
 
 @router.post("/api/v1/social/posts", response_model=dict, status_code=status.HTTP_201_CREATED)
-async def create_post(body: dict, user: CurrentUser, db: DBSession) -> dict:
-    content = (body.get("content") or "").strip()
-    if not content:
-        raise HTTPException(status_code=422, detail="content required")
-
-    account_ids: list = body.get("account_ids", [])
-    scheduled_at = _parse_dt(body.get("scheduled_at"))
+async def create_post(body: CreatePostRequest, user: CurrentUser, db: DBSession) -> dict:
+    content = body.content.strip()
+    account_ids = body.account_ids
+    scheduled_at = _parse_dt(body.scheduled_at)
 
     post = SocialPost(
         user_id=user.id,
         account_ids=account_ids,
         content=content,
-        image_url=body.get("image_url"),
+        image_url=body.image_url,
         status="draft",
         scheduled_at=scheduled_at,
     )
     db.add(post)
     await db.flush()
 
-    publish_now = body.get("publish_now", False)
-    if publish_now and account_ids:
+    if body.publish_now and account_ids:
         errors = []
         platform_post_ids = {}
         for account_id in account_ids:
@@ -391,7 +384,7 @@ async def create_post(body: dict, user: CurrentUser, db: DBSession) -> dict:
                 account = await db.get(SocialAccount, uuid.UUID(str(account_id)))
                 if not account or account.user_id != user.id:
                     continue
-                pid = await _publish_to_platform(account, content, body.get("image_url"))
+                pid = await _publish_to_platform(account, content, body.image_url)
                 if pid:
                     platform_post_ids[account_id] = pid
             except Exception as e:
@@ -420,13 +413,11 @@ async def delete_post(post_id: uuid.UUID, user: CurrentUser, db: DBSession) -> d
 
 
 @router.post("/api/v1/social/posts/generate-caption", response_model=dict)
-async def generate_caption(body: dict, user: CurrentUser, db: DBSession) -> dict:
-    prompt = (body.get("prompt") or "").strip()
-    if not prompt:
-        raise HTTPException(status_code=422, detail="prompt required")
+async def generate_caption(body: GenerateCaptionRequest, user: CurrentUser, db: DBSession) -> dict:
+    prompt = body.prompt.strip()
 
     from app.services.llm import ChatMessage, LLMRouter
-    llm = LLMRouter(model=body.get("model", "claude-sonnet-4-6"))
+    llm = LLMRouter(model=body.model)
     messages = [
         ChatMessage(
             role="system",
@@ -454,27 +445,20 @@ async def list_comment_automations(user: CurrentUser, db: DBSession) -> dict:
 
 
 @router.post("/api/v1/comment-automations", response_model=dict, status_code=status.HTTP_201_CREATED)
-async def create_comment_automation(body: dict, user: CurrentUser, db: DBSession) -> dict:
-    platform = (body.get("platform") or "").strip()
-    page_id = (body.get("page_id") or "").strip()
-    if not platform or platform not in ("facebook", "instagram"):
-        raise HTTPException(status_code=422, detail="platform must be facebook or instagram")
-    if not page_id:
-        raise HTTPException(status_code=422, detail="page_id required")
-
+async def create_comment_automation(body: CreateCommentAutomationRequest, user: CurrentUser, db: DBSession) -> dict:
     ca = CommentAutomation(
         user_id=user.id,
-        platform=platform,
-        page_id=page_id,
-        page_name=body.get("page_name"),
-        enabled=body.get("enabled", True),
-        ai_prompt=body.get("ai_prompt"),
-        response_type=body.get("response_type", "ai"),
-        response_text=body.get("response_text"),
-        keyword_triggers=body.get("keyword_triggers", []),
-        delay_seconds=body.get("delay_seconds", 0),
-        also_send_dm=body.get("also_send_dm", False),
-        dm_message=body.get("dm_message"),
+        platform=body.platform,
+        page_id=body.page_id.strip(),
+        page_name=body.page_name,
+        enabled=body.enabled,
+        ai_prompt=body.ai_prompt,
+        response_type=body.response_type,
+        response_text=body.response_text,
+        keyword_triggers=body.keyword_triggers,
+        delay_seconds=body.delay_seconds,
+        also_send_dm=body.also_send_dm,
+        dm_message=body.dm_message,
     )
     db.add(ca)
     await db.commit()
@@ -483,14 +467,12 @@ async def create_comment_automation(body: dict, user: CurrentUser, db: DBSession
 
 
 @router.patch("/api/v1/comment-automations/{ca_id}", response_model=dict)
-async def update_comment_automation(ca_id: uuid.UUID, body: dict, user: CurrentUser, db: DBSession) -> dict:
+async def update_comment_automation(ca_id: uuid.UUID, body: UpdateCommentAutomationRequest, user: CurrentUser, db: DBSession) -> dict:
     ca = await db.get(CommentAutomation, ca_id)
     if not ca or ca.user_id != user.id:
         raise HTTPException(status_code=404, detail="Not found")
-    for field in ("enabled", "ai_prompt", "response_type", "response_text",
-                  "keyword_triggers", "delay_seconds", "also_send_dm", "dm_message", "page_name"):
-        if field in body:
-            setattr(ca, field, body[field])
+    for field, value in body.model_dump(exclude_unset=True).items():
+        setattr(ca, field, value)
     await db.commit()
     await db.refresh(ca)
     return {"success": True, "data": _ca_dict(ca)}
