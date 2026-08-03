@@ -8,6 +8,7 @@ from fastapi import APIRouter
 
 from app.core.config import settings
 from app.core.dependencies import CurrentUser, DBSession
+from app.core.plan_limits import is_model_allowed
 from app.services.llm.key_store import get_all_keys
 
 router = APIRouter(prefix="/api/v1", tags=["models"])
@@ -119,7 +120,10 @@ async def list_models(user: CurrentUser, db: DBSession) -> dict:
             "provider": provider,
             "label": meta["label"],
             "available": available,
-            "models": meta["models"],
+            "models": [
+                {**m, "allowed": is_model_allowed(user.role, m["id"])}
+                for m in meta["models"]
+            ],
         })
 
     return {"success": True, "data": result}
