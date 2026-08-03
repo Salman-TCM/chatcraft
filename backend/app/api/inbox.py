@@ -25,6 +25,14 @@ from app.models.conversation import Conversation
 from app.models.inbox import InboxAssignment, InternalNote, TeamMember
 from app.models.message import Message, MessageRole
 from app.models.user import User
+from app.schemas.inbox import (
+    AddNoteRequest,
+    AiComposeEmailRequest,
+    AssignConversationRequest,
+    InviteTeamMemberRequest,
+    ReopenConversationRequest,
+    SendMessageRequest,
+)
 
 router = APIRouter(prefix="/api/v1", tags=["inbox"], dependencies=[Depends(require_feature(INBOX))])
 
@@ -308,13 +316,13 @@ async def close_conversation(conv_id: uuid.UUID, user: CurrentUser, db: DBSessio
 
 @router.post("/conversations/{conv_id}/reopen", response_model=dict)
 async def reopen_conversation(
-    conv_id: uuid.UUID, user: CurrentUser, db: DBSession, body: dict = {}
+    conv_id: uuid.UUID, user: CurrentUser, db: DBSession, body: ReopenConversationRequest = ReopenConversationRequest()
 ) -> dict:
     _, team_role = await _resolve_caller(user.id, db)
     _require_manager(team_role, "reopen")
     conv = await _get_owned_conv(conv_id, user.id, db)
     conv.status = "active"
-    if body.get("release_takeover") and conv.status == "human_takeover":
+    if body.release_takeover and conv.status == "human_takeover":
         pass  # status already set to active above
     await db.commit()
     return {"success": True, "data": {"status": "active"}}
@@ -341,22 +349,17 @@ async def get_messages(conv_id: uuid.UUID, user: CurrentUser, db: DBSession) -> 
 @router.post("/conversations/{conv_id}/messages", response_model=dict, status_code=status.HTTP_201_CREATED)
 async def send_message(
     conv_id: uuid.UUID,
-    body: dict,
+    body: SendMessageRequest,
     user: CurrentUser,
     db: DBSession,
 ) -> dict:
     """Send a message as 'assistant' or 'system' from the inbox (human agent reply)."""
-    content: str = body.get("content", "").strip()
-    role_str: str = body.get("role", "assistant")
-    if not content:
-        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="content required")
-    if role_str not in ("assistant", "system"):
-        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="role must be assistant or system")
+    content = body.content.strip()
 
     conv = await _get_owned_conv(conv_id, user.id, db)
     msg = Message(
         conversation_id=conv.id,
-        role=MessageRole(role_str),
+        role=MessageRole(body.role),
         content=content,
     )
     db.add(msg)
@@ -443,11 +446,9 @@ async def get_notes(conv_id: uuid.UUID, user: CurrentUser, db: DBSession) -> dic
 
 @router.post("/conversations/{conv_id}/notes", response_model=dict, status_code=status.HTTP_201_CREATED)
 async def add_note(
-    conv_id: uuid.UUID, body: dict, user: CurrentUser, db: DBSession
+    conv_id: uuid.UUID, body: AddNoteRequest, user: CurrentUser, db: DBSession
 ) -> dict:
-    content = body.get("content", "").strip()
-    if not content:
-        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="content required")
+    content = body.content.strip()
     # Verify ownership
     await _get_owned_conv(conv_id, user.id, db)
     note = InternalNote(conversation_id=conv_id, author_id=user.id, content=content)
@@ -470,16 +471,12 @@ async def add_note(
 
 @router.post("/conversations/{conv_id}/assign", response_model=dict)
 async def assign_conversation(
-    conv_id: uuid.UUID, body: dict, user: CurrentUser, db: DBSession
+    conv_id: uuid.UUID, body: AssignConversationRequest, user: CurrentUser, db: DBSession
 ) -> dict:
     _, team_role = await _resolve_caller(user.id, db)
     _require_manager(team_role, "assign")
 
-    assignee_id_str: str | None = body.get("user_id")
-    if not assignee_id_str:
-        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="user_id required")
-
-    assignee_id = uuid.UUID(assignee_id_str)
+    assignee_id = body.user_id
     conv = await _get_owned_conv(conv_id, user.id, db)
 
     existing = await db.execute(
@@ -525,11 +522,9 @@ async def list_team(user: CurrentUser, db: DBSession) -> dict:
 
 
 @router.post("/team", response_model=dict, status_code=status.HTTP_201_CREATED)
-async def invite_team_member(body: dict, user: CurrentUser, db: DBSession) -> dict:
-    email: str = body.get("email", "").strip().lower()
-    role: str = body.get("role", "agent")
-    if not email:
-        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="email required")
+async def invite_team_member(body: InviteTeamMemberRequest, user: CurrentUser, db: DBSession) -> dict:
+    email = body.email.strip().lower()
+    role = body.role
 
     # Check if invited user already exists in the platform
     member_user_result = await db.execute(select(User).where(User.email == email))
@@ -723,15 +718,15 @@ async def update_conversation_contact(
 @router.post("/conversations/{conv_id}/ai-compose", response_model=dict)
 async def ai_compose_email(
     conv_id: uuid.UUID,
-    body: dict,
+    body: AiComposeEmailRequest,
     user: CurrentUser,
     db: DBSession,
 ) -> dict:
     """Generate an AI-drafted email body based on conversation context and an optional prompt."""
     conv = await _get_owned_conv(conv_id, user.id, db)
 
-    tone: str = body.get("tone", "professional")  # professional / friendly / formal
-    instruction: str = body.get("instruction", "").strip()
+    tone = body.tone
+    instruction = (body.instruction or "").strip()
 
     # Build recent conversation history as context
     recent = conv.messages[-10:] if conv.messages else []
