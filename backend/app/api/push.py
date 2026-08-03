@@ -12,6 +12,7 @@ from fastapi import APIRouter, HTTPException, status
 
 from app.core.config import settings
 from app.core.dependencies import CurrentUser, DBSession, RedisClient
+from app.schemas.push import PushSendRequest, PushSubscribeRequest
 
 router = APIRouter(prefix="/api/push", tags=["push"])
 
@@ -31,13 +32,8 @@ async def get_vapid_key() -> dict:
 
 
 @router.post("/subscribe", response_model=dict)
-async def subscribe(body: dict, user: CurrentUser, redis: RedisClient) -> dict:
-    endpoint = body.get("endpoint")
-    keys = body.get("keys")
-    if not endpoint or not keys:
-        raise HTTPException(status_code=422, detail="endpoint and keys required")
-
-    sub = {"endpoint": endpoint, "keys": keys}
+async def subscribe(body: PushSubscribeRequest, user: CurrentUser, redis: RedisClient) -> dict:
+    sub = {"endpoint": body.endpoint, "keys": body.keys}
     await redis.set(_sub_key(user.id), json.dumps(sub), ex=_SUBSCRIPTION_TTL)
     return {"success": True, "data": {"subscribed": True}}
 
@@ -49,16 +45,14 @@ async def unsubscribe(user: CurrentUser, redis: RedisClient) -> dict:
 
 
 @router.post("/send", response_model=dict)
-async def send_push(body: dict, user: CurrentUser, redis: RedisClient) -> dict:
+async def send_push(body: PushSendRequest, user: CurrentUser, redis: RedisClient) -> dict:
     """Send a test push notification to the current user."""
     sub_raw = await redis.get(_sub_key(user.id))
     if not sub_raw:
         raise HTTPException(status_code=404, detail="No push subscription found")
 
     sub = json.loads(sub_raw)
-    title = body.get("title", "ChatCraft AI")
-    message = body.get("message", "You have a new notification")
-    payload = json.dumps({"title": title, "body": message, "url": body.get("url", "/dashboard")})
+    payload = json.dumps({"title": body.title, "body": body.message, "url": body.url})
 
     try:
         from pywebpush import webpush, WebPushException
