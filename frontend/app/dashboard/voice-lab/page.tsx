@@ -1,6 +1,9 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { useForm, Controller } from "react-hook-form";
+import { zodResolver } from "@hookform/resolvers/zod";
+import { z } from "zod";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -42,6 +45,8 @@ import {
   X,
 } from "lucide-react";
 import { apiClient } from "@/lib/api";
+import { toast } from "@/hooks/use-toast";
+import { getErrorMessage, getFieldErrors } from "@/lib/errors";
 
 interface Voice {
   id: string;
@@ -79,6 +84,45 @@ const AVAILABLE_CLIENT_EVENTS = [
   { id: "internal_tentative_agent_response", label: "Tentative response (debug)", description: "Partial responses before final output" },
 ];
 
+const LANGUAGES: [string, string][] = [
+  ["en", "English"],
+  ["es", "Spanish"],
+  ["fr", "French"],
+  ["de", "German"],
+  ["ar", "Arabic"],
+  ["zh", "Chinese"],
+  ["ja", "Japanese"],
+];
+
+const cloneVoiceSchema = z.object({
+  name: z.string().min(1, "Name is required").max(255, "Maximum 255 characters"),
+  description: z.string().max(500, "Maximum 500 characters").optional(),
+});
+type CloneVoiceFormData = z.infer<typeof cloneVoiceSchema>;
+
+const agentSchema = z.object({
+  name: z.string().min(1, "Name is required").max(255, "Maximum 255 characters"),
+  voice_id: z.string().min(1, "Please select a voice"),
+  system_prompt: z.string().optional(),
+  first_message: z.string().optional(),
+  language: z.string().optional(),
+});
+type AgentFormData = z.infer<typeof agentSchema>;
+
+const agentEditSchema = agentSchema.extend({
+  auth_enabled: z.boolean(),
+  allowed_origins: z.string().optional(),
+});
+type AgentEditFormData = z.infer<typeof agentEditSchema>;
+
+const DEFAULT_AGENT_VALUES: AgentFormData = {
+  name: "",
+  voice_id: "",
+  system_prompt: "You are a helpful assistant.",
+  first_message: "Hello! How can I help you today?",
+  language: "en",
+};
+
 export default function VoiceLabPage() {
   const [voices, setVoices] = useState<Voice[]>([]);
   const [agents, setAgents] = useState<Agent[]>([]);
@@ -89,22 +133,29 @@ export default function VoiceLabPage() {
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
 
-  const [cloneForm, setCloneForm] = useState({ name: "", description: "" });
+  const cloneForm = useForm<CloneVoiceFormData>({
+    resolver: zodResolver(cloneVoiceSchema),
+    defaultValues: { name: "", description: "" },
+  });
   const [cloneFiles, setCloneFiles] = useState<FileList | null>(null);
+  const [cloneFilesError, setCloneFilesError] = useState<string | null>(null);
   const [cloning, setCloning] = useState(false);
 
-  const [agentForm, setAgentForm] = useState({
-    name: "",
-    voice_id: "",
-    system_prompt: "You are a helpful assistant.",
-    first_message: "Hello! How can I help you today?",
-    language: "en",
+  const agentForm = useForm<AgentFormData>({
+    resolver: zodResolver(agentSchema),
+    defaultValues: DEFAULT_AGENT_VALUES,
   });
   const [creatingAgent, setCreatingAgent] = useState(false);
   const [expandedAgentId, setExpandedAgentId] = useState<string | null>(null);
   const [agentDetails, setAgentDetails] = useState<Record<string, AgentDetail>>({});
   const [loadingDetail, setLoadingDetail] = useState<string | null>(null);
   const [savingDetail, setSavingDetail] = useState<string | null>(null);
+
+  const editForm = useForm<AgentEditFormData>({
+    resolver: zodResolver(agentEditSchema),
+    defaultValues: { ...DEFAULT_AGENT_VALUES, auth_enabled: false, allowed_origins: "" },
+  });
+  const [editClientEvents, setEditClientEvents] = useState<string[]>([]);
 
   // Conversation history
   const [historyAgentId, setHistoryAgentId] = useState<string | null>(null);
@@ -130,36 +181,75 @@ export default function VoiceLabPage() {
       ]);
       setVoices(voiceRes.data.data || []);
       setAgents(agentRes.data.data || []);
-    } catch {}
+    } catch (err) {
+      toast({
+        variant: "destructive",
+        title: "Failed to load voice lab data",
+        description: getErrorMessage(err),
+      });
+    }
     setLoading(false);
   }
 
-  async function handleClone(e: React.FormEvent) {
-    e.preventDefault();
-    if (!cloneFiles?.length) return;
+  async function handleClone(data: CloneVoiceFormData) {
+    if (!cloneFiles?.length) {
+      setCloneFilesError("Attach at least one audio file");
+      return;
+    }
+    setCloneFilesError(null);
     setCloning(true);
     try {
       const fd = new FormData();
-      fd.append("name", cloneForm.name);
-      fd.append("description", cloneForm.description);
+      fd.append("name", data.name);
+      fd.append("description", data.description ?? "");
       for (const f of Array.from(cloneFiles)) fd.append("files", f);
       await apiClient.post("/api/v1/voice-lab/voices/clone", fd);
       setCloneOpen(false);
-      setCloneForm({ name: "", description: "" });
+      cloneForm.reset({ name: "", description: "" });
       setCloneFiles(null);
       await loadData();
-    } catch {}
+    } catch (err) {
+      toast({
+        variant: "destructive",
+        title: "Failed to clone voice",
+        description: getErrorMessage(err),
+      });
+      const fieldErrors = getFieldErrors(err);
+      for (const [field, message] of Object.entries(fieldErrors)) {
+        if (field === "name" || field === "description") {
+          cloneForm.setError(field as keyof CloneVoiceFormData, { message });
+        } else if (field === "files") {
+          setCloneFilesError(message);
+        }
+      }
+    }
     setCloning(false);
   }
 
   async function handleDeleteVoice(id: string) {
     if (!confirm("Delete this voice?")) return;
-    await apiClient.delete(`/api/v1/voice-lab/voices/${id}`);
-    await loadData();
+    try {
+      await apiClient.delete(`/api/v1/voice-lab/voices/${id}`);
+      await loadData();
+    } catch (err) {
+      toast({
+        variant: "destructive",
+        title: "Failed to delete voice",
+        description: getErrorMessage(err),
+      });
+    }
   }
 
   async function handlePreview(voiceId: string) {
     if (previewing) return;
+    if (!previewForm.text.trim()) {
+      toast({
+        variant: "destructive",
+        title: "Failed to generate preview",
+        description: "Enter some text to preview first.",
+      });
+      return;
+    }
     setPreviewing(true);
     setPreviewingId(voiceId);
     try {
@@ -173,26 +263,52 @@ export default function VoiceLabPage() {
         audioRef.current.src = url;
         audioRef.current.play();
       }
-    } catch {}
+    } catch (err) {
+      toast({
+        variant: "destructive",
+        title: "Failed to generate preview",
+        description: getErrorMessage(err),
+      });
+    }
     setPreviewing(false);
     setPreviewingId(null);
   }
 
-  async function handleCreateAgent(e: React.FormEvent) {
-    e.preventDefault();
+  async function handleCreateAgent(data: AgentFormData) {
     setCreatingAgent(true);
     try {
-      await apiClient.post("/api/v1/voice-lab/agents", agentForm);
+      await apiClient.post("/api/v1/voice-lab/agents", data);
       setAgentOpen(false);
+      agentForm.reset(DEFAULT_AGENT_VALUES);
       await loadData();
-    } catch {}
+    } catch (err) {
+      toast({
+        variant: "destructive",
+        title: "Failed to create agent",
+        description: getErrorMessage(err),
+      });
+      const fieldErrors = getFieldErrors(err);
+      for (const [field, message] of Object.entries(fieldErrors)) {
+        agentForm.setError(field as keyof AgentFormData, { message });
+      }
+    }
     setCreatingAgent(false);
   }
 
   async function handleDeleteAgent(id: string) {
     if (!confirm("Delete this agent?")) return;
-    await apiClient.delete(`/api/v1/voice-lab/agents/${id}`);
-    await loadData();
+    try {
+      await apiClient.delete(`/api/v1/voice-lab/agents/${id}`);
+      if (expandedAgentId === id) setExpandedAgentId(null);
+      if (historyAgentId === id) setHistoryAgentId(null);
+      await loadData();
+    } catch (err) {
+      toast({
+        variant: "destructive",
+        title: "Failed to delete agent",
+        description: getErrorMessage(err),
+      });
+    }
   }
 
   async function toggleAgentDetail(agentId: string) {
@@ -201,30 +317,86 @@ export default function VoiceLabPage() {
       return;
     }
     setExpandedAgentId(agentId);
-    if (agentDetails[agentId]) return;
+    const cached = agentDetails[agentId];
+    if (cached) {
+      resetEditForm(cached);
+      return;
+    }
     setLoadingDetail(agentId);
     try {
       const { data } = await apiClient.get(`/api/v1/voice-lab/agents/${agentId}`);
       setAgentDetails((prev) => ({ ...prev, [agentId]: data.data }));
-    } catch {}
+      resetEditForm(data.data);
+    } catch (err) {
+      toast({
+        variant: "destructive",
+        title: "Failed to load agent configuration",
+        description: getErrorMessage(err),
+      });
+      setExpandedAgentId(null);
+    }
     setLoadingDetail(null);
   }
 
-  function updateDetail(agentId: string, patch: Partial<AgentDetail>) {
-    setAgentDetails((prev) => ({ ...prev, [agentId]: { ...prev[agentId], ...patch } }));
+  function resetEditForm(detail: AgentDetail) {
+    editForm.reset({
+      name: detail.name,
+      voice_id: detail.voice_id ?? "",
+      system_prompt: detail.system_prompt,
+      first_message: detail.first_message,
+      language: detail.language,
+      auth_enabled: detail.auth_enabled,
+      allowed_origins: detail.allowed_origins.join(", "),
+    });
+    setEditClientEvents(detail.client_events);
   }
 
-  async function saveAgentDetail(agentId: string) {
-    const detail = agentDetails[agentId];
-    if (!detail) return;
+  async function saveAgentDetail(agentId: string, data: AgentEditFormData) {
     setSavingDetail(agentId);
+    const allowedOrigins = (data.allowed_origins ?? "")
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean);
     try {
       await apiClient.patch(`/api/v1/voice-lab/agents/${agentId}`, {
-        auth_enabled: detail.auth_enabled,
-        allowed_origins: detail.allowed_origins,
-        client_events: detail.client_events,
+        name: data.name,
+        voice_id: data.voice_id,
+        system_prompt: data.system_prompt,
+        first_message: data.first_message,
+        language: data.language,
+        auth_enabled: data.auth_enabled,
+        allowed_origins: allowedOrigins,
+        client_events: editClientEvents,
       });
-    } catch {}
+      setAgentDetails((prev) => ({
+        ...prev,
+        [agentId]: {
+          ...prev[agentId],
+          name: data.name,
+          voice_id: data.voice_id,
+          system_prompt: data.system_prompt ?? "",
+          first_message: data.first_message ?? "",
+          language: data.language ?? "en",
+          auth_enabled: data.auth_enabled,
+          allowed_origins: allowedOrigins,
+          client_events: editClientEvents,
+        },
+      }));
+      setAgents((prev) =>
+        prev.map((a) => (a.id === agentId ? { ...a, name: data.name, voice_id: data.voice_id } : a))
+      );
+      toast({ title: "Agent updated", description: "Configuration saved successfully." });
+    } catch (err) {
+      toast({
+        variant: "destructive",
+        title: "Failed to update agent",
+        description: getErrorMessage(err),
+      });
+      const fieldErrors = getFieldErrors(err);
+      for (const [field, message] of Object.entries(fieldErrors)) {
+        editForm.setError(field as keyof AgentEditFormData, { message });
+      }
+    }
     setSavingDetail(null);
   }
 
@@ -242,7 +414,14 @@ export default function VoiceLabPage() {
     try {
       const { data } = await apiClient.get(`/api/v1/voice-lab/agents/${agentId}/conversations`);
       setConversations(prev => ({ ...prev, [agentId]: data.data ?? [] }));
-    } catch {}
+    } catch (err) {
+      toast({
+        variant: "destructive",
+        title: "Failed to load conversation history",
+        description: getErrorMessage(err),
+      });
+      setHistoryAgentId(null);
+    }
     setLoadingHistory(null);
   }
 
@@ -252,7 +431,15 @@ export default function VoiceLabPage() {
     try {
       const { data } = await apiClient.get(`/api/v1/voice-lab/agents/${agentId}/conversations/${conv.id}`);
       setConvTranscript(data.data);
-    } catch {}
+    } catch (err) {
+      toast({
+        variant: "destructive",
+        title: "Failed to load transcript",
+        description: getErrorMessage(err),
+      });
+      setSelectedConv(null);
+      setConvTranscript(null);
+    }
     setLoadingTranscript(false);
   }
 
@@ -267,7 +454,17 @@ export default function VoiceLabPage() {
           </p>
         </div>
         <div className="flex gap-2">
-          <Dialog open={cloneOpen} onOpenChange={setCloneOpen}>
+          <Dialog
+            open={cloneOpen}
+            onOpenChange={(open) => {
+              setCloneOpen(open);
+              if (!open) {
+                cloneForm.reset({ name: "", description: "" });
+                setCloneFiles(null);
+                setCloneFilesError(null);
+              }
+            }}
+          >
             <DialogTrigger asChild>
               <Button variant="outline">
                 <Upload className="h-4 w-4 mr-2" /> Clone Voice
@@ -277,23 +474,26 @@ export default function VoiceLabPage() {
               <DialogHeader>
                 <DialogTitle>Clone a Voice</DialogTitle>
               </DialogHeader>
-              <form onSubmit={handleClone} className="space-y-4">
+              <form onSubmit={cloneForm.handleSubmit(handleClone)} className="space-y-4">
                 <div className="space-y-1">
                   <Label>Name</Label>
                   <Input
-                    value={cloneForm.name}
-                    onChange={(e) => setCloneForm({ ...cloneForm, name: e.target.value })}
                     placeholder="e.g. My Voice Clone"
-                    required
+                    {...cloneForm.register("name")}
                   />
+                  {cloneForm.formState.errors.name && (
+                    <p className="text-sm text-destructive">{cloneForm.formState.errors.name.message}</p>
+                  )}
                 </div>
                 <div className="space-y-1">
                   <Label>Description (optional)</Label>
                   <Input
-                    value={cloneForm.description}
-                    onChange={(e) => setCloneForm({ ...cloneForm, description: e.target.value })}
                     placeholder="Short description"
+                    {...cloneForm.register("description")}
                   />
+                  {cloneForm.formState.errors.description && (
+                    <p className="text-sm text-destructive">{cloneForm.formState.errors.description.message}</p>
+                  )}
                 </div>
                 <div className="space-y-1">
                   <Label>Audio Files (1–25 wav/mp3 files, min 1 min each)</Label>
@@ -301,9 +501,14 @@ export default function VoiceLabPage() {
                     type="file"
                     accept="audio/*"
                     multiple
-                    onChange={(e) => setCloneFiles(e.target.files)}
-                    required
+                    onChange={(e) => {
+                      setCloneFiles(e.target.files);
+                      setCloneFilesError(null);
+                    }}
                   />
+                  {cloneFilesError && (
+                    <p className="text-sm text-destructive">{cloneFilesError}</p>
+                  )}
                 </div>
                 <Button type="submit" className="w-full" disabled={cloning}>
                   {cloning ? "Cloning..." : "Create Clone"}
@@ -312,7 +517,13 @@ export default function VoiceLabPage() {
             </DialogContent>
           </Dialog>
 
-          <Dialog open={agentOpen} onOpenChange={setAgentOpen}>
+          <Dialog
+            open={agentOpen}
+            onOpenChange={(open) => {
+              setAgentOpen(open);
+              if (!open) agentForm.reset(DEFAULT_AGENT_VALUES);
+            }}
+          >
             <DialogTrigger asChild>
               <Button>
                 <Plus className="h-4 w-4 mr-2" /> New Agent
@@ -322,71 +533,83 @@ export default function VoiceLabPage() {
               <DialogHeader>
                 <DialogTitle>Create Voice Agent</DialogTitle>
               </DialogHeader>
-              <form onSubmit={handleCreateAgent} className="space-y-4">
+              <form onSubmit={agentForm.handleSubmit(handleCreateAgent)} className="space-y-4">
                 <div className="space-y-1">
                   <Label>Agent Name</Label>
                   <Input
-                    value={agentForm.name}
-                    onChange={(e) => setAgentForm({ ...agentForm, name: e.target.value })}
                     placeholder="e.g. Support Agent"
-                    required
+                    {...agentForm.register("name")}
                   />
+                  {agentForm.formState.errors.name && (
+                    <p className="text-sm text-destructive">{agentForm.formState.errors.name.message}</p>
+                  )}
                 </div>
                 <div className="space-y-1">
                   <Label>Voice</Label>
-                  <Select
-                    value={agentForm.voice_id}
-                    onValueChange={(v) => setAgentForm({ ...agentForm, voice_id: v })}
-                  >
-                    <SelectTrigger>
-                      <SelectValue placeholder="Select a voice" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {voices.map((v) => (
-                        <SelectItem key={v.id} value={v.id}>
-                          {v.name}
-                          {v.cloned && (
-                            <Badge variant="secondary" className="ml-2 text-xs">
-                              Cloned
-                            </Badge>
-                          )}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                  <Controller
+                    control={agentForm.control}
+                    name="voice_id"
+                    render={({ field }) => (
+                      <Select value={field.value} onValueChange={field.onChange}>
+                        <SelectTrigger>
+                          <SelectValue placeholder="Select a voice" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {voices.map((v) => (
+                            <SelectItem key={v.id} value={v.id}>
+                              {v.name}
+                              {v.cloned && (
+                                <Badge variant="secondary" className="ml-2 text-xs">
+                                  Cloned
+                                </Badge>
+                              )}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    )}
+                  />
+                  {agentForm.formState.errors.voice_id && (
+                    <p className="text-sm text-destructive">{agentForm.formState.errors.voice_id.message}</p>
+                  )}
                 </div>
                 <div className="space-y-1">
                   <Label>System Prompt</Label>
                   <Textarea
-                    value={agentForm.system_prompt}
-                    onChange={(e) => setAgentForm({ ...agentForm, system_prompt: e.target.value })}
                     rows={3}
+                    {...agentForm.register("system_prompt")}
                   />
+                  {agentForm.formState.errors.system_prompt && (
+                    <p className="text-sm text-destructive">{agentForm.formState.errors.system_prompt.message}</p>
+                  )}
                 </div>
                 <div className="space-y-1">
                   <Label>First Message</Label>
-                  <Input
-                    value={agentForm.first_message}
-                    onChange={(e) => setAgentForm({ ...agentForm, first_message: e.target.value })}
-                  />
+                  <Input {...agentForm.register("first_message")} />
+                  {agentForm.formState.errors.first_message && (
+                    <p className="text-sm text-destructive">{agentForm.formState.errors.first_message.message}</p>
+                  )}
                 </div>
                 <div className="space-y-1">
                   <Label>Language</Label>
-                  <Select
-                    value={agentForm.language}
-                    onValueChange={(v) => setAgentForm({ ...agentForm, language: v })}
-                  >
-                    <SelectTrigger>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {[["en","English"],["es","Spanish"],["fr","French"],["de","German"],["ar","Arabic"],["zh","Chinese"],["ja","Japanese"]].map(([code, name]) => (
-                        <SelectItem key={code} value={code}>{name}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                  <Controller
+                    control={agentForm.control}
+                    name="language"
+                    render={({ field }) => (
+                      <Select value={field.value} onValueChange={field.onChange}>
+                        <SelectTrigger>
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {LANGUAGES.map(([code, name]) => (
+                            <SelectItem key={code} value={code}>{name}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    )}
+                  />
                 </div>
-                <Button type="submit" className="w-full" disabled={creatingAgent || !agentForm.voice_id}>
+                <Button type="submit" className="w-full" disabled={creatingAgent}>
                   {creatingAgent ? "Creating..." : "Create Agent"}
                 </Button>
               </form>
@@ -563,6 +786,69 @@ export default function VoiceLabPage() {
                           <p className="text-xs text-muted-foreground">Loading configuration…</p>
                         ) : detail ? (
                           <>
+                            {/* Agent configuration */}
+                            <div className="space-y-2">
+                              <p className="text-xs font-semibold">Agent Configuration</p>
+                              <div className="space-y-1">
+                                <Label className="text-xs">Agent Name</Label>
+                                <Input className="h-8 text-xs" {...editForm.register("name")} />
+                                {editForm.formState.errors.name && (
+                                  <p className="text-xs text-destructive">{editForm.formState.errors.name.message}</p>
+                                )}
+                              </div>
+                              <div className="space-y-1">
+                                <Label className="text-xs">Voice</Label>
+                                <Controller
+                                  control={editForm.control}
+                                  name="voice_id"
+                                  render={({ field }) => (
+                                    <Select value={field.value} onValueChange={field.onChange}>
+                                      <SelectTrigger className="h-8 text-xs">
+                                        <SelectValue placeholder="Select a voice" />
+                                      </SelectTrigger>
+                                      <SelectContent>
+                                        {voices.map((v) => (
+                                          <SelectItem key={v.id} value={v.id}>
+                                            {v.name}
+                                          </SelectItem>
+                                        ))}
+                                      </SelectContent>
+                                    </Select>
+                                  )}
+                                />
+                                {editForm.formState.errors.voice_id && (
+                                  <p className="text-xs text-destructive">{editForm.formState.errors.voice_id.message}</p>
+                                )}
+                              </div>
+                              <div className="space-y-1">
+                                <Label className="text-xs">System Prompt</Label>
+                                <Textarea className="text-xs" rows={3} {...editForm.register("system_prompt")} />
+                              </div>
+                              <div className="space-y-1">
+                                <Label className="text-xs">First Message</Label>
+                                <Input className="h-8 text-xs" {...editForm.register("first_message")} />
+                              </div>
+                              <div className="space-y-1">
+                                <Label className="text-xs">Language</Label>
+                                <Controller
+                                  control={editForm.control}
+                                  name="language"
+                                  render={({ field }) => (
+                                    <Select value={field.value} onValueChange={field.onChange}>
+                                      <SelectTrigger className="h-8 text-xs">
+                                        <SelectValue />
+                                      </SelectTrigger>
+                                      <SelectContent>
+                                        {LANGUAGES.map(([code, name]) => (
+                                          <SelectItem key={code} value={code}>{name}</SelectItem>
+                                        ))}
+                                      </SelectContent>
+                                    </Select>
+                                  )}
+                                />
+                              </div>
+                            </div>
+
                             {/* Security overrides */}
                             <div>
                               <div className="flex items-center gap-1.5 mb-2">
@@ -575,24 +861,26 @@ export default function VoiceLabPage() {
                                     <p className="text-xs font-medium">Require authentication</p>
                                     <p className="text-[10px] text-muted-foreground">Force signed-URL auth — prevents unauthorized widget usage</p>
                                   </div>
-                                  <button
-                                    role="switch"
-                                    aria-checked={detail.auth_enabled}
-                                    onClick={() => updateDetail(agent.id, { auth_enabled: !detail.auth_enabled })}
-                                    className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${detail.auth_enabled ? "bg-primary" : "bg-input"}`}
-                                  >
-                                    <span className={`inline-block h-3.5 w-3.5 rounded-full bg-white shadow transition-transform ${detail.auth_enabled ? "translate-x-4" : "translate-x-0.5"}`} />
-                                  </button>
+                                  <Controller
+                                    control={editForm.control}
+                                    name="auth_enabled"
+                                    render={({ field }) => (
+                                      <button
+                                        type="button"
+                                        role="switch"
+                                        aria-checked={field.value}
+                                        onClick={() => field.onChange(!field.value)}
+                                        className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${field.value ? "bg-primary" : "bg-input"}`}
+                                      >
+                                        <span className={`inline-block h-3.5 w-3.5 rounded-full bg-white shadow transition-transform ${field.value ? "translate-x-4" : "translate-x-0.5"}`} />
+                                      </button>
+                                    )}
+                                  />
                                 </label>
                                 <div>
                                   <p className="text-xs font-medium mb-1">Allowed origins</p>
                                   <input
-                                    value={detail.allowed_origins.join(", ")}
-                                    onChange={(e) =>
-                                      updateDetail(agent.id, {
-                                        allowed_origins: e.target.value.split(",").map((s) => s.trim()).filter(Boolean),
-                                      })
-                                    }
+                                    {...editForm.register("allowed_origins")}
                                     placeholder="example.com, app.example.com"
                                     className="w-full h-8 rounded-md border bg-background px-2 text-xs font-mono focus:outline-none focus:ring-1 focus:ring-ring"
                                   />
@@ -609,18 +897,16 @@ export default function VoiceLabPage() {
                               </p>
                               <div className="space-y-1.5">
                                 {AVAILABLE_CLIENT_EVENTS.map((ev) => {
-                                  const active = detail.client_events.includes(ev.id);
+                                  const active = editClientEvents.includes(ev.id);
                                   return (
                                     <label key={ev.id} className="flex items-start gap-2 cursor-pointer">
                                       <input
                                         type="checkbox"
                                         checked={active}
                                         onChange={() =>
-                                          updateDetail(agent.id, {
-                                            client_events: active
-                                              ? detail.client_events.filter((e) => e !== ev.id)
-                                              : [...detail.client_events, ev.id],
-                                          })
+                                          setEditClientEvents((prev) =>
+                                            active ? prev.filter((e) => e !== ev.id) : [...prev, ev.id]
+                                          )
                                         }
                                         className="mt-0.5 h-3.5 w-3.5 rounded"
                                       />
@@ -638,9 +924,9 @@ export default function VoiceLabPage() {
                               size="sm"
                               className="w-full h-8 text-xs"
                               disabled={savingDetail === agent.id}
-                              onClick={() => saveAgentDetail(agent.id)}
+                              onClick={editForm.handleSubmit((data) => saveAgentDetail(agent.id, data))}
                             >
-                              {savingDetail === agent.id ? "Saving…" : "Save Security & Events"}
+                              {savingDetail === agent.id ? "Saving…" : "Save Configuration"}
                             </Button>
                           </>
                         ) : null}
