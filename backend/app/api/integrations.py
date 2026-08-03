@@ -30,6 +30,13 @@ from app.core.config import settings
 from app.core.dependencies import CurrentUser, DBSession
 from app.models.channel_integration import ChannelIntegration
 from app.models.chatbot_config import ChatbotConfig
+from app.schemas.integrations import (
+    CreateWhatsAppTemplateRequest,
+    SetMessengerMenuRequest,
+    SetTelegramCommandsRequest,
+    TestEmailIntegrationRequest,
+    UpsertIntegrationRequest,
+)
 
 router = APIRouter(prefix="/api/v1", tags=["integrations"])
 
@@ -83,7 +90,7 @@ async def list_integrations(chatbot_id: uuid.UUID, user: CurrentUser, db: DBSess
 async def upsert_integration(
     chatbot_id: uuid.UUID,
     channel: str,
-    body: dict,
+    body: UpsertIntegrationRequest,
     user: CurrentUser,
     db: DBSession,
 ) -> dict:
@@ -102,8 +109,8 @@ async def upsert_integration(
     )
     integration = result.scalar_one_or_none()
 
-    incoming_config: dict = body.get("config", {})
-    is_active: bool = body.get("is_active", True)
+    incoming_config: dict = body.config
+    is_active: bool = body.is_active
 
     if integration:
         # Merge config — preserve existing secret values unless caller provides a new non-masked one
@@ -442,15 +449,12 @@ async def get_telegram_commands(chatbot_id: uuid.UUID, user: CurrentUser, db: DB
 
 @router.post("/chatbots/{chatbot_id}/integrations/telegram/commands", response_model=dict)
 async def set_telegram_commands(
-    chatbot_id: uuid.UUID, body: dict, user: CurrentUser, db: DBSession
+    chatbot_id: uuid.UUID, body: SetTelegramCommandsRequest, user: CurrentUser, db: DBSession
 ) -> dict:
     """body: { "commands": [{"command": "start", "description": "Start the bot"}] }"""
-    commands = body.get("commands", [])
-    if not isinstance(commands, list):
-        raise HTTPException(status_code=422, detail="commands must be a list")
     sender = await _get_telegram_sender(chatbot_id, user.id, db)
     try:
-        result = await sender.set_commands(commands)
+        result = await sender.set_commands([c.model_dump() for c in body.commands])
     except Exception as exc:
         raise HTTPException(status_code=502, detail=str(exc))
     return {"success": True, "data": result}
@@ -495,11 +499,11 @@ async def list_whatsapp_templates(chatbot_id: uuid.UUID, user: CurrentUser, db: 
 
 @router.post("/chatbots/{chatbot_id}/integrations/whatsapp/templates", response_model=dict, status_code=201)
 async def create_whatsapp_template(
-    chatbot_id: uuid.UUID, body: dict, user: CurrentUser, db: DBSession
+    chatbot_id: uuid.UUID, body: CreateWhatsAppTemplateRequest, user: CurrentUser, db: DBSession
 ) -> dict:
     sender = await _get_whatsapp_sender(chatbot_id, user.id, db)
     try:
-        result = await sender.create_template(body)
+        result = await sender.create_template(body.model_dump(exclude_none=True))
     except Exception as exc:
         raise HTTPException(status_code=502, detail=str(exc))
     return {"success": True, "data": result}
@@ -546,15 +550,14 @@ async def get_messenger_menu(chatbot_id: uuid.UUID, user: CurrentUser, db: DBSes
 
 @router.post("/chatbots/{chatbot_id}/integrations/facebook/menu", response_model=dict)
 async def set_messenger_menu(
-    chatbot_id: uuid.UUID, body: dict, user: CurrentUser, db: DBSession
+    chatbot_id: uuid.UUID, body: SetMessengerMenuRequest, user: CurrentUser, db: DBSession
 ) -> dict:
     """body: { "menu_items": [{"type":"postback","title":"...","payload":"..."}] }"""
-    menu_items = body.get("menu_items", [])
-    if not isinstance(menu_items, list):
-        raise HTTPException(status_code=422, detail="menu_items must be a list")
     sender = await _get_facebook_sender(chatbot_id, user.id, db)
     try:
-        result = await sender.set_persistent_menu(menu_items)
+        result = await sender.set_persistent_menu(
+            [item.model_dump(exclude_none=True) for item in body.menu_items]
+        )
     except Exception as exc:
         raise HTTPException(status_code=502, detail=str(exc))
     return {"success": True, "data": result}
@@ -574,7 +577,7 @@ async def delete_messenger_menu(chatbot_id: uuid.UUID, user: CurrentUser, db: DB
 
 @router.post("/chatbots/{chatbot_id}/integrations/email/test", response_model=dict)
 async def test_email_integration(
-    chatbot_id: uuid.UUID, body: dict, user: CurrentUser, db: DBSession
+    chatbot_id: uuid.UUID, body: TestEmailIntegrationRequest, user: CurrentUser, db: DBSession
 ) -> dict:
     """Send a test email to verify SMTP config.  Body: { "to": "test@example.com" }"""
     await _get_owned_bot(chatbot_id, user.id, db)
@@ -588,9 +591,7 @@ async def test_email_integration(
     if not integration:
         raise HTTPException(status_code=404, detail="Email integration not configured")
 
-    to = (body.get("to") or "").strip()
-    if not to:
-        raise HTTPException(status_code=422, detail="to address required")
+    to = body.to
 
     from app.services.channels.email_sender import EmailSender
     sender = EmailSender(integration.config)
