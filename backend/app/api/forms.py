@@ -21,6 +21,7 @@ from sqlalchemy import func, select
 from app.core.dependencies import CurrentUser, DBSession, require_feature
 from app.core.features import FORMS
 from app.models.form import Form, FormSubmission
+from app.schemas.forms import FormCreateRequest, FormUpdateRequest, PublicFormSubmitRequest
 
 # Authenticated management routes — requires forms feature access
 router = APIRouter(tags=["forms"], dependencies=[Depends(require_feature(FORMS))])
@@ -74,19 +75,16 @@ async def list_forms(
 
 
 @router.post("/api/v1/forms", response_model=dict, status_code=status.HTTP_201_CREATED)
-async def create_form(body: dict, user: CurrentUser, db: DBSession) -> dict:
-    name = (body.get("name") or "").strip()
-    if not name:
-        raise HTTPException(status_code=422, detail="name required")
+async def create_form(body: FormCreateRequest, user: CurrentUser, db: DBSession) -> dict:
     form = Form(
         user_id=user.id,
-        chatbot_id=body.get("chatbot_id"),
-        name=name,
-        description=body.get("description"),
-        fields=body.get("fields", []),
-        is_active=body.get("is_active", True),
-        success_message=body.get("success_message", "Thank you! We'll be in touch."),
-        submit_button_text=body.get("submit_button_text", "Submit"),
+        chatbot_id=body.chatbot_id,
+        name=body.name,
+        description=body.description,
+        fields=body.fields,
+        is_active=body.is_active,
+        success_message=body.success_message,
+        submit_button_text=body.submit_button_text,
         public_id=secrets.token_urlsafe(16),
     )
     db.add(form)
@@ -102,11 +100,10 @@ async def get_form(form_id: uuid.UUID, user: CurrentUser, db: DBSession) -> dict
 
 
 @router.patch("/api/v1/forms/{form_id}", response_model=dict)
-async def update_form(form_id: uuid.UUID, body: dict, user: CurrentUser, db: DBSession) -> dict:
+async def update_form(form_id: uuid.UUID, body: FormUpdateRequest, user: CurrentUser, db: DBSession) -> dict:
     form = await _get_owned_form(form_id, user.id, db)
-    for field in ("name", "description", "fields", "is_active", "success_message", "submit_button_text", "chatbot_id"):
-        if field in body:
-            setattr(form, field, body[field])
+    for field, value in body.model_dump(exclude_unset=True).items():
+        setattr(form, field, value)
     await db.commit()
     await db.refresh(form)
     return {"success": True, "data": _form_dict(form)}
@@ -161,10 +158,12 @@ async def list_submissions(
 @public_router.post("/api/public/forms/{public_id}/submit", response_model=dict, status_code=status.HTTP_201_CREATED)
 async def public_submit(
     public_id: str,
-    body: dict,
+    body: PublicFormSubmitRequest,
     request: Request,
     db: DBSession,
 ) -> dict:
+    data = body.model_dump()
+
     result = await db.execute(
         select(Form).where(Form.public_id == public_id, Form.is_active.is_(True))
     )
@@ -172,23 +171,23 @@ async def public_submit(
     if not form:
         raise HTTPException(status_code=404, detail="Form not found")
 
-    # Validate required fields
+    # Validate required fields (dynamic, per-form — not expressible as static schema fields)
     fields_def = form.fields or []
     errors: dict[str, str] = {}
     for field_def in fields_def:
-        if field_def.get("required") and not body.get(field_def["id"]):
+        if field_def.get("required") and not data.get(field_def["id"]):
             errors[field_def["id"]] = f"{field_def.get('label', field_def['id'])} is required"
     if errors:
         raise HTTPException(status_code=422, detail=errors)
 
     # Find or create contact from email/phone in submission
     contact_id: uuid.UUID | None = None
-    email = str(body.get("email", "")).strip().lower() or None
-    phone = str(body.get("phone", "")).strip() or None
+    email = str(data.get("email", "")).strip().lower() or None
+    phone = str(data.get("phone", "")).strip() or None
 
     # Also check field values for email/phone field types
     for field_def in fields_def:
-        val = body.get(field_def["id"], "")
+        val = data.get(field_def["id"], "")
         if field_def.get("type") == "email" and val:
             email = email or str(val).strip().lower()
         elif field_def.get("type") == "phone" and val:
@@ -208,8 +207,8 @@ async def public_submit(
         )
         contact = c_result.scalar_one_or_none()
         if not contact:
-            first_name = str(body.get("first_name", "")).strip() or None
-            last_name = str(body.get("last_name", "")).strip() or None
+            first_name = str(data.get("first_name", "")).strip() or None
+            last_name = str(data.get("last_name", "")).strip() or None
             contact = Contact(
                 user_id=form.user_id,
                 email=email,
@@ -226,7 +225,7 @@ async def public_submit(
     submission = FormSubmission(
         form_id=form.id,
         contact_id=contact_id,
-        data=body,
+        data=data,
         ip_address=ip,
     )
     db.add(submission)
@@ -242,7 +241,7 @@ async def public_submit(
         context={
             "form_id": str(form.id),
             "contact_id": str(contact_id) if contact_id else None,
-            "data": body,
+            "data": data,
         },
     )
 
