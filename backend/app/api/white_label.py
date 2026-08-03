@@ -47,6 +47,19 @@ from app.models.white_label import (
     Agency, AgencyPricingTier, AgencyTeamMember, ImpersonationAuditLog, ResellerSubscription, Tenant,
 )
 from app.models.user import User, UserRole
+from app.schemas.white_label import (
+    AgencyCreateRequest,
+    AgencyMeUpdateRequest,
+    AgencyPricingUpsertRequest,
+    AgencyUpdateRequest,
+    DomainVerifyRequest,
+    LicenseValidateRequest,
+    ResellerSubscriptionCreateRequest,
+    TeamMemberInviteRequest,
+    TeamMemberUpdateRequest,
+    TenantCreateRequest,
+    TestEmailRequest,
+)
 
 router = APIRouter(tags=["white_label"])
 
@@ -167,31 +180,21 @@ async def list_agencies(db: DBSession) -> dict:
 
 
 @router.post("/api/v1/agencies", response_model=dict, status_code=201, dependencies=[RequireAdmin])
-async def create_agency(body: dict, db: DBSession) -> dict:
-    slug = (body.get("slug") or "").strip().lower().replace(" ", "-")
-    if not slug:
-        raise HTTPException(status_code=422, detail={"success": False, "error": "slug required", "code": "VALIDATION_ERROR"})
-    owner_user_id_raw = body.get("owner_user_id")
-    if not owner_user_id_raw:
-        raise HTTPException(status_code=422, detail={"success": False, "error": "owner_user_id required", "code": "VALIDATION_ERROR"})
+async def create_agency(body: AgencyCreateRequest, db: DBSession) -> dict:
+    slug = body.slug.strip().lower().replace(" ", "-")
 
-    try:
-        owner_uuid = uuid.UUID(str(owner_user_id_raw))
-    except ValueError:
-        raise HTTPException(status_code=422, detail={"success": False, "error": "owner_user_id is not a valid UUID", "code": "VALIDATION_ERROR"})
-
-    owner = await db.get(User, owner_uuid)
+    owner = await db.get(User, body.owner_user_id)
     if not owner:
         raise HTTPException(status_code=404, detail={"success": False, "error": "Owner user not found", "code": "NOT_FOUND"})
 
     a = Agency(
         slug=slug,
-        primary_colour=body.get("primary_colour", "#6366f1"),
-        plan=body.get("plan", "starter"),
-        status=body.get("status", "active"),
-        owner_user_id=owner_uuid,
-        support_email=body.get("support_email"),
-        from_email=body.get("from_email"),
+        primary_colour=body.primary_colour,
+        plan=body.plan,
+        status=body.status,
+        owner_user_id=body.owner_user_id,
+        support_email=body.support_email,
+        from_email=body.from_email,
     )
     db.add(a)
     try:
@@ -210,13 +213,10 @@ async def get_agency(agency_id: uuid.UUID, db: DBSession) -> dict:
 
 
 @router.patch("/api/v1/agencies/{agency_id}", response_model=dict, dependencies=[RequireAdmin])
-async def update_agency(agency_id: uuid.UUID, body: dict, db: DBSession) -> dict:
+async def update_agency(agency_id: uuid.UUID, body: AgencyUpdateRequest, db: DBSession) -> dict:
     a = await _get_agency(agency_id, db)
-    updatable = {"slug", "custom_domain", "logo_url", "favicon_url", "primary_colour",
-                 "support_email", "from_email", "smtp_config", "plan", "status"}
-    for k, v in body.items():
-        if k in updatable:
-            setattr(a, k, v)
+    for k, v in body.model_dump(exclude_unset=True).items():
+        setattr(a, k, v)
     await db.commit()
     await db.refresh(a)
     return {"success": True, "data": _agency_dict(a)}
@@ -243,18 +243,16 @@ async def list_tenants(agency_id: uuid.UUID, db: DBSession) -> dict:
 
 
 @router.post("/api/v1/agencies/{agency_id}/tenants", response_model=dict, status_code=201, dependencies=[RequireAdmin])
-async def create_tenant(agency_id: uuid.UUID, body: dict, db: DBSession) -> dict:
+async def create_tenant(agency_id: uuid.UUID, body: TenantCreateRequest, db: DBSession) -> dict:
     await _get_agency(agency_id, db)
-    slug = (body.get("slug") or "").strip().lower().replace(" ", "-")
-    name = (body.get("name") or "").strip()
-    if not slug or not name:
-        raise HTTPException(status_code=422, detail="name and slug required")
+    slug = body.slug.strip().lower().replace(" ", "-")
+    name = body.name.strip()
     t = Tenant(
         agency_id=agency_id,
         name=name,
         slug=slug,
-        plan=body.get("plan", "starter"),
-        status=body.get("status", "active"),
+        plan=body.plan,
+        status=body.status,
     )
     db.add(t)
     await db.commit()
@@ -316,12 +314,10 @@ async def get_my_agency(user: CurrentUser, db: DBSession) -> dict:
 
 
 @router.put("/api/v1/agency/me", response_model=dict, dependencies=[Depends(require_feature(WHITE_LABEL))])
-async def update_my_agency(body: dict, user: CurrentUser, db: DBSession) -> dict:
+async def update_my_agency(body: AgencyMeUpdateRequest, user: CurrentUser, db: DBSession) -> dict:
     a = await _owner_agency(user.id, db)
-    updatable = {"logo_url", "favicon_url", "primary_colour", "support_email", "from_email", "smtp_config"}
-    for k, v in body.items():
-        if k in updatable:
-            setattr(a, k, v)
+    for k, v in body.model_dump(exclude_unset=True).items():
+        setattr(a, k, v)
     a.updated_at = datetime.now(timezone.utc)
     await db.commit()
     await db.refresh(a)
@@ -342,11 +338,9 @@ async def domain_status(user: CurrentUser, db: DBSession) -> dict:
 
 
 @router.post("/api/v1/agency/verify-domain", response_model=dict, dependencies=[Depends(require_feature(WHITE_LABEL))])
-async def verify_domain(body: dict, user: CurrentUser, db: DBSession) -> dict:
+async def verify_domain(body: DomainVerifyRequest, user: CurrentUser, db: DBSession) -> dict:
     a = await _owner_agency(user.id, db)
-    domain = (body.get("domain") or "").strip().lower()
-    if not domain:
-        raise HTTPException(status_code=422, detail="domain required")
+    domain = body.domain.strip().lower()
     try:
         addrs = socket.getaddrinfo(domain, None)
         resolves = bool(addrs)
@@ -363,11 +357,11 @@ async def verify_domain(body: dict, user: CurrentUser, db: DBSession) -> dict:
 
 
 @router.post("/api/v1/agency/send-test-email", response_model=dict, dependencies=[Depends(require_feature(WHITE_LABEL))])
-async def send_test_email(body: dict, user: CurrentUser, db: DBSession) -> dict:
+async def send_test_email(body: TestEmailRequest, user: CurrentUser, db: DBSession) -> dict:
     a = await _owner_agency(user.id, db)
     if not a.smtp_config:
         raise HTTPException(status_code=422, detail="SMTP config not set")
-    to_email = body.get("to") or user.email
+    to_email = body.to or user.email
     try:
         import smtplib
         from email.mime.text import MIMEText
@@ -439,14 +433,10 @@ async def list_agency_team(user: CurrentUser, db: DBSession) -> dict:
 
 
 @router.post("/api/v1/agency/team", response_model=dict, status_code=201, dependencies=[Depends(require_feature(WHITE_LABEL))])
-async def invite_agency_team_member(body: dict, user: CurrentUser, db: DBSession) -> dict:
+async def invite_agency_team_member(body: TeamMemberInviteRequest, user: CurrentUser, db: DBSession) -> dict:
     a = await _owner_agency(user.id, db)
-    member_email = (body.get("member_email") or "").strip().lower()
-    if not member_email:
-        raise HTTPException(status_code=422, detail="member_email required")
-    role = (body.get("role") or "agent").strip()
-    if role not in ("agent", "manager"):
-        raise HTTPException(status_code=422, detail="role must be 'agent' or 'manager'")
+    member_email = body.member_email.strip().lower()
+    role = body.role
 
     existing = await db.execute(
         select(AgencyTeamMember).where(
@@ -472,16 +462,14 @@ async def invite_agency_team_member(body: dict, user: CurrentUser, db: DBSession
 
 @router.patch("/api/v1/agency/team/{member_id}", response_model=dict, dependencies=[Depends(require_feature(WHITE_LABEL))])
 async def update_agency_team_member(
-    member_id: uuid.UUID, body: dict, user: CurrentUser, db: DBSession
+    member_id: uuid.UUID, body: TeamMemberUpdateRequest, user: CurrentUser, db: DBSession
 ) -> dict:
     a = await _owner_agency(user.id, db)
     m = await db.get(AgencyTeamMember, member_id)
     if not m or m.agency_id != a.id:
         raise HTTPException(status_code=404, detail="Team member not found")
-    if "role" in body and body["role"] in ("agent", "manager"):
-        m.role = body["role"]
-    if "status" in body and body["status"] in ("active", "pending", "disabled"):
-        m.status = body["status"]
+    for k, v in body.model_dump(exclude_unset=True).items():
+        setattr(m, k, v)
     await db.commit()
     await db.refresh(m)
     return {"success": True, "data": _team_member_dict(m)}
@@ -503,11 +491,9 @@ async def remove_agency_team_member(
 # ── Public: License token validation ─────────────────────────────────────────
 
 @router.post("/api/public/license/validate", response_model=dict)
-async def validate_license(body: dict, db: DBSession) -> dict:
+async def validate_license(body: LicenseValidateRequest, db: DBSession) -> dict:
     """Validate a reseller license token (called by widget embed on load)."""
-    token = (body.get("token") or "").strip()
-    if not token:
-        raise HTTPException(status_code=422, detail="token required")
+    token = body.token.strip()
 
     result = await db.execute(
         select(ResellerSubscription).where(ResellerSubscription.license_token == token)
@@ -559,10 +545,9 @@ async def get_agency_pricing(user: CurrentUser, db: DBSession) -> dict:
 
 
 @router.put("/api/v1/agency/pricing", response_model=dict, dependencies=[Depends(require_feature(WHITE_LABEL))])
-async def upsert_agency_pricing(body: dict, user: CurrentUser, db: DBSession) -> dict:
+async def upsert_agency_pricing(body: AgencyPricingUpsertRequest, user: CurrentUser, db: DBSession) -> dict:
     """Replace the full set of pricing tiers for the agency."""
     a = await _owner_agency(user.id, db)
-    tiers_data: list[dict] = body.get("tiers") or []
 
     # Delete existing tiers
     existing = await db.execute(
@@ -572,19 +557,15 @@ async def upsert_agency_pricing(body: dict, user: CurrentUser, db: DBSession) ->
         await db.delete(t)
 
     new_tiers = []
-    for td in tiers_data:
-        plan_key = (td.get("plan_key") or "").strip()
-        display_name = (td.get("display_name") or "").strip()
-        if not plan_key or not display_name:
-            continue
+    for td in body.tiers:
         t = AgencyPricingTier(
             agency_id=a.id,
-            plan_key=plan_key,
-            display_name=display_name,
-            price_monthly=int(td.get("price_monthly") or 0),
-            price_yearly=int(td.get("price_yearly") or 0),
-            features=td.get("features"),
-            is_active=bool(td.get("is_active", True)),
+            plan_key=td.plan_key.strip(),
+            display_name=td.display_name.strip(),
+            price_monthly=td.price_monthly,
+            price_yearly=td.price_yearly,
+            features=td.features,
+            is_active=td.is_active,
         )
         db.add(t)
         new_tiers.append(t)
@@ -596,20 +577,18 @@ async def upsert_agency_pricing(body: dict, user: CurrentUser, db: DBSession) ->
 
 
 @router.post("/api/v1/agency/subscriptions", response_model=dict, status_code=201, dependencies=[Depends(require_feature(WHITE_LABEL))])
-async def create_reseller_subscription(body: dict, user: CurrentUser, db: DBSession) -> dict:
+async def create_reseller_subscription(body: ResellerSubscriptionCreateRequest, user: CurrentUser, db: DBSession) -> dict:
     a = await _owner_agency(user.id, db)
-    client_email = (body.get("client_email") or "").strip()
-    if not client_email:
-        raise HTTPException(status_code=422, detail="client_email required")
+    client_email = body.client_email.strip()
     license_token = secrets.token_hex(32)
     sub = ResellerSubscription(
         agency_id=a.id,
         client_email=client_email,
-        plan=body.get("plan", "starter"),
-        amount=int(body.get("amount", 0)),
+        plan=body.plan,
+        amount=body.amount,
         status="active",
         license_token=license_token,
-        stripe_subscription_id=body.get("stripe_subscription_id"),
+        stripe_subscription_id=body.stripe_subscription_id,
     )
     db.add(sub)
     await db.commit()
