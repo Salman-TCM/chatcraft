@@ -5,6 +5,7 @@ import { Loader2, Smartphone, Check } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { toast } from "@/hooks/use-toast";
 
 interface ProgramInfo {
   program_id: string;
@@ -37,6 +38,48 @@ const FIELD_TYPES: Record<string, string> = {
   postal_code: "text",
 };
 
+const GENERIC_ERROR_MESSAGE = "Something went wrong. Please try again.";
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+/** Every field the program's admin configured is required for enrollment —
+ * there's no server-declared "required" flag, so we treat the rendered
+ * field list itself as the source of truth. */
+function validateJoinForm(fields: string[], data: Record<string, string>): Record<string, string> {
+  const errors: Record<string, string> = {};
+  for (const field of fields) {
+    const value = (data[field] || "").trim();
+    if (!value) {
+      errors[field] = `${FIELD_LABELS[field] || field} is required`;
+    } else if (field === "email" && !EMAIL_RE.test(value)) {
+      errors[field] = "Enter a valid email address";
+    }
+  }
+  return errors;
+}
+
+/** Parses a fetch error body into a message + per-field errors. The API
+ * returns two shapes: a plain string `detail` (hand-rolled
+ * HTTPException(detail="...") calls) and the structured
+ * {success, code, error, fields} shape produced for Pydantic validation
+ * errors — see backend/app/core/error_handlers.py. Handles both so we don't
+ * lose the specific message on the string-detail path (e.g. an expired/
+ * inactive join link), while still surfacing field-level messages when present. */
+function parseApiError(body: unknown): { message: string; fields: Record<string, string> } {
+  const detail = (body as { detail?: unknown } | null | undefined)?.detail;
+  if (typeof detail === "string" && detail) {
+    return { message: detail, fields: {} };
+  }
+  if (detail && typeof detail === "object") {
+    const d = detail as { error?: string; fields?: { field: string; message: string }[] };
+    const fields = (d.fields ?? []).reduce<Record<string, string>>((acc, f) => {
+      acc[f.field] = f.message;
+      return acc;
+    }, {});
+    return { message: d.error || GENERIC_ERROR_MESSAGE, fields };
+  }
+  return { message: GENERIC_ERROR_MESSAGE, fields: {} };
+}
+
 export default function JoinPageClient({ token }: { token: string }) {
   const [program, setProgram] = useState<ProgramInfo | null>(null);
   const [card, setCard] = useState<CardResult | null>(null);
@@ -44,6 +87,7 @@ export default function JoinPageClient({ token }: { token: string }) {
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [formData, setFormData] = useState<Record<string, string>>({});
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
 
   const apiBase = process.env.NEXT_PUBLIC_API_URL ?? "";
 
@@ -71,6 +115,17 @@ export default function JoinPageClient({ token }: { token: string }) {
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (!program) return;
+    setError("");
+
+    const fields = program.join_form_fields?.length ? program.join_form_fields : ["name", "email"];
+    const validationErrors = validateJoinForm(fields, formData);
+    if (Object.keys(validationErrors).length > 0) {
+      setFieldErrors(validationErrors);
+      setError("Please fix the highlighted fields below.");
+      return;
+    }
+    setFieldErrors({});
+
     setSubmitting(true);
     try {
       const res = await fetch(`${apiBase}/api/wallet/join/${token}`, {
@@ -79,15 +134,31 @@ export default function JoinPageClient({ token }: { token: string }) {
         body: JSON.stringify(formData),
       });
       if (!res.ok) {
-        const err = await res.json();
-        throw new Error(err.detail || "Enrollment failed");
+        const body = await res.json().catch(() => null);
+        const { message, fields: apiFieldErrors } = parseApiError(body);
+        setFieldErrors(apiFieldErrors);
+        setError(message);
+        toast({ variant: "destructive", title: "Couldn't join program", description: message });
+        return;
       }
       const data = await res.json();
       setCard(data.data);
-    } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : "Something went wrong. Please try again.");
+    } catch {
+      setError(GENERIC_ERROR_MESSAGE);
+      toast({ variant: "destructive", title: "Couldn't join program", description: GENERIC_ERROR_MESSAGE });
     } finally {
       setSubmitting(false);
+    }
+  }
+
+  function handleFieldChange(field: string, value: string) {
+    setFormData((p) => ({ ...p, [field]: value }));
+    if (fieldErrors[field]) {
+      setFieldErrors((p) => {
+        const next = { ...p };
+        delete next[field];
+        return next;
+      });
     }
   }
 
@@ -195,6 +266,7 @@ export default function JoinPageClient({ token }: { token: string }) {
         {/* Join form */}
         <form
           onSubmit={handleSubmit}
+          noValidate
           className="bg-white/5 border border-white/10 rounded-2xl p-6 space-y-4 backdrop-blur-sm"
         >
           <p className="text-sm font-medium text-white/80 mb-2">Join this program</p>
@@ -211,11 +283,16 @@ export default function JoinPageClient({ token }: { token: string }) {
               <Input
                 type={FIELD_TYPES[field] || "text"}
                 value={formData[field] || ""}
-                onChange={(e) => setFormData((p) => ({ ...p, [field]: e.target.value }))}
+                onChange={(e) => handleFieldChange(field, e.target.value)}
                 placeholder={FIELD_LABELS[field] || field}
-                required={field === "name"}
-                className="bg-white/10 border-white/20 text-white placeholder:text-white/30 focus-visible:ring-white/30"
+                aria-invalid={!!fieldErrors[field]}
+                className={`bg-white/10 text-white placeholder:text-white/30 focus-visible:ring-white/30 ${
+                  fieldErrors[field] ? "border-red-400/60" : "border-white/20"
+                }`}
               />
+              {fieldErrors[field] && (
+                <p className="text-xs text-red-300">{fieldErrors[field]}</p>
+              )}
             </div>
           ))}
 
