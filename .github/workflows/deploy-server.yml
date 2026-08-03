@@ -1,0 +1,65 @@
+name: Deploy → Server (staging)
+
+# Runs on a self-hosted runner living on the target server itself, so no
+# inbound ports (SSH etc.) need to be opened on this shared box. The job
+# updates the *existing* checkout in place (no actions/checkout) so the
+# untracked .env file and docker volumes are never touched.
+
+on:
+  push:
+    branches: [master]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-server
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Rebuild and redeploy docker compose stack
+    runs-on: [self-hosted, chatcraft-deploy]
+
+    steps:
+      - name: Sync working copy to origin/master
+        run: |
+          set -euo pipefail
+          cd /home/salman/Salman/deployment/chatcraft
+          git fetch origin master
+          git reset --hard origin/master
+
+      - name: Build images
+        run: |
+          set -euo pipefail
+          cd /home/salman/Salman/deployment/chatcraft
+          docker compose -f docker-compose.yml -f docker-compose.staging.yml build
+
+      - name: Deploy
+        run: |
+          set -euo pipefail
+          cd /home/salman/Salman/deployment/chatcraft
+          docker compose -f docker-compose.yml -f docker-compose.staging.yml up -d --remove-orphans
+
+      - name: Run database migrations
+        run: |
+          set -euo pipefail
+          cd /home/salman/Salman/deployment/chatcraft
+          docker compose -f docker-compose.yml -f docker-compose.staging.yml exec -T backend alembic upgrade head
+
+      - name: Health check
+        run: |
+          set -euo pipefail
+          for i in $(seq 1 12); do
+            STATUS=$(curl -sk -o /dev/null -w "%{http_code}" https://tiertech.com.bd/health/live || echo "000")
+            if [ "$STATUS" = "200" ]; then
+              echo "Healthy (attempt $i)"
+              exit 0
+            fi
+            echo "Attempt $i: HTTP $STATUS — retrying in 10s"
+            sleep 10
+          done
+          echo "Service did not become healthy after 2 minutes"
+          exit 1
+
+      - name: Prune old images
+        if: always()
+        run: docker image prune -f --filter "until=72h"
