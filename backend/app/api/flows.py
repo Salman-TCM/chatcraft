@@ -33,6 +33,15 @@ from sqlalchemy import func, select
 from app.core.dependencies import CurrentUser, DBSession, require_feature
 from app.core.features import FLOWS
 from app.models.flow import Flow, FlowFolder, FlowRun
+from app.schemas.flows import (
+    FlowCreate,
+    FlowFolderCreate,
+    FlowFolderUpdate,
+    FlowGenerateRequest,
+    FlowTriggerRequest,
+    FlowUpdate,
+    WebhookConfigureRequest,
+)
 
 router = APIRouter(tags=["flows"], dependencies=[Depends(require_feature(FLOWS))])
 
@@ -92,11 +101,9 @@ Do not include markdown fences. Output raw JSON only.
 
 
 @router.post("/api/v1/flows/generate", response_model=dict, status_code=status.HTTP_201_CREATED)
-async def generate_flow(body: dict, user: CurrentUser, db: DBSession) -> dict:
+async def generate_flow(body: FlowGenerateRequest, user: CurrentUser, db: DBSession) -> dict:
     """Generate a complete flow from a natural-language description using AI, then save it."""
-    description = (body.get("description") or "").strip()
-    if not description:
-        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="description required")
+    description = body.description
 
     from app.services.llm.base import ChatMessage
     from app.services.llm.router import get_provider
@@ -128,8 +135,8 @@ async def generate_flow(body: dict, user: CurrentUser, db: DBSession) -> dict:
 
     flow = Flow(
         user_id=user.id,
-        chatbot_id=body.get("chatbot_id"),
-        folder_id=body.get("folder_id"),
+        chatbot_id=body.chatbot_id,
+        folder_id=body.folder_id,
         name=generated.get("name") or description[:80],
         description=generated.get("description"),
         trigger_type=generated.get("trigger_type", "manual"),
@@ -212,11 +219,7 @@ async def list_flows(
 
 
 @router.post("/api/v1/flows", response_model=dict, status_code=status.HTTP_201_CREATED)
-async def create_flow(body: dict, user: CurrentUser, db: DBSession) -> dict:
-    name = (body.get("name") or "").strip()
-    if not name:
-        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="name required")
-
+async def create_flow(body: FlowCreate, user: CurrentUser, db: DBSession) -> dict:
     # Default canvas: start + end nodes
     default_nodes = [
         {"id": "start-1", "type": "start", "position": {"x": 250, "y": 50}, "data": {"label": "Start"}},
@@ -228,14 +231,14 @@ async def create_flow(body: dict, user: CurrentUser, db: DBSession) -> dict:
 
     flow = Flow(
         user_id=user.id,
-        chatbot_id=body.get("chatbot_id"),
-        folder_id=body.get("folder_id"),
-        name=name,
-        description=body.get("description"),
-        trigger_type=body.get("trigger_type"),
-        trigger_config=body.get("trigger_config", {}),
-        nodes=body.get("nodes", default_nodes),
-        edges=body.get("edges", default_edges),
+        chatbot_id=body.chatbot_id,
+        folder_id=body.folder_id,
+        name=body.name,
+        description=body.description,
+        trigger_type=body.trigger_type,
+        trigger_config=body.trigger_config,
+        nodes=body.nodes if body.nodes is not None else default_nodes,
+        edges=body.edges if body.edges is not None else default_edges,
         webhook_secret=secrets.token_urlsafe(32),
     )
     db.add(flow)
@@ -251,11 +254,10 @@ async def get_flow(flow_id: uuid.UUID, user: CurrentUser, db: DBSession) -> dict
 
 
 @router.patch("/api/v1/flows/{flow_id}", response_model=dict)
-async def update_flow(flow_id: uuid.UUID, body: dict, user: CurrentUser, db: DBSession) -> dict:
+async def update_flow(flow_id: uuid.UUID, body: FlowUpdate, user: CurrentUser, db: DBSession) -> dict:
     flow = await _get_owned_flow(flow_id, user.id, db)
-    for field in ("name", "description", "trigger_type", "trigger_config", "nodes", "edges", "chatbot_id", "folder_id", "starting_node_id"):
-        if field in body:
-            setattr(flow, field, body[field])
+    for field, value in body.model_dump(exclude_unset=True).items():
+        setattr(flow, field, value)
     await db.commit()
     await db.refresh(flow)
     return {"success": True, "data": _flow_dict(flow)}
@@ -314,12 +316,13 @@ async def get_webhook_config(flow_id: uuid.UUID, user: CurrentUser, db: DBSessio
 
 
 @router.post("/api/v1/flows/{flow_id}/webhook", response_model=dict)
-async def configure_webhook(flow_id: uuid.UUID, body: dict, user: CurrentUser, db: DBSession) -> dict:
+async def configure_webhook(flow_id: uuid.UUID, body: WebhookConfigureRequest, user: CurrentUser, db: DBSession) -> dict:
     flow = await _get_owned_flow(flow_id, user.id, db)
-    if body.get("regenerate"):
+    data = body.model_dump(exclude_unset=True)
+    if data.get("regenerate"):
         flow.webhook_secret = secrets.token_urlsafe(32)
-    if "enabled" in body:
-        flow.is_active = bool(body["enabled"])
+    if "enabled" in data:
+        flow.is_active = bool(data["enabled"])
     await db.commit()
     await db.refresh(flow)
     return {
@@ -335,22 +338,18 @@ async def configure_webhook(flow_id: uuid.UUID, body: dict, user: CurrentUser, d
 # ── Manual trigger ─────────────────────────────────────────────────────────────
 
 @router.post("/api/v1/flows/{flow_id}/trigger", response_model=dict, status_code=status.HTTP_201_CREATED)
-async def trigger_flow(flow_id: uuid.UUID, body: dict, user: CurrentUser, db: DBSession) -> dict:
+async def trigger_flow(flow_id: uuid.UUID, body: FlowTriggerRequest, user: CurrentUser, db: DBSession) -> dict:
     flow = await _get_owned_flow(flow_id, user.id, db)
     if not flow.is_active:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Flow is not active")
-
-    contact_id_str = body.get("contact_id")
-    conversation_id_str = body.get("conversation_id")
-    trigger_data = body.get("data", {})
 
     from app.services.flow.executor import start_run
     run = await start_run(
         flow=flow,
         db=db,
-        contact_id=uuid.UUID(contact_id_str) if contact_id_str else None,
-        conversation_id=uuid.UUID(conversation_id_str) if conversation_id_str else None,
-        trigger_data=trigger_data,
+        contact_id=body.contact_id,
+        conversation_id=body.conversation_id,
+        trigger_data=body.data,
     )
     return {
         "success": True,
@@ -422,11 +421,8 @@ async def list_folders(user: CurrentUser, db: DBSession) -> dict:
 
 
 @router.post("/api/v1/flows/folders", response_model=dict, status_code=status.HTTP_201_CREATED)
-async def create_folder(body: dict, user: CurrentUser, db: DBSession) -> dict:
-    name = (body.get("name") or "").strip()
-    if not name:
-        raise HTTPException(status_code=400, detail="name is required")
-    folder = FlowFolder(user_id=user.id, name=name, colour=body.get("colour"))
+async def create_folder(body: FlowFolderCreate, user: CurrentUser, db: DBSession) -> dict:
+    folder = FlowFolder(user_id=user.id, name=body.name, colour=body.colour)
     db.add(folder)
     await db.commit()
     await db.refresh(folder)
@@ -434,14 +430,15 @@ async def create_folder(body: dict, user: CurrentUser, db: DBSession) -> dict:
 
 
 @router.patch("/api/v1/flows/folders/{folder_id}", response_model=dict)
-async def update_folder(folder_id: uuid.UUID, body: dict, user: CurrentUser, db: DBSession) -> dict:
+async def update_folder(folder_id: uuid.UUID, body: FlowFolderUpdate, user: CurrentUser, db: DBSession) -> dict:
     folder = await db.get(FlowFolder, folder_id)
     if not folder or folder.user_id != user.id:
         raise HTTPException(status_code=404, detail="Folder not found")
-    if "name" in body:
-        folder.name = body["name"].strip() or folder.name
-    if "colour" in body:
-        folder.colour = body["colour"]
+    data = body.model_dump(exclude_unset=True)
+    if "name" in data:
+        folder.name = (data["name"] or "").strip() or folder.name
+    if "colour" in data:
+        folder.colour = data["colour"]
     await db.commit()
     return {"success": True, "data": {"id": str(folder.id), "name": folder.name, "colour": folder.colour}}
 
