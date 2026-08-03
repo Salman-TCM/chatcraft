@@ -1,18 +1,36 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { useAppStore } from "@/store";
+import { useForm, useFieldArray } from "react-hook-form";
+import { zodResolver } from "@hookform/resolvers/zod";
+import { z } from "zod";
 import { Plus, Trash2, Save, RefreshCcw, Tag } from "lucide-react";
+import { apiClient } from "@/lib/api";
+import { toast } from "@/hooks/use-toast";
+import { getErrorMessage, getFieldErrors } from "@/lib/errors";
 
-interface PricingTier {
-  id?: string;
-  plan_key: string;
-  display_name: string;
-  price_monthly: number;
-  price_yearly: number;
-  features: string[];
-  is_active: boolean;
-}
+const tierSchema = z.object({
+  id: z.string().optional(),
+  plan_key: z.string().trim().min(1, "Plan key is required"),
+  display_name: z.string().trim().min(1, "Display name is required"),
+  price_monthly: z
+    .number({ invalid_type_error: "Enter a valid amount" })
+    .int()
+    .min(0, "Must be 0 or more"),
+  price_yearly: z
+    .number({ invalid_type_error: "Enter a valid amount" })
+    .int()
+    .min(0, "Must be 0 or more"),
+  features: z.array(z.string()),
+  is_active: z.boolean(),
+});
+
+const pricingSchema = z.object({
+  tiers: z.array(tierSchema),
+});
+
+type PricingFormData = z.infer<typeof pricingSchema>;
+type PricingTier = PricingFormData["tiers"][number];
 
 const DEFAULT_TIER: PricingTier = {
   plan_key: "",
@@ -24,96 +42,95 @@ const DEFAULT_TIER: PricingTier = {
 };
 
 export default function AgencyPricingPage() {
-  const user = useAppStore((s) => s.user);
-  const [tiers, setTiers] = useState<PricingTier[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
-  const [error, setError] = useState("");
+
+  const {
+    control,
+    register,
+    handleSubmit,
+    reset,
+    setValue,
+    getValues,
+    watch,
+    setError,
+    formState: { errors },
+  } = useForm<PricingFormData>({
+    resolver: zodResolver(pricingSchema),
+    defaultValues: { tiers: [] },
+  });
+
+  const { fields, append, remove } = useFieldArray({ control, name: "tiers" });
+  const watchedTiers = watch("tiers");
 
   async function load() {
-    if (!user?.accessToken) return;
     setLoading(true);
     try {
-      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/v1/agency/pricing`, {
-        headers: { Authorization: `Bearer ${user.accessToken}` },
+      const { data } = await apiClient.get("/api/v1/agency/pricing");
+      const list = (data.data ?? []).map((t: any) => ({
+        ...t,
+        features: Array.isArray(t.features) ? t.features : [],
+      }));
+      reset({ tiers: list });
+    } catch (err) {
+      toast({
+        variant: "destructive",
+        title: "Failed to load pricing tiers",
+        description: getErrorMessage(err),
       });
-      const data = await res.json();
-      if (data.success) {
-        setTiers(
-          data.data.map((t: any) => ({
-            ...t,
-            features: Array.isArray(t.features) ? t.features : [],
-          }))
-        );
-      }
     } finally {
       setLoading(false);
     }
   }
 
-  useEffect(() => { load(); }, [user?.accessToken]); // eslint-disable-line
+  useEffect(() => { load(); }, []); // eslint-disable-line
 
   function addTier() {
-    setTiers((prev) => [...prev, { ...DEFAULT_TIER }]);
+    append({ ...DEFAULT_TIER });
   }
 
   function removeTier(i: number) {
-    setTiers((prev) => prev.filter((_, idx) => idx !== i));
-  }
-
-  function updateTier(i: number, field: keyof PricingTier, value: unknown) {
-    setTiers((prev) => prev.map((t, idx) => idx === i ? { ...t, [field]: value } : t));
+    remove(i);
   }
 
   function updateFeature(tierIdx: number, featIdx: number, value: string) {
-    setTiers((prev) =>
-      prev.map((t, i) => {
-        if (i !== tierIdx) return t;
-        const features = [...t.features];
-        features[featIdx] = value;
-        return { ...t, features };
-      })
-    );
+    const current = [...(getValues(`tiers.${tierIdx}.features`) ?? [])];
+    current[featIdx] = value;
+    setValue(`tiers.${tierIdx}.features`, current, { shouldDirty: true, shouldValidate: true });
   }
 
   function addFeature(tierIdx: number) {
-    setTiers((prev) =>
-      prev.map((t, i) => i === tierIdx ? { ...t, features: [...t.features, ""] } : t)
-    );
+    const current = getValues(`tiers.${tierIdx}.features`) ?? [];
+    setValue(`tiers.${tierIdx}.features`, [...current, ""], { shouldDirty: true });
   }
 
   function removeFeature(tierIdx: number, featIdx: number) {
-    setTiers((prev) =>
-      prev.map((t, i) =>
-        i === tierIdx ? { ...t, features: t.features.filter((_, fi) => fi !== featIdx) } : t
-      )
+    const current = getValues(`tiers.${tierIdx}.features`) ?? [];
+    setValue(
+      `tiers.${tierIdx}.features`,
+      current.filter((_, fi) => fi !== featIdx),
+      { shouldDirty: true, shouldValidate: true }
     );
   }
 
-  async function save() {
-    if (!user?.accessToken) return;
+  async function onSubmit(data: PricingFormData) {
     setSaving(true);
-    setError("");
     try {
-      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/v1/agency/pricing`, {
-        method: "PUT",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${user.accessToken}`,
-        },
-        body: JSON.stringify({ tiers }),
+      await apiClient.put("/api/v1/agency/pricing", { tiers: data.tiers });
+      setSaved(true);
+      setTimeout(() => setSaved(false), 2500);
+      await load();
+    } catch (err) {
+      const fieldErrors = getFieldErrors(err);
+      Object.entries(fieldErrors).forEach(([field, message]) => {
+        setError(field as keyof PricingFormData, { message });
       });
-      const data = await res.json();
-      if (!data.success) {
-        setError(data.detail ?? "Failed to save");
-      } else {
-        setSaved(true);
-        setTimeout(() => setSaved(false), 2500);
-        await load();
-      }
-    } catch {
-      setError("Network error");
+      toast({
+        variant: "destructive",
+        title: "Failed to save pricing tiers",
+        description: getErrorMessage(err),
+      });
     } finally {
       setSaving(false);
     }
@@ -137,7 +154,7 @@ export default function AgencyPricingPage() {
           </p>
         </div>
         <button
-          onClick={save}
+          onClick={handleSubmit(onSubmit)}
           disabled={saving}
           className="inline-flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-60 transition-colors"
         >
@@ -152,13 +169,7 @@ export default function AgencyPricingPage() {
         </button>
       </div>
 
-      {error && (
-        <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
-          {error}
-        </div>
-      )}
-
-      {tiers.length === 0 && (
+      {fields.length === 0 && (
         <div className="rounded-xl border-2 border-dashed border-border py-16 text-center">
           <Tag className="h-8 w-8 mx-auto text-muted-foreground/30 mb-3" />
           <p className="text-sm text-muted-foreground">No pricing tiers yet.</p>
@@ -169,126 +180,140 @@ export default function AgencyPricingPage() {
       )}
 
       <div className="space-y-4">
-        {tiers.map((tier, i) => (
-          <div key={i} className="rounded-xl border bg-card p-5 space-y-4">
-            {/* Header row */}
-            <div className="flex items-center justify-between">
-              <span className="text-sm font-semibold text-muted-foreground">Tier {i + 1}</span>
-              <div className="flex items-center gap-3">
-                <label className="flex items-center gap-1.5 text-xs text-muted-foreground cursor-pointer select-none">
-                  <input
-                    type="checkbox"
-                    checked={tier.is_active}
-                    onChange={(e) => updateTier(i, "is_active", e.target.checked)}
-                    className="rounded"
-                  />
-                  Active
-                </label>
-                <button
-                  onClick={() => removeTier(i)}
-                  className="rounded p-1 text-muted-foreground hover:bg-red-50 hover:text-red-600 transition-colors"
-                >
-                  <Trash2 className="h-3.5 w-3.5" />
-                </button>
-              </div>
-            </div>
-
-            {/* Key + name */}
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <label className="block text-xs font-medium mb-1 text-muted-foreground">Plan key</label>
-                <input
-                  type="text"
-                  value={tier.plan_key}
-                  onChange={(e) => updateTier(i, "plan_key", e.target.value.toLowerCase().replace(/\s+/g, "_"))}
-                  placeholder="e.g. starter"
-                  className="w-full px-3 py-2 text-sm rounded-lg border bg-background focus:outline-none focus:ring-2 focus:ring-primary/30"
-                />
-              </div>
-              <div>
-                <label className="block text-xs font-medium mb-1 text-muted-foreground">Display name</label>
-                <input
-                  type="text"
-                  value={tier.display_name}
-                  onChange={(e) => updateTier(i, "display_name", e.target.value)}
-                  placeholder="e.g. Starter Plan"
-                  className="w-full px-3 py-2 text-sm rounded-lg border bg-background focus:outline-none focus:ring-2 focus:ring-primary/30"
-                />
-              </div>
-            </div>
-
-            {/* Prices */}
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <label className="block text-xs font-medium mb-1 text-muted-foreground">Monthly price (cents)</label>
-                <div className="relative">
-                  <span className="absolute left-3 top-2 text-sm text-muted-foreground">$</span>
-                  <input
-                    type="number"
-                    min={0}
-                    value={tier.price_monthly}
-                    onChange={(e) => updateTier(i, "price_monthly", parseInt(e.target.value) || 0)}
-                    className="w-full pl-6 pr-3 py-2 text-sm rounded-lg border bg-background focus:outline-none focus:ring-2 focus:ring-primary/30"
-                  />
-                </div>
-                <p className="text-[10px] text-muted-foreground mt-0.5">
-                  = ${(tier.price_monthly / 100).toFixed(2)}/mo
-                </p>
-              </div>
-              <div>
-                <label className="block text-xs font-medium mb-1 text-muted-foreground">Yearly price (cents)</label>
-                <div className="relative">
-                  <span className="absolute left-3 top-2 text-sm text-muted-foreground">$</span>
-                  <input
-                    type="number"
-                    min={0}
-                    value={tier.price_yearly}
-                    onChange={(e) => updateTier(i, "price_yearly", parseInt(e.target.value) || 0)}
-                    className="w-full pl-6 pr-3 py-2 text-sm rounded-lg border bg-background focus:outline-none focus:ring-2 focus:ring-primary/30"
-                  />
-                </div>
-                <p className="text-[10px] text-muted-foreground mt-0.5">
-                  = ${(tier.price_yearly / 100).toFixed(2)}/yr
-                </p>
-              </div>
-            </div>
-
-            {/* Features */}
-            <div>
-              <div className="flex items-center justify-between mb-2">
-                <label className="text-xs font-medium text-muted-foreground">Features</label>
-                <button
-                  onClick={() => addFeature(i)}
-                  className="text-xs text-primary hover:underline"
-                >
-                  + Add feature
-                </button>
-              </div>
-              <div className="space-y-1.5">
-                {tier.features.map((feat, fi) => (
-                  <div key={fi} className="flex items-center gap-2">
+        {fields.map((field, i) => {
+          const tier = watchedTiers?.[i] ?? field;
+          const tierErrors = errors.tiers?.[i];
+          return (
+            <div key={field.id} className="rounded-xl border bg-card p-5 space-y-4">
+              {/* Header row */}
+              <div className="flex items-center justify-between">
+                <span className="text-sm font-semibold text-muted-foreground">Tier {i + 1}</span>
+                <div className="flex items-center gap-3">
+                  <label className="flex items-center gap-1.5 text-xs text-muted-foreground cursor-pointer select-none">
                     <input
-                      type="text"
-                      value={feat}
-                      onChange={(e) => updateFeature(i, fi, e.target.value)}
-                      placeholder="e.g. 1,000 conversations/mo"
-                      className="flex-1 px-3 py-1.5 text-sm rounded-lg border bg-background focus:outline-none focus:ring-2 focus:ring-primary/30"
+                      type="checkbox"
+                      className="rounded"
+                      {...register(`tiers.${i}.is_active`)}
                     />
-                    <button
-                      onClick={() => removeFeature(i, fi)}
-                      className="rounded p-1 text-muted-foreground hover:text-red-600 transition-colors"
-                    >
-                      <Trash2 className="h-3 w-3" />
-                    </button>
+                    Active
+                  </label>
+                  <button
+                    onClick={() => removeTier(i)}
+                    className="rounded p-1 text-muted-foreground hover:bg-red-50 hover:text-red-600 transition-colors"
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
+                  </button>
+                </div>
+              </div>
+
+              {/* Key + name */}
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-xs font-medium mb-1 text-muted-foreground">Plan key</label>
+                  <input
+                    type="text"
+                    value={tier.plan_key}
+                    onChange={(e) => setValue(`tiers.${i}.plan_key`, e.target.value.toLowerCase().replace(/\s+/g, "_"), { shouldValidate: true })}
+                    placeholder="e.g. starter"
+                    className="w-full px-3 py-2 text-sm rounded-lg border bg-background focus:outline-none focus:ring-2 focus:ring-primary/30"
+                  />
+                  {tierErrors?.plan_key && (
+                    <p className="text-xs text-destructive mt-1">{tierErrors.plan_key.message}</p>
+                  )}
+                </div>
+                <div>
+                  <label className="block text-xs font-medium mb-1 text-muted-foreground">Display name</label>
+                  <input
+                    type="text"
+                    placeholder="e.g. Starter Plan"
+                    className="w-full px-3 py-2 text-sm rounded-lg border bg-background focus:outline-none focus:ring-2 focus:ring-primary/30"
+                    {...register(`tiers.${i}.display_name`)}
+                  />
+                  {tierErrors?.display_name && (
+                    <p className="text-xs text-destructive mt-1">{tierErrors.display_name.message}</p>
+                  )}
+                </div>
+              </div>
+
+              {/* Prices */}
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-xs font-medium mb-1 text-muted-foreground">Monthly price (cents)</label>
+                  <div className="relative">
+                    <span className="absolute left-3 top-2 text-sm text-muted-foreground">$</span>
+                    <input
+                      type="number"
+                      min={0}
+                      value={tier.price_monthly}
+                      onChange={(e) => setValue(`tiers.${i}.price_monthly`, parseInt(e.target.value, 10) || 0, { shouldValidate: true })}
+                      className="w-full pl-6 pr-3 py-2 text-sm rounded-lg border bg-background focus:outline-none focus:ring-2 focus:ring-primary/30"
+                    />
                   </div>
-                ))}
-                {tier.features.length === 0 && (
-                  <p className="text-xs text-muted-foreground/60 italic">No features listed yet.</p>
-                )}
+                  <p className="text-[10px] text-muted-foreground mt-0.5">
+                    = ${(tier.price_monthly / 100).toFixed(2)}/mo
+                  </p>
+                  {tierErrors?.price_monthly && (
+                    <p className="text-xs text-destructive mt-1">{tierErrors.price_monthly.message}</p>
+                  )}
+                </div>
+                <div>
+                  <label className="block text-xs font-medium mb-1 text-muted-foreground">Yearly price (cents)</label>
+                  <div className="relative">
+                    <span className="absolute left-3 top-2 text-sm text-muted-foreground">$</span>
+                    <input
+                      type="number"
+                      min={0}
+                      value={tier.price_yearly}
+                      onChange={(e) => setValue(`tiers.${i}.price_yearly`, parseInt(e.target.value, 10) || 0, { shouldValidate: true })}
+                      className="w-full pl-6 pr-3 py-2 text-sm rounded-lg border bg-background focus:outline-none focus:ring-2 focus:ring-primary/30"
+                    />
+                  </div>
+                  <p className="text-[10px] text-muted-foreground mt-0.5">
+                    = ${(tier.price_yearly / 100).toFixed(2)}/yr
+                  </p>
+                  {tierErrors?.price_yearly && (
+                    <p className="text-xs text-destructive mt-1">{tierErrors.price_yearly.message}</p>
+                  )}
+                </div>
+              </div>
+
+              {/* Features */}
+              <div>
+                <div className="flex items-center justify-between mb-2">
+                  <label className="text-xs font-medium text-muted-foreground">Features</label>
+                  <button
+                    onClick={() => addFeature(i)}
+                    className="text-xs text-primary hover:underline"
+                  >
+                    + Add feature
+                  </button>
+                </div>
+                <div className="space-y-1.5">
+                  {tier.features.map((feat, fi) => (
+                    <div key={fi} className="flex items-center gap-2">
+                      <input
+                        type="text"
+                        value={feat}
+                        onChange={(e) => updateFeature(i, fi, e.target.value)}
+                        placeholder="e.g. 1,000 conversations/mo"
+                        className="flex-1 px-3 py-1.5 text-sm rounded-lg border bg-background focus:outline-none focus:ring-2 focus:ring-primary/30"
+                      />
+                      <button
+                        onClick={() => removeFeature(i, fi)}
+                        className="rounded p-1 text-muted-foreground hover:text-red-600 transition-colors"
+                      >
+                        <Trash2 className="h-3 w-3" />
+                      </button>
+                    </div>
+                  ))}
+                  {tier.features.length === 0 && (
+                    <p className="text-xs text-muted-foreground/60 italic">No features listed yet.</p>
+                  )}
+                </div>
               </div>
             </div>
-          </div>
-        ))}
+          );
+        })}
       </div>
 
       <button
