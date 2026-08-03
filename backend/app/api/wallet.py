@@ -62,6 +62,12 @@ from app.models.wallet import (
     UserWalletCredentials, WalletCard, WalletCardEvent, WalletProgram,
     WalletPushSubscription, WalletReceiptScan,
 )
+from app.schemas.wallet import (
+    AppleLogBody, WalletAppleCredentialsUpdate, WalletCardAction, WalletCardIssue,
+    WalletGoogleCredentialsUpdate, WalletProgramBulkDelete, WalletProgramCreate,
+    WalletProgramUpdate, WalletPushMessage, WalletReceiptScanRequest, WalletScannerAction,
+    WalletSelfEnroll,
+)
 from app.services.wallet.service import apply_action, default_push_message
 
 # Public routes (join, scan, pkpass download, Apple Wallet web-service)
@@ -70,7 +76,8 @@ router = APIRouter(tags=["wallet"])
 wallet_mgmt_router = APIRouter(tags=["wallet"], dependencies=[Depends(require_feature(WALLET))])
 logger = logging.getLogger(__name__)
 
-_VALID_PROGRAM_STATUSES = frozenset({"active", "inactive", "archived"})
+# Program status/type closed sets (_ProgramStatus / _ProgramType) are enforced via
+# Literal types in app.schemas.wallet.
 
 PROGRAM_TYPES = [
     {"value": "membership",      "label": "Membership Card",    "icon": "🪪",  "description": "Tiered membership with optional points"},
@@ -349,18 +356,12 @@ async def list_programs(
 
 
 @wallet_mgmt_router.post("/api/wallet/programs", response_model=dict, status_code=status.HTTP_201_CREATED)
-async def create_program(body: dict, user: CurrentUser, db: DBSession) -> dict:
-    name = (body.get("name") or "").strip()
-    prog_type = (body.get("type") or "").strip()
-    if not name:
-        raise HTTPException(status_code=422, detail="name required")
-    if prog_type not in {t["value"] for t in PROGRAM_TYPES}:
-        raise HTTPException(status_code=422, detail=f"invalid type: {prog_type}")
-    prog_status = body.get("status", "active")
-    if prog_status not in _VALID_PROGRAM_STATUSES:
-        raise HTTPException(status_code=422, detail=f"Invalid status. Must be one of: {', '.join(sorted(_VALID_PROGRAM_STATUSES))}")
+async def create_program(body: WalletProgramCreate, user: CurrentUser, db: DBSession) -> dict:
+    name = body.name.strip()
+    prog_type = body.type
+    prog_status = body.status
 
-    chatbot_id = body.get("chatbot_id")
+    chatbot_id = body.chatbot_id
     if chatbot_id:
         from app.models.chatbot_config import ChatbotConfig
         try:
@@ -378,14 +379,14 @@ async def create_program(body: dict, user: CurrentUser, db: DBSession) -> dict:
         chatbot_id=chatbot_id,
         name=name,
         type=prog_type,
-        description=body.get("description"),
+        description=body.description,
         status=prog_status,
-        config=body.get("config", {}),
-        brand_overrides=body.get("brand_overrides", {}),
+        config=body.config,
+        brand_overrides=body.brand_overrides,
         join_token=join_token,
         scanner_token=scanner_token,
-        join_form_fields=body.get("join_form_fields", ["name", "email"]),
-        receipt_scanning_config=body.get("receipt_scanning_config", {}),
+        join_form_fields=body.join_form_fields,
+        receipt_scanning_config=body.receipt_scanning_config,
     )
     db.add(program)
     await db.commit()
@@ -410,17 +411,10 @@ async def get_program(program_id: uuid.UUID, user: CurrentUser, db: DBSession) -
 
 
 @wallet_mgmt_router.patch("/api/wallet/programs/{program_id}", response_model=dict)
-async def update_program(program_id: uuid.UUID, body: dict, user: CurrentUser, db: DBSession) -> dict:
+async def update_program(program_id: uuid.UUID, body: WalletProgramUpdate, user: CurrentUser, db: DBSession) -> dict:
     program = await _get_program(program_id, user.id, db)
-    if "status" in body and body["status"] not in _VALID_PROGRAM_STATUSES:
-        raise HTTPException(
-            status_code=422,
-            detail=f"Invalid status. Must be one of: {', '.join(sorted(_VALID_PROGRAM_STATUSES))}",
-        )
-    for field in ("name", "description", "status", "config", "brand_overrides", "chatbot_id",
-                  "join_form_fields", "receipt_scanning_config"):
-        if field in body:
-            setattr(program, field, body[field])
+    for field, value in body.model_dump(exclude_unset=True).items():
+        setattr(program, field, value)
     await db.commit()
     await db.refresh(program)
     dc = await _program_device_count(program_id, db)
@@ -436,8 +430,8 @@ async def delete_program(program_id: uuid.UUID, user: CurrentUser, db: DBSession
 
 
 @wallet_mgmt_router.post("/api/wallet/programs/bulk-delete", response_model=dict)
-async def bulk_delete_programs(body: dict, user: CurrentUser, db: DBSession) -> dict:
-    ids: list[str] = body.get("ids", [])
+async def bulk_delete_programs(body: WalletProgramBulkDelete, user: CurrentUser, db: DBSession) -> dict:
+    ids: list[str] = body.ids
     deleted = 0
     for id_str in ids:
         try:
@@ -499,7 +493,7 @@ async def get_join_program(request: Request, token: str, db: DBSession) -> dict:
 
 @router.post("/api/wallet/join/{token}", response_model=dict, status_code=status.HTTP_201_CREATED)
 @limiter.limit("5/minute")
-async def self_enroll(request: Request, token: str, body: dict, db: DBSession) -> dict:
+async def self_enroll(request: Request, token: str, body: WalletSelfEnroll, db: DBSession) -> dict:
     """Public: customer self-enrolls. Returns card info with wallet add URLs."""
     result = await db.execute(
         select(WalletProgram).where(WalletProgram.join_token == token, WalletProgram.status == "active")
@@ -508,9 +502,9 @@ async def self_enroll(request: Request, token: str, body: dict, db: DBSession) -
     if not program:
         raise HTTPException(status_code=404, detail="Join link not found or program is inactive")
 
-    email = (body.get("email") or "").strip().lower() or None
-    name  = (body.get("name") or "").strip() or None
-    phone = (body.get("phone") or "").strip() or None
+    email = (body.email or "").strip().lower() or None
+    name  = (body.name or "").strip() or None
+    phone = (body.phone or "").strip() or None
 
     # Dedup by email first, then by phone
     if email:
@@ -623,7 +617,7 @@ async def get_scanner_program(request: Request, token: str, db: DBSession) -> di
 
 @router.post("/api/wallet/scan/{token}/action", response_model=dict)
 @limiter.limit("30/minute")
-async def scanner_action(request: Request, token: str, body: dict, db: DBSession) -> dict:
+async def scanner_action(request: Request, token: str, body: WalletScannerAction, db: DBSession) -> dict:
     """Public staff scanner: apply a quick action to a card by serial."""
     result = await db.execute(
         select(WalletProgram).where(WalletProgram.scanner_token == token)
@@ -632,14 +626,9 @@ async def scanner_action(request: Request, token: str, body: dict, db: DBSession
     if not program:
         raise HTTPException(status_code=404, detail="Scanner link not found")
 
-    serial = (body.get("serial") or "").strip()
-    action = (body.get("action") or "").strip()
-    value = body.get("value")
-
-    if not serial or not action:
-        raise HTTPException(status_code=422, detail="serial and action required")
-    if action not in _SCANNER_ACTIONS:
-        raise HTTPException(status_code=422, detail=f"Action not permitted via scanner: {action}")
+    serial = body.serial.strip()
+    action = body.action
+    value = body.value
 
     card_result = await db.execute(
         select(WalletCard)
@@ -719,12 +708,12 @@ async def list_cards(
 
 
 @wallet_mgmt_router.post("/api/wallet/programs/{program_id}/cards", response_model=dict, status_code=status.HTTP_201_CREATED)
-async def issue_card(program_id: uuid.UUID, body: dict, user: CurrentUser, db: DBSession) -> dict:
+async def issue_card(program_id: uuid.UUID, body: WalletCardIssue, user: CurrentUser, db: DBSession) -> dict:
     program = await _get_program(program_id, user.id, db)
 
-    email = (body.get("customer_email") or "").strip().lower() or None
-    name  = (body.get("customer_name") or "").strip() or None
-    phone = (body.get("customer_phone") or "").strip() or None
+    email = (body.customer_email or "").strip().lower() or None
+    name  = (body.customer_name or "").strip() or None
+    phone = (body.customer_phone or "").strip() or None
 
     if email:
         existing = (await db.execute(
@@ -786,35 +775,21 @@ async def revoke_card(serial: str, user: CurrentUser, db: DBSession) -> dict:
 
 
 # ── Card actions ───────────────────────────────────────────────────────────────
-
-_VALID_ACTIONS = frozenset({
-    "add_punch", "remove_punch", "redeem", "set_punches",
-    "set_tier", "add_points", "remove_points", "redeem_points_reward",
-    "set_balance", "check_in", "un_check_in",
-    "deduct_balance", "load_balance", "refund_balance", "redeem_coupon",
-})
-
-# Subset of actions allowed via the public scanner URL (staff-facing quick actions only)
-_SCANNER_ACTIONS = frozenset({
-    "add_punch", "redeem", "add_points", "redeem_points_reward",
-    "check_in", "deduct_balance", "redeem_coupon",
-})
+# Valid actions (_CardAction) and the scanner-permitted subset (_ScannerAction) are
+# now enforced via Literal types in app.schemas.wallet.
 
 
 @wallet_mgmt_router.post("/api/wallet/cards/{serial}/action", response_model=dict)
-async def card_action(serial: str, body: dict, user: CurrentUser, db: DBSession) -> dict:
+async def card_action(serial: str, body: WalletCardAction, user: CurrentUser, db: DBSession) -> dict:
     card = await _get_card_by_serial(serial, db, locked=True)
     program = await db.get(WalletProgram, card.program_id)
     if not program or program.user_id != user.id:
         raise HTTPException(status_code=404, detail="Card not found")
 
-    action = (body.get("action") or "").strip()
-    if action not in _VALID_ACTIONS:
-        raise HTTPException(status_code=422, detail=f"Unknown action: {action}")
-
-    value = body.get("value")
-    silent = bool(body.get("silent", False))
-    custom_message = (body.get("message") or "").strip() or None
+    action = body.action
+    value = body.value
+    silent = body.silent
+    custom_message = (body.message or "").strip() or None
 
     old_state = dict(card.state or {})
     _validate_action_value(action, value, old_state)
@@ -908,7 +883,7 @@ async def list_card_events(
 
 @router.post("/api/wallet/cards/{serial}/receipt-scan", response_model=dict)
 @limiter.limit("10/minute")
-async def receipt_scan(request: Request, serial: str, body: dict, db: DBSession) -> dict:
+async def receipt_scan(request: Request, serial: str, body: WalletReceiptScanRequest, db: DBSession) -> dict:
     """
     Public endpoint (authenticated by serial being in the customer's pass).
     Accepts base64-encoded receipt image and awards points/punches via AI extraction.
@@ -941,9 +916,7 @@ async def receipt_scan(request: Request, serial: str, body: dict, db: DBSession)
     if program.type not in ("points", "punch_card"):
         raise HTTPException(status_code=422, detail="Receipt scanning only available for points and punch card programs")
 
-    image_b64 = (body.get("image") or "").strip()
-    if not image_b64:
-        raise HTTPException(status_code=422, detail="image required (base64)")
+    image_b64 = body.image.strip()
 
     # Strip data URI prefix if present
     if "," in image_b64:
@@ -1141,14 +1114,14 @@ async def get_receipt_image(scan_id: uuid.UUID, user: CurrentUser, db: DBSession
 # ── Push notifications ─────────────────────────────────────────────────────────
 
 @wallet_mgmt_router.post("/api/wallet/cards/{serial}/push", response_model=dict)
-async def push_to_card(serial: str, body: dict, user: CurrentUser, db: DBSession) -> dict:
+async def push_to_card(serial: str, body: WalletPushMessage, user: CurrentUser, db: DBSession) -> dict:
     card = await _get_card_by_serial(serial, db)
     program = await db.get(WalletProgram, card.program_id)
     if not program or program.user_id != user.id:
         raise HTTPException(status_code=404, detail="Card not found")
 
     message = _render_message(
-        (body.get("message") or "Your pass has been updated.").strip(),
+        (body.message or "Your pass has been updated.").strip(),
         card, program,
     )
     sent = await _push_card_devices(card, program, message, db)
@@ -1156,9 +1129,9 @@ async def push_to_card(serial: str, body: dict, user: CurrentUser, db: DBSession
 
 
 @wallet_mgmt_router.post("/api/wallet/programs/{program_id}/push", response_model=dict)
-async def broadcast_push(program_id: uuid.UUID, body: dict, user: CurrentUser, db: DBSession) -> dict:
+async def broadcast_push(program_id: uuid.UUID, body: WalletPushMessage, user: CurrentUser, db: DBSession) -> dict:
     program = await _get_program(program_id, user.id, db)
-    raw_message = (body.get("message") or "Your pass has been updated.").strip()
+    raw_message = (body.message or "Your pass has been updated.").strip()
 
     cards_result = await db.execute(
         select(WalletCard).where(
@@ -1326,7 +1299,7 @@ async def apple_get_updated_pass(
 
 
 @router.post("/api/wallet/v1/log")
-async def apple_log(body: dict) -> dict:
+async def apple_log(body: AppleLogBody) -> dict:
     """Apple Wallet error log endpoint (required by web service spec)."""
     return {}
 
@@ -1470,7 +1443,7 @@ def _decrypt_apple_field(value: str) -> str:
 
 
 @wallet_mgmt_router.patch("/api/settings/wallet/apple", response_model=dict)
-async def save_apple_credentials(body: dict, user: CurrentUser, db: DBSession) -> dict:
+async def save_apple_credentials(body: WalletAppleCredentialsUpdate, user: CurrentUser, db: DBSession) -> dict:
     creds = await db.get(UserWalletCredentials, user.id)
     if not creds:
         creds = UserWalletCredentials(user_id=user.id, apple_config={}, google_config={})
@@ -1486,9 +1459,10 @@ async def save_apple_credentials(body: dict, user: CurrentUser, db: DBSession) -
         "push_key_id": "push_key_id",
         "push_key_pem": "push_key_pem",
     }
+    body_data = body.model_dump(exclude_unset=True)
     for body_key, cfg_key in mapping.items():
-        if body_key in body and body[body_key]:
-            val = body[body_key]
+        if body_key in body_data and body_data[body_key]:
+            val = body_data[body_key]
             if cfg_key in _APPLE_ENCRYPTED_FIELDS:
                 val = _encrypt_apple_field(val)
             current[cfg_key] = val
@@ -1499,17 +1473,17 @@ async def save_apple_credentials(body: dict, user: CurrentUser, db: DBSession) -
 
 
 @wallet_mgmt_router.patch("/api/settings/wallet/google", response_model=dict)
-async def save_google_credentials(body: dict, user: CurrentUser, db: DBSession) -> dict:
+async def save_google_credentials(body: WalletGoogleCredentialsUpdate, user: CurrentUser, db: DBSession) -> dict:
     creds = await db.get(UserWalletCredentials, user.id)
     if not creds:
         creds = UserWalletCredentials(user_id=user.id, apple_config={}, google_config={})
         db.add(creds)
 
     current = dict(creds.google_config or {})
-    if body.get("issuer_id"):
-        current["issuer_id"] = body["issuer_id"]
-    if body.get("service_account"):
-        current["service_account"] = body["service_account"]
+    if body.issuer_id:
+        current["issuer_id"] = body.issuer_id
+    if body.service_account:
+        current["service_account"] = body.service_account
 
     creds.google_config = current
     await db.commit()
