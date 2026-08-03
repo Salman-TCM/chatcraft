@@ -23,6 +23,7 @@ from app.core.security import (
 )
 from app.models.user import User, UserRole
 from app.schemas.auth import (
+    ChangePasswordRequest,
     ForgotPasswordRequest,
     GoogleSyncRequest,
     LoginRequest,
@@ -33,6 +34,7 @@ from app.schemas.auth import (
     RegisterResponse,
     ResetPasswordRequest,
     TokenData,
+    UpdateMeRequest,
     UserResponse,
 )
 from app.services.email import send_password_reset_email, send_verification_email
@@ -274,18 +276,12 @@ async def me(current_user: CurrentUser) -> MeResponse:
 
 @router.put("/me", response_model=dict)
 async def update_me(
-    body: dict,
+    body: UpdateMeRequest,
     current_user: CurrentUser,
     db: DBSession,
 ) -> dict:
     """Update the current user's display name."""
-    name = (body.get("name") or "").strip()
-    if not name:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail={"success": False, "error": "Name is required", "code": "VALIDATION_ERROR"},
-        )
-    current_user.name = name[:100]
+    current_user.name = body.name.strip()[:100]
     await db.commit()
     await db.refresh(current_user)
     return {"success": True, "data": UserResponse.model_validate(current_user)}
@@ -293,13 +289,13 @@ async def update_me(
 
 @router.post("/change-password", response_model=dict)
 async def change_password(
-    body: dict,
+    body: ChangePasswordRequest,
     current_user: CurrentUser,
     db: DBSession,
 ) -> dict:
     """Change password after verifying the current one."""
-    current_pwd = body.get("current_password", "")
-    new_pwd = body.get("new_password", "")
+    current_pwd = body.current_password
+    new_pwd = body.new_password
 
     if not current_user.password_hash:
         raise HTTPException(
@@ -310,11 +306,6 @@ async def change_password(
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail={"success": False, "error": "Current password is incorrect", "code": "WRONG_PASSWORD"},
-        )
-    if len(new_pwd) < 8:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail={"success": False, "error": "Password must be at least 8 characters", "code": "VALIDATION_ERROR"},
         )
 
     current_user.password_hash = hash_password(new_pwd)

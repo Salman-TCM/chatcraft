@@ -99,3 +99,20 @@ class GoogleSyncRequest(BaseModel):
     email: EmailStr
     name: str | None = None
     avatar_url: str | None = None
+
+
+class UpdateMeRequest(BaseModel):
+    name: str = Field(min_length=1, max_length=100)
+
+    @field_validator("name")
+    @classmethod
+    def name_not_blank(cls, v: str) -> str:
+        stripped = v.strip()
+        if not stripped:
+            raise ValueError("Name is required")
+        return stripped
+
+
+class ChangePasswordRequest(BaseModel):
+    current_password: str
+    new_password: str = Field(min_length=8, max_length=72)
