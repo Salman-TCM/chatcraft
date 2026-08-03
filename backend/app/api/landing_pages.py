@@ -25,6 +25,11 @@ from sqlalchemy import func, select
 
 from app.core.dependencies import CurrentUser, DBSession
 from app.models.form import LandingPage
+from app.schemas.landing_pages import (
+    LandingPageAIGenerate,
+    LandingPageCreate,
+    LandingPageUpdate,
+)
 
 router = APIRouter(tags=["landing-pages"])
 
@@ -90,10 +95,8 @@ async def list_pages(
 
 
 @router.post("/api/v1/landing-pages", response_model=dict, status_code=status.HTTP_201_CREATED)
-async def create_page(body: dict, user: CurrentUser, db: DBSession) -> dict:
-    name = (body.get("name") or body.get("title") or "").strip()
-    if not name:
-        raise HTTPException(status_code=422, detail="name required")
+async def create_page(body: LandingPageCreate, user: CurrentUser, db: DBSession) -> dict:
+    name = body.name  # LandingPageCreate validator guarantees a non-empty, stripped value
 
     base_slug = _slugify(name)
     # Ensure unique slug for this user
@@ -110,16 +113,16 @@ async def create_page(body: dict, user: CurrentUser, db: DBSession) -> dict:
 
     page = LandingPage(
         user_id=user.id,
-        chatbot_id=body.get("chatbot_id"),
-        title=body.get("title", name),
+        chatbot_id=body.chatbot_id,
+        title=body.title or name,
         name=name,
         slug=slug,
         short_id=secrets.token_urlsafe(8)[:10],
-        description=body.get("description"),
-        html_content=body.get("html_content", _default_html(name)),
-        theme=body.get("theme", "light"),
-        primary_color=body.get("primary_color", "#6366f1"),
-        seo_meta=body.get("seo_meta", {}),
+        description=body.description,
+        html_content=body.html_content if body.html_content is not None else _default_html(name),
+        theme=body.theme,
+        primary_color=body.primary_color,
+        seo_meta=body.seo_meta,
     )
     db.add(page)
     await db.commit()
@@ -134,11 +137,10 @@ async def get_page(page_id: uuid.UUID, user: CurrentUser, db: DBSession) -> dict
 
 
 @router.patch("/api/v1/landing-pages/{page_id}", response_model=dict)
-async def update_page(page_id: uuid.UUID, body: dict, user: CurrentUser, db: DBSession) -> dict:
+async def update_page(page_id: uuid.UUID, body: LandingPageUpdate, user: CurrentUser, db: DBSession) -> dict:
     page = await _get_owned(page_id, user.id, db)
-    for field in ("title", "name", "description", "html_content", "theme", "primary_color", "seo_meta", "chatbot_id"):
-        if field in body:
-            setattr(page, field, body[field])
+    for field, value in body.model_dump(exclude_unset=True).items():
+        setattr(page, field, value)
     await db.commit()
     await db.refresh(page)
     return {"success": True, "data": _page_dict(page)}
@@ -251,17 +253,15 @@ async def get_qr(
 @router.post("/api/v1/landing-pages/{page_id}/ai", response_model=dict)
 async def ai_generate(
     page_id: uuid.UUID,
-    body: dict,
+    body: LandingPageAIGenerate,
     user: CurrentUser,
     db: DBSession,
 ) -> dict:
     page = await _get_owned(page_id, user.id, db)
-    prompt = (body.get("prompt") or "").strip()
-    if not prompt:
-        raise HTTPException(status_code=422, detail="prompt required")
+    prompt = body.prompt  # already stripped/validated non-empty by LandingPageAIGenerate
 
     from app.services.llm import ChatMessage, LLMRouter
-    llm = LLMRouter(model=body.get("model", "claude-sonnet-4-6"))
+    llm = LLMRouter(model=body.model or "claude-sonnet-4-6")
     messages = [
         ChatMessage(
             role="system",
