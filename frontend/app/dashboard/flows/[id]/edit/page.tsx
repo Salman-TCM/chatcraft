@@ -2,6 +2,9 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
+import { useForm } from "react-hook-form";
+import { zodResolver } from "@hookform/resolvers/zod";
+import { z } from "zod";
 import {
   ReactFlow,
   Background,
@@ -42,6 +45,8 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { apiClient } from "@/lib/api";
+import { toast } from "@/hooks/use-toast";
+import { getErrorMessage, getFieldErrors } from "@/lib/errors";
 
 // ── Node definitions ──────────────────────────────────────────────────────────
 
@@ -880,6 +885,12 @@ function WebhookPanel({
     try {
       const { data } = await apiClient.post(`/api/v1/flows/${flowId}/webhook`, { regenerate: true });
       onSecretChange(data.data.webhook_secret);
+    } catch (err) {
+      toast({
+        variant: "destructive",
+        title: "Couldn't regenerate webhook secret",
+        description: getErrorMessage(err),
+      });
     } finally {
       setRegenerating(false);
     }
@@ -980,6 +991,13 @@ function RunHistoryPanel({
         setRuns(data.data ?? []);
         setTotal(data.total ?? 0);
       })
+      .catch((err) => {
+        toast({
+          variant: "destructive",
+          title: "Couldn't load run history",
+          description: getErrorMessage(err),
+        });
+      })
       .finally(() => setLoading(false));
   }, [flowId]);
 
@@ -1076,8 +1094,8 @@ function FlowSimulatorPanel({
         data,
       });
       setResult(res.data.data);
-    } catch (e: any) {
-      setError(e?.response?.data?.detail ?? "Failed to trigger flow");
+    } catch (e) {
+      setError(getErrorMessage(e));
     } finally {
       setRunning(false);
     }
@@ -1175,11 +1193,23 @@ function newNodeId() {
 
 type RightPanel = "node" | "webhook" | "history" | "simulator" | null;
 
+// Flow name — the inline toolbar title doubles as the "rename" form. It's
+// saved via the same FlowUpdate PATCH as the canvas (name/nodes/edges), so
+// both the onBlur autosave and the explicit Save button run through this
+// schema before hitting the API.
+const flowNameSchema = z.object({
+  name: z.string().trim().min(1, "Flow name is required").max(255, "Max 255 characters"),
+});
+type FlowNameFormData = z.infer<typeof flowNameSchema>;
+
 export default function FlowEditorPage() {
   const { id: flowId } = useParams<{ id: string }>();
   const router = useRouter();
 
-  const [flowName, setFlowName] = useState("Loading…");
+  const nameForm = useForm<FlowNameFormData>({
+    resolver: zodResolver(flowNameSchema),
+    defaultValues: { name: "" },
+  });
   const [isActive, setIsActive] = useState(false);
   const [webhookSecret, setWebhookSecret] = useState<string | null>(null);
   const [startingNodeId, setStartingNodeId] = useState<string | null>(null);
@@ -1219,10 +1249,9 @@ export default function FlowEditorPage() {
   useEffect(() => {
     apiClient.get(`/api/v1/flows/${flowId}`).then(({ data }) => {
       const f = data.data;
-      setFlowName(f.name);
+      nameForm.reset({ name: f.name });
       setIsActive(f.is_active);
       setWebhookSecret(f.webhook_secret);
-      setStartingNodeId(f.starting_node_id ?? null);
       const snId = f.starting_node_id ?? null;
       setStartingNodeId(snId);
       setNodes(toRFNodes(f.nodes || []).map((n: Node) => ({
@@ -1230,7 +1259,15 @@ export default function FlowEditorPage() {
         data: { ...n.data, isStartingNode: n.id === snId },
       })));
       setEdges(f.edges || []);
+    }).catch((err) => {
+      toast({
+        variant: "destructive",
+        title: "Couldn't load flow",
+        description: getErrorMessage(err),
+      });
+      router.push("/dashboard/flows");
     }).finally(() => setLoading(false));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [flowId]);
 
   const onConnect = useCallback(
@@ -1280,25 +1317,43 @@ export default function FlowEditorPage() {
     })));
   }
 
-  async function save() {
+  async function onSaveSubmit(values: FlowNameFormData) {
     setSaving(true);
     try {
       await apiClient.patch(`/api/v1/flows/${flowId}`, {
-        name: flowName,
+        name: values.name,
         nodes: fromRFNodes(nodes),
         edges,
         starting_node_id: startingNodeId,
       });
       setSavedOk(true);
       setTimeout(() => setSavedOk(false), 2000);
+    } catch (err) {
+      toast({
+        variant: "destructive",
+        title: "Couldn't save flow",
+        description: getErrorMessage(err),
+      });
+      const fieldErrors = getFieldErrors(err);
+      for (const [field, message] of Object.entries(fieldErrors)) {
+        nameForm.setError(field as keyof FlowNameFormData, { message });
+      }
     } finally {
       setSaving(false);
     }
   }
 
   async function toggle() {
-    await apiClient.post(`/api/v1/flows/${flowId}/toggle`);
-    setIsActive(a => !a);
+    try {
+      await apiClient.post(`/api/v1/flows/${flowId}/toggle`);
+      setIsActive(a => !a);
+    } catch (err) {
+      toast({
+        variant: "destructive",
+        title: "Couldn't update flow status",
+        description: getErrorMessage(err),
+      });
+    }
   }
 
   function openNodePanel(node: Node) {
@@ -1339,10 +1394,12 @@ export default function FlowEditorPage() {
         </Button>
         <GitFork className="h-4 w-4 text-muted-foreground" />
         <input
-          className="flex-1 max-w-xs bg-transparent text-sm font-medium outline-none placeholder:text-muted-foreground"
-          value={flowName}
-          onChange={e => setFlowName(e.target.value)}
-          onBlur={save}
+          className={`flex-1 max-w-xs bg-transparent text-sm font-medium outline-none placeholder:text-muted-foreground ${
+            nameForm.formState.errors.name ? "text-destructive" : ""
+          }`}
+          title={nameForm.formState.errors.name?.message}
+          {...nameForm.register("name")}
+          onBlur={nameForm.handleSubmit(onSaveSubmit)}
         />
         <div className="ml-auto flex items-center gap-2">
           <Button
@@ -1376,7 +1433,7 @@ export default function FlowEditorPage() {
             {isActive ? <Pause className="h-3.5 w-3.5 text-amber-600" /> : <Play className="h-3.5 w-3.5 text-green-600" />}
             {isActive ? "Active" : "Inactive"}
           </Button>
-          <Button size="sm" className="h-8 gap-1 text-xs" onClick={save} disabled={saving}>
+          <Button size="sm" className="h-8 gap-1 text-xs" onClick={nameForm.handleSubmit(onSaveSubmit)} disabled={saving}>
             {saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : savedOk ? <Check className="h-3.5 w-3.5" /> : <Save className="h-3.5 w-3.5" />}
             {savedOk ? "Saved" : "Save"}
           </Button>

@@ -2,6 +2,9 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
+import { useForm } from "react-hook-form";
+import { zodResolver } from "@hookform/resolvers/zod";
+import { z } from "zod";
 import {
   GitFork,
   Play,
@@ -44,6 +47,8 @@ import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { apiClient } from "@/lib/api";
 import { cn } from "@/lib/utils";
+import { toast } from "@/hooks/use-toast";
+import { getErrorMessage, getFieldErrors } from "@/lib/errors";
 
 interface FlowItem {
   id: string;
@@ -74,6 +79,21 @@ const FOLDER_COLOURS = [
   "#f97316", "#eab308", "#22c55e", "#14b8a6", "#3b82f6",
 ];
 
+// Folder create/rename form — name required (backend rejects whitespace-only
+// on create; blank name on rename is a silent no-op server-side, so we only
+// enforce non-empty on the create path via folderDialogMode).
+const folderSchema = z.object({
+  name: z.string().trim().min(1, "Folder name is required").max(255, "Max 255 characters"),
+  colour: z.string().regex(/^#[0-9a-fA-F]{6}$/, "Pick a colour"),
+});
+type FolderFormData = z.infer<typeof folderSchema>;
+
+// AI-generate-flow prompt form
+const aiGenerateSchema = z.object({
+  description: z.string().trim().min(1, "Describe the flow you want to build").max(2000, "Max 2000 characters"),
+});
+type AiGenerateFormData = z.infer<typeof aiGenerateSchema>;
+
 export default function FlowsPage() {
   const router = useRouter();
   const [flows, setFlows] = useState<FlowItem[]>([]);
@@ -83,19 +103,24 @@ export default function FlowsPage() {
   const [selectedFolder, setSelectedFolder] = useState<string | null>(null); // null = "All"
 
   // Folder dialog
-  const [folderDialog, setFolderDialog] = useState<{
-    open: boolean;
-    mode: "create" | "rename";
-    folder?: FolderItem;
-    name: string;
-    colour: string;
-  }>({ open: false, mode: "create", name: "", colour: FOLDER_COLOURS[0] });
+  const [folderDialogOpen, setFolderDialogOpen] = useState(false);
+  const [folderDialogMode, setFolderDialogMode] = useState<"create" | "rename">("create");
+  const [editingFolder, setEditingFolder] = useState<FolderItem | undefined>(undefined);
   const [savingFolder, setSavingFolder] = useState(false);
+
+  const folderForm = useForm<FolderFormData>({
+    resolver: zodResolver(folderSchema),
+    defaultValues: { name: "", colour: FOLDER_COLOURS[0] },
+  });
 
   // AI Generate dialog
   const [aiDialog, setAiDialog] = useState(false);
-  const [aiDesc, setAiDesc] = useState("");
   const [aiGenerating, setAiGenerating] = useState(false);
+
+  const aiForm = useForm<AiGenerateFormData>({
+    resolver: zodResolver(aiGenerateSchema),
+    defaultValues: { description: "" },
+  });
 
   const load = useCallback(async () => {
     try {
@@ -105,6 +130,12 @@ export default function FlowsPage() {
       ]);
       setFlows(flowsRes.data.data);
       setFolders(foldersRes.data.data);
+    } catch (err) {
+      toast({
+        variant: "destructive",
+        title: "Couldn't load flows",
+        description: getErrorMessage(err),
+      });
     } finally {
       setLoading(false);
     }
@@ -116,6 +147,20 @@ export default function FlowsPage() {
     selectedFolder === null ? true : f.folder_id === selectedFolder
   );
 
+  function openCreateFolder() {
+    folderForm.reset({ name: "", colour: FOLDER_COLOURS[0] });
+    setFolderDialogMode("create");
+    setEditingFolder(undefined);
+    setFolderDialogOpen(true);
+  }
+
+  function openRenameFolder(folder: FolderItem) {
+    folderForm.reset({ name: folder.name, colour: folder.colour ?? FOLDER_COLOURS[0] });
+    setFolderDialogMode("rename");
+    setEditingFolder(folder);
+    setFolderDialogOpen(true);
+  }
+
   async function createFlow() {
     setCreating(true);
     try {
@@ -124,74 +169,130 @@ export default function FlowsPage() {
         folder_id: selectedFolder ?? undefined,
       });
       router.push(`/dashboard/flows/${data.data.id}/edit`);
+    } catch (err) {
+      toast({
+        variant: "destructive",
+        title: "Couldn't create flow",
+        description: getErrorMessage(err),
+      });
     } finally {
       setCreating(false);
     }
   }
 
-  async function generateFlow() {
-    if (!aiDesc.trim()) return;
+  async function onAiGenerateSubmit(values: AiGenerateFormData) {
     setAiGenerating(true);
     try {
       const { data } = await apiClient.post("/api/v1/flows/generate", {
-        description: aiDesc.trim(),
+        description: values.description,
         folder_id: selectedFolder ?? undefined,
       });
       setAiDialog(false);
-      setAiDesc("");
+      aiForm.reset({ description: "" });
       router.push(`/dashboard/flows/${data.data.id}/edit`);
+    } catch (err) {
+      toast({
+        variant: "destructive",
+        title: "Couldn't generate flow",
+        description: getErrorMessage(err),
+      });
+      const fieldErrors = getFieldErrors(err);
+      for (const [field, message] of Object.entries(fieldErrors)) {
+        aiForm.setError(field as keyof AiGenerateFormData, { message });
+      }
     } finally {
       setAiGenerating(false);
     }
   }
 
   async function toggleFlow(id: string, current: boolean) {
-    await apiClient.post(`/api/v1/flows/${id}/toggle`);
-    setFlows((prev) => prev.map((f) => (f.id === id ? { ...f, is_active: !current } : f)));
+    try {
+      await apiClient.post(`/api/v1/flows/${id}/toggle`);
+      setFlows((prev) => prev.map((f) => (f.id === id ? { ...f, is_active: !current } : f)));
+    } catch (err) {
+      toast({
+        variant: "destructive",
+        title: "Couldn't update flow",
+        description: getErrorMessage(err),
+      });
+    }
   }
 
   async function duplicateFlow(id: string) {
-    const { data } = await apiClient.post(`/api/v1/flows/${id}/duplicate`);
-    setFlows((prev) => [data.data, ...prev]);
+    try {
+      const { data } = await apiClient.post(`/api/v1/flows/${id}/duplicate`);
+      setFlows((prev) => [data.data, ...prev]);
+    } catch (err) {
+      toast({
+        variant: "destructive",
+        title: "Couldn't duplicate flow",
+        description: getErrorMessage(err),
+      });
+    }
   }
 
   async function deleteFlow(id: string, name: string) {
     if (!confirm(`Delete "${name}"? This cannot be undone.`)) return;
-    await apiClient.delete(`/api/v1/flows/${id}`);
-    setFlows((prev) => prev.filter((f) => f.id !== id));
+    try {
+      await apiClient.delete(`/api/v1/flows/${id}`);
+      setFlows((prev) => prev.filter((f) => f.id !== id));
+    } catch (err) {
+      toast({
+        variant: "destructive",
+        title: "Couldn't delete flow",
+        description: getErrorMessage(err),
+      });
+    }
   }
 
   async function moveToFolder(flowId: string, folderId: string | null) {
-    await apiClient.patch(`/api/v1/flows/${flowId}`, { folder_id: folderId });
-    setFlows((prev) =>
-      prev.map((f) => (f.id === flowId ? { ...f, folder_id: folderId } : f))
-    );
+    try {
+      await apiClient.patch(`/api/v1/flows/${flowId}`, { folder_id: folderId });
+      setFlows((prev) =>
+        prev.map((f) => (f.id === flowId ? { ...f, folder_id: folderId } : f))
+      );
+    } catch (err) {
+      toast({
+        variant: "destructive",
+        title: "Couldn't move flow",
+        description: getErrorMessage(err),
+      });
+    }
   }
 
-  async function saveFolder() {
-    if (!folderDialog.name.trim()) return;
+  async function onFolderSubmit(values: FolderFormData) {
     setSavingFolder(true);
     try {
-      if (folderDialog.mode === "create") {
+      if (folderDialogMode === "create") {
         const { data } = await apiClient.post("/api/v1/flows/folders", {
-          name: folderDialog.name.trim(),
-          colour: folderDialog.colour,
+          name: values.name,
+          colour: values.colour,
         });
         setFolders((prev) => [...prev, data.data]);
-      } else if (folderDialog.folder) {
-        await apiClient.patch(`/api/v1/flows/folders/${folderDialog.folder.id}`, {
-          name: folderDialog.name.trim(),
-          colour: folderDialog.colour,
+      } else if (editingFolder) {
+        await apiClient.patch(`/api/v1/flows/folders/${editingFolder.id}`, {
+          name: values.name,
+          colour: values.colour,
         });
         setFolders((prev) =>
           prev.map((f) =>
-            f.id === folderDialog.folder!.id
-              ? { ...f, name: folderDialog.name.trim(), colour: folderDialog.colour }
+            f.id === editingFolder.id
+              ? { ...f, name: values.name, colour: values.colour }
               : f
           )
         );
       }
-      setFolderDialog((d) => ({ ...d, open: false }));
+      setFolderDialogOpen(false);
+    } catch (err) {
+      toast({
+        variant: "destructive",
+        title: folderDialogMode === "create" ? "Couldn't create folder" : "Couldn't rename folder",
+        description: getErrorMessage(err),
+      });
+      const fieldErrors = getFieldErrors(err);
+      for (const [field, message] of Object.entries(fieldErrors)) {
+        folderForm.setError(field as keyof FolderFormData, { message });
+      }
     } finally {
       setSavingFolder(false);
     }
@@ -199,10 +300,18 @@ export default function FlowsPage() {
 
   async function deleteFolder(id: string, name: string) {
     if (!confirm(`Delete folder "${name}"? Flows inside will become unorganised.`)) return;
-    await apiClient.delete(`/api/v1/flows/folders/${id}`);
-    setFolders((prev) => prev.filter((f) => f.id !== id));
-    setFlows((prev) => prev.map((f) => (f.folder_id === id ? { ...f, folder_id: null } : f)));
-    if (selectedFolder === id) setSelectedFolder(null);
+    try {
+      await apiClient.delete(`/api/v1/flows/folders/${id}`);
+      setFolders((prev) => prev.filter((f) => f.id !== id));
+      setFlows((prev) => prev.map((f) => (f.folder_id === id ? { ...f, folder_id: null } : f)));
+      if (selectedFolder === id) setSelectedFolder(null);
+    } catch (err) {
+      toast({
+        variant: "destructive",
+        title: "Couldn't delete folder",
+        description: getErrorMessage(err),
+      });
+    }
   }
 
   if (loading) {
@@ -226,14 +335,7 @@ export default function FlowsPage() {
             variant="ghost"
             className="h-6 w-6"
             title="New folder"
-            onClick={() =>
-              setFolderDialog({
-                open: true,
-                mode: "create",
-                name: "",
-                colour: FOLDER_COLOURS[0],
-              })
-            }
+            onClick={openCreateFolder}
           >
             <FolderPlus className="h-3.5 w-3.5" />
           </Button>
@@ -280,15 +382,7 @@ export default function FlowsPage() {
                   </DropdownMenuTrigger>
                   <DropdownMenuContent align="end">
                     <DropdownMenuItem
-                      onClick={() =>
-                        setFolderDialog({
-                          open: true,
-                          mode: "rename",
-                          folder,
-                          name: folder.name,
-                          colour: folder.colour ?? FOLDER_COLOURS[0],
-                        })
-                      }
+                      onClick={() => openRenameFolder(folder)}
                     >
                       <Pencil className="h-3.5 w-3.5 mr-2" /> Rename
                     </DropdownMenuItem>
@@ -489,24 +583,33 @@ export default function FlowsPage() {
 
       {/* Folder create/rename dialog */}
       <Dialog
-        open={folderDialog.open}
-        onOpenChange={(open) => setFolderDialog((d) => ({ ...d, open }))}
+        open={folderDialogOpen}
+        onOpenChange={(open) => setFolderDialogOpen(open)}
       >
         <DialogContent className="sm:max-w-sm">
           <DialogHeader>
             <DialogTitle>
-              {folderDialog.mode === "create" ? "New folder" : "Rename folder"}
+              {folderDialogMode === "create" ? "New folder" : "Rename folder"}
             </DialogTitle>
           </DialogHeader>
           <div className="space-y-4 py-2">
             <div className="space-y-1.5">
               <Label>Name</Label>
               <Input
-                value={folderDialog.name}
-                onChange={(e) => setFolderDialog((d) => ({ ...d, name: e.target.value }))}
+                {...folderForm.register("name")}
                 placeholder="e.g. Lead Nurture"
-                onKeyDown={(e) => e.key === "Enter" && saveFolder()}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    e.preventDefault();
+                    folderForm.handleSubmit(onFolderSubmit)();
+                  }
+                }}
               />
+              {folderForm.formState.errors.name && (
+                <p className="text-xs text-destructive">
+                  {folderForm.formState.errors.name.message}
+                </p>
+              )}
             </div>
             <div className="space-y-1.5">
               <Label>Colour</Label>
@@ -514,29 +617,35 @@ export default function FlowsPage() {
                 {FOLDER_COLOURS.map((colour) => (
                   <button
                     key={colour}
+                    type="button"
                     className={cn(
                       "h-6 w-6 rounded-md border-2 transition-all",
-                      folderDialog.colour === colour
+                      folderForm.watch("colour") === colour
                         ? "border-foreground scale-110"
                         : "border-transparent"
                     )}
                     style={{ background: colour }}
-                    onClick={() => setFolderDialog((d) => ({ ...d, colour }))}
+                    onClick={() => folderForm.setValue("colour", colour, { shouldValidate: true })}
                   />
                 ))}
               </div>
+              {folderForm.formState.errors.colour && (
+                <p className="text-xs text-destructive">
+                  {folderForm.formState.errors.colour.message}
+                </p>
+              )}
             </div>
           </div>
           <DialogFooter>
             <Button
               variant="outline"
-              onClick={() => setFolderDialog((d) => ({ ...d, open: false }))}
+              onClick={() => setFolderDialogOpen(false)}
             >
               Cancel
             </Button>
-            <Button onClick={saveFolder} disabled={savingFolder || !folderDialog.name.trim()}>
+            <Button onClick={folderForm.handleSubmit(onFolderSubmit)} disabled={savingFolder}>
               {savingFolder && <Loader2 className="h-4 w-4 animate-spin" />}
-              {folderDialog.mode === "create" ? "Create" : "Save"}
+              {folderDialogMode === "create" ? "Create" : "Save"}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -556,12 +665,16 @@ export default function FlowsPage() {
               Describe the conversation flow you want to build and AI will generate it for you.
             </p>
             <Textarea
-              value={aiDesc}
-              onChange={(e) => setAiDesc(e.target.value)}
+              {...aiForm.register("description")}
               placeholder="e.g. When a user says 'hello', greet them and ask for their name. Save their name to a custom field, then send them a welcome message with their name."
               rows={5}
               className="resize-none"
             />
+            {aiForm.formState.errors.description && (
+              <p className="text-xs text-destructive">
+                {aiForm.formState.errors.description.message}
+              </p>
+            )}
             <div className="flex flex-wrap gap-2">
               {[
                 "Lead qualification flow",
@@ -571,8 +684,9 @@ export default function FlowsPage() {
               ].map((example) => (
                 <button
                   key={example}
+                  type="button"
                   className="rounded-full border px-3 py-1 text-xs hover:bg-accent transition-colors"
-                  onClick={() => setAiDesc(example)}
+                  onClick={() => aiForm.setValue("description", example, { shouldValidate: true })}
                 >
                   {example}
                 </button>
@@ -584,8 +698,8 @@ export default function FlowsPage() {
               Cancel
             </Button>
             <Button
-              onClick={generateFlow}
-              disabled={aiGenerating || !aiDesc.trim()}
+              onClick={aiForm.handleSubmit(onAiGenerateSubmit)}
+              disabled={aiGenerating}
             >
               {aiGenerating ? (
                 <>
