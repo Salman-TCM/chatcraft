@@ -12,16 +12,17 @@ from typing import Any
 
 import httpx
 from bs4 import BeautifulSoup
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy import func, select, update
 
 from app.core.config import settings
-from app.core.dependencies import CurrentUser, DBSession
+from app.core.dependencies import CurrentUser, DBSession, require_feature
+from app.core.features import BROWSER_AGENT
 from app.models.browser import BrowserSession
 from app.models.user import UserRole
 
-router = APIRouter(prefix="/api/v1/browser", tags=["browser"])
+router = APIRouter(prefix="/api/v1/browser", tags=["browser"], dependencies=[Depends(require_feature(BROWSER_AGENT))])
 
 _PRIVATE_RANGES = [
     "10.", "172.16.", "172.17.", "172.18.", "172.19.", "172.20.", "172.21.",

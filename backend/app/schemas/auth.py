@@ -1,8 +1,9 @@
 from datetime import datetime
 from uuid import UUID
 
-from pydantic import BaseModel, EmailStr, Field, field_validator
+from pydantic import BaseModel, EmailStr, Field, field_validator, model_validator
 
+from app.core.plan_limits import role_default_features
 from app.models.user import UserRole
 
 
@@ -32,6 +33,15 @@ class UserResponse(BaseModel):
     allowed_features: list | None = None
 
     model_config = {"from_attributes": True}
+
+    @model_validator(mode="after")
+    def _apply_plan_default_features(self) -> "UserResponse":
+        """When there's no explicit per-user override, expose the caller's
+        plan-based default so the frontend nav reflects what
+        require_feature actually enforces (see app.core.dependencies)."""
+        if self.allowed_features is None:
+            self.allowed_features = role_default_features(self.role)
+        return self
 
 
 class RegisterResponse(BaseModel):

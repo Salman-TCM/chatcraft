@@ -100,7 +100,15 @@ export default function PricingPage() {
       if (plan.name === "Free") {
         router.push(session ? "/dashboard" : "/register");
       } else {
-        window.location.href = "mailto:sales@chatcraft.ai";
+        // No payment gateway configured yet — route Pro/Enterprise
+        // upgrades to a manual sales email in the meantime.
+        const subject = encodeURIComponent(`${plan.name} plan — ${APP_NAME}`);
+        const body = encodeURIComponent(
+          session?.user?.email
+            ? `Hi, I'd like to upgrade my account (${session.user.email}) to the ${plan.name} plan.`
+            : `Hi, I'd like to sign up for the ${plan.name} plan.`
+        );
+        window.location.href = `mailto:bytecurebd@gmail.com?subject=${subject}&body=${body}`;
       }
       return;
     }

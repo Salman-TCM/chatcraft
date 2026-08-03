@@ -40,8 +40,9 @@ from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.dependencies import CurrentUser, DBSession, RequireAdmin
+from app.core.dependencies import CurrentUser, DBSession, RequireAdmin, require_feature
 from app.core.config import settings
+from app.core.features import WHITE_LABEL
 from app.models.white_label import (
     Agency, AgencyPricingTier, AgencyTeamMember, ImpersonationAuditLog, ResellerSubscription, Tenant,
 )
@@ -308,13 +309,13 @@ async def impersonate_agency(agency_id: uuid.UUID, user: CurrentUser, request: R
 
 # ── Agency owner endpoints ────────────────────────────────────────────────────
 
-@router.get("/api/v1/agency/me", response_model=dict)
+@router.get("/api/v1/agency/me", response_model=dict, dependencies=[Depends(require_feature(WHITE_LABEL))])
 async def get_my_agency(user: CurrentUser, db: DBSession) -> dict:
     a = await _owner_agency(user.id, db)
     return {"success": True, "data": _agency_dict(a)}
 
 
-@router.put("/api/v1/agency/me", response_model=dict)
+@router.put("/api/v1/agency/me", response_model=dict, dependencies=[Depends(require_feature(WHITE_LABEL))])
 async def update_my_agency(body: dict, user: CurrentUser, db: DBSession) -> dict:
     a = await _owner_agency(user.id, db)
     updatable = {"logo_url", "favicon_url", "primary_colour", "support_email", "from_email", "smtp_config"}
@@ -327,7 +328,7 @@ async def update_my_agency(body: dict, user: CurrentUser, db: DBSession) -> dict
     return {"success": True, "data": _agency_dict(a)}
 
 
-@router.get("/api/v1/agency/me/domain-status", response_model=dict)
+@router.get("/api/v1/agency/me/domain-status", response_model=dict, dependencies=[Depends(require_feature(WHITE_LABEL))])
 async def domain_status(user: CurrentUser, db: DBSession) -> dict:
     a = await _owner_agency(user.id, db)
     if not a.custom_domain:
@@ -340,7 +341,7 @@ async def domain_status(user: CurrentUser, db: DBSession) -> dict:
     return {"success": True, "data": {"domain": a.custom_domain, "verified": a.custom_domain_verified, "dns_resolves": resolved}}
 
 
-@router.post("/api/v1/agency/verify-domain", response_model=dict)
+@router.post("/api/v1/agency/verify-domain", response_model=dict, dependencies=[Depends(require_feature(WHITE_LABEL))])
 async def verify_domain(body: dict, user: CurrentUser, db: DBSession) -> dict:
     a = await _owner_agency(user.id, db)
     domain = (body.get("domain") or "").strip().lower()
@@ -361,7 +362,7 @@ async def verify_domain(body: dict, user: CurrentUser, db: DBSession) -> dict:
     return {"success": True, "data": {"domain": domain, "verified": resolves}}
 
 
-@router.post("/api/v1/agency/send-test-email", response_model=dict)
+@router.post("/api/v1/agency/send-test-email", response_model=dict, dependencies=[Depends(require_feature(WHITE_LABEL))])
 async def send_test_email(body: dict, user: CurrentUser, db: DBSession) -> dict:
     a = await _owner_agency(user.id, db)
     if not a.smtp_config:
@@ -386,7 +387,7 @@ async def send_test_email(body: dict, user: CurrentUser, db: DBSession) -> dict:
 
 # ── Agency reseller subscriptions ─────────────────────────────────────────────
 
-@router.get("/api/v1/agency/subscriptions", response_model=dict)
+@router.get("/api/v1/agency/subscriptions", response_model=dict, dependencies=[Depends(require_feature(WHITE_LABEL))])
 async def list_reseller_subscriptions(user: CurrentUser, db: DBSession) -> dict:
     a = await _owner_agency(user.id, db)
     result = await db.execute(
@@ -425,7 +426,7 @@ def _team_member_dict(m: AgencyTeamMember) -> dict:
     }
 
 
-@router.get("/api/v1/agency/team", response_model=dict)
+@router.get("/api/v1/agency/team", response_model=dict, dependencies=[Depends(require_feature(WHITE_LABEL))])
 async def list_agency_team(user: CurrentUser, db: DBSession) -> dict:
     a = await _owner_agency(user.id, db)
     result = await db.execute(
@@ -437,7 +438,7 @@ async def list_agency_team(user: CurrentUser, db: DBSession) -> dict:
     return {"success": True, "data": [_team_member_dict(m) for m in members]}
 
 
-@router.post("/api/v1/agency/team", response_model=dict, status_code=201)
+@router.post("/api/v1/agency/team", response_model=dict, status_code=201, dependencies=[Depends(require_feature(WHITE_LABEL))])
 async def invite_agency_team_member(body: dict, user: CurrentUser, db: DBSession) -> dict:
     a = await _owner_agency(user.id, db)
     member_email = (body.get("member_email") or "").strip().lower()
@@ -469,7 +470,7 @@ async def invite_agency_team_member(body: dict, user: CurrentUser, db: DBSession
     return {"success": True, "data": _team_member_dict(m)}
 
 
-@router.patch("/api/v1/agency/team/{member_id}", response_model=dict)
+@router.patch("/api/v1/agency/team/{member_id}", response_model=dict, dependencies=[Depends(require_feature(WHITE_LABEL))])
 async def update_agency_team_member(
     member_id: uuid.UUID, body: dict, user: CurrentUser, db: DBSession
 ) -> dict:
@@ -486,7 +487,7 @@ async def update_agency_team_member(
     return {"success": True, "data": _team_member_dict(m)}
 
 
-@router.delete("/api/v1/agency/team/{member_id}", response_model=dict)
+@router.delete("/api/v1/agency/team/{member_id}", response_model=dict, dependencies=[Depends(require_feature(WHITE_LABEL))])
 async def remove_agency_team_member(
     member_id: uuid.UUID, user: CurrentUser, db: DBSession
 ) -> dict:
@@ -545,7 +546,7 @@ def _tier_dict(t: AgencyPricingTier) -> dict:
     }
 
 
-@router.get("/api/v1/agency/pricing", response_model=dict)
+@router.get("/api/v1/agency/pricing", response_model=dict, dependencies=[Depends(require_feature(WHITE_LABEL))])
 async def get_agency_pricing(user: CurrentUser, db: DBSession) -> dict:
     a = await _owner_agency(user.id, db)
     result = await db.execute(
@@ -557,7 +558,7 @@ async def get_agency_pricing(user: CurrentUser, db: DBSession) -> dict:
     return {"success": True, "data": [_tier_dict(t) for t in tiers]}
 
 
-@router.put("/api/v1/agency/pricing", response_model=dict)
+@router.put("/api/v1/agency/pricing", response_model=dict, dependencies=[Depends(require_feature(WHITE_LABEL))])
 async def upsert_agency_pricing(body: dict, user: CurrentUser, db: DBSession) -> dict:
     """Replace the full set of pricing tiers for the agency."""
     a = await _owner_agency(user.id, db)
@@ -594,7 +595,7 @@ async def upsert_agency_pricing(body: dict, user: CurrentUser, db: DBSession) ->
     return {"success": True, "data": [_tier_dict(t) for t in new_tiers]}
 
 
-@router.post("/api/v1/agency/subscriptions", response_model=dict, status_code=201)
+@router.post("/api/v1/agency/subscriptions", response_model=dict, status_code=201, dependencies=[Depends(require_feature(WHITE_LABEL))])
 async def create_reseller_subscription(body: dict, user: CurrentUser, db: DBSession) -> dict:
     a = await _owner_agency(user.id, db)
     client_email = (body.get("client_email") or "").strip()
