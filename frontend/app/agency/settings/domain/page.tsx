@@ -1,17 +1,35 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { useForm } from "react-hook-form";
+import { zodResolver } from "@hookform/resolvers/zod";
+import { z } from "zod";
 import { Check, Globe, Loader2, AlertCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { apiClient } from "@/lib/api";
+import { toast } from "@/hooks/use-toast";
+import { getErrorMessage, getFieldErrors } from "@/lib/errors";
 
 type Step = 1 | 2 | 3 | 4;
 
+// Basic hostname shape: labels of alphanumerics/hyphens separated by dots,
+// requiring at least one dot (so bare words like "localhost" are rejected).
+const DOMAIN_REGEX =
+  /^[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)+$/;
+
+const domainSchema = z.object({
+  domain: z
+    .string()
+    .min(1, "Domain is required")
+    .max(253, "Domain is too long")
+    .regex(DOMAIN_REGEX, "Enter a valid domain, e.g. portal.youragency.com"),
+});
+
+type DomainFormData = z.infer<typeof domainSchema>;
+
 export default function AgencyDomainPage() {
-  const [domain, setDomain] = useState("");
   const [currentDomain, setCurrentDomain] = useState<string | null>(null);
   const [verified, setVerified] = useState(false);
   const [dnsResolves, setDnsResolves] = useState<boolean | null>(null);
@@ -20,41 +38,69 @@ export default function AgencyDomainPage() {
   const [checking, setChecking] = useState(false);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
+  const {
+    watch,
+    setValue,
+    setError,
+    handleSubmit,
+    formState: { errors },
+  } = useForm<DomainFormData>({
+    resolver: zodResolver(domainSchema),
+    defaultValues: { domain: "" },
+  });
+
+  const domain = watch("domain");
+
   useEffect(() => {
-    apiClient.get("/api/v1/agency/me/domain-status").then(({ data }) => {
-      const d = data.data;
-      setCurrentDomain(d.domain);
-      setVerified(d.verified);
-      setDnsResolves(d.dns_resolves ?? null);
-      if (d.domain) {
-        setDomain(d.domain);
-        setStep(d.verified ? 4 : 3);
-      }
-    }).finally(() => setLoading(false));
+    apiClient
+      .get("/api/v1/agency/me/domain-status")
+      .then(({ data }) => {
+        const d = data.data;
+        setCurrentDomain(d.domain);
+        setVerified(d.verified);
+        setDnsResolves(d.dns_resolves ?? null);
+        if (d.domain) {
+          setValue("domain", d.domain);
+          setStep(d.verified ? 4 : 3);
+        }
+      })
+      .catch((err) => {
+        toast({
+          variant: "destructive",
+          title: "Failed to load domain settings",
+          description: getErrorMessage(err),
+        });
+      })
+      .finally(() => setLoading(false));
     return () => { if (pollRef.current) clearInterval(pollRef.current); };
-  }, []);
+  }, [setValue]);
 
   function startPolling() {
     if (pollRef.current) clearInterval(pollRef.current);
     pollRef.current = setInterval(async () => {
-      const { data } = await apiClient.get("/api/v1/agency/me/domain-status");
-      if (data.data?.verified) {
-        setVerified(true);
-        setStep(4);
-        clearInterval(pollRef.current!);
+      try {
+        const { data } = await apiClient.get("/api/v1/agency/me/domain-status");
+        if (data.data?.verified) {
+          setVerified(true);
+          setStep(4);
+          if (pollRef.current) clearInterval(pollRef.current);
+        }
+      } catch {
+        // Transient polling failure — silently retry on the next interval.
       }
     }, 30_000);
   }
 
-  async function submitDomain() {
-    if (!domain.trim()) return;
+  function goToStep2() {
     setStep(2);
   }
 
   async function verify() {
     setChecking(true);
     try {
-      const { data } = await apiClient.post("/api/v1/agency/verify-domain", { domain: domain.trim() });
+      const { data } = await apiClient.post("/api/v1/agency/verify-domain", {
+        domain: domain.trim(),
+      });
       setDnsResolves(data.data.dns_resolves);
       if (data.data.verified) {
         setVerified(true);
@@ -64,6 +110,16 @@ export default function AgencyDomainPage() {
         setStep(3);
         startPolling();
       }
+    } catch (err) {
+      const fieldErrors = getFieldErrors(err);
+      Object.entries(fieldErrors).forEach(([field, message]) => {
+        setError(field as keyof DomainFormData, { message });
+      });
+      toast({
+        variant: "destructive",
+        title: "Domain verification failed",
+        description: getErrorMessage(err),
+      });
     } finally {
       setChecking(false);
     }
@@ -80,23 +136,26 @@ export default function AgencyDomainPage() {
 
       <Card className="p-4 space-y-4">
         {/* Step 1 */}
-        <div className={step >= 1 ? "" : "opacity-40"}>
+        <form onSubmit={handleSubmit(goToStep2)} className={step >= 1 ? "" : "opacity-40"}>
           <p className="text-sm font-semibold mb-2">Step 1 — Enter your domain</p>
           <div className="flex gap-2">
             <Input
               value={domain}
-              onChange={e => setDomain(e.target.value.toLowerCase())}
+              onChange={e => setValue("domain", e.target.value.toLowerCase(), { shouldValidate: true })}
               placeholder="portal.youragency.com"
               disabled={step >= 2 && verified}
             />
             {step === 1 && (
-              <Button onClick={submitDomain} disabled={!domain.trim()}>Next</Button>
+              <Button type="submit" disabled={!domain.trim()}>Next</Button>
             )}
             {step > 1 && !verified && (
-              <Button variant="outline" onClick={() => setStep(1)}>Change</Button>
+              <Button type="button" variant="outline" onClick={() => setStep(1)}>Change</Button>
             )}
           </div>
-        </div>
+          {errors.domain && (
+            <p className="text-sm text-destructive mt-1">{errors.domain.message}</p>
+          )}
+        </form>
 
         {/* Step 2 */}
         {step >= 2 && (
