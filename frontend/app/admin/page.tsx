@@ -11,6 +11,7 @@ import {
   Tooltip, ResponsiveContainer,
 } from "recharts";
 import { apiClient } from "@/lib/api";
+import { APP_NAME } from "@/lib/constants";
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -70,7 +71,7 @@ export default function AdminOverviewPage() {
     <div className="space-y-8 p-6">
       <div>
         <h1 className="text-2xl font-semibold">Platform Overview</h1>
-        <p className="text-sm text-muted-foreground">Real-time health of ChatCraft AI</p>
+        <p className="text-sm text-muted-foreground">Real-time health of {APP_NAME}</p>
       </div>
 
       {/* Past-due alert */}

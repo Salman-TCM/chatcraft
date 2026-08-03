@@ -1,3 +1,7 @@
+"use client";
+
+import { motion } from "framer-motion";
+import { fadeUp, staggerChildren } from "@/lib/motion";
 import { STEPS } from "./content";
 
 export function HowItWorks() {
@@ -10,15 +14,31 @@ export function HowItWorks() {
           </h2>
         </div>
 
-        <div className="mt-14 grid gap-8 sm:grid-cols-3">
+        <motion.div
+          className="relative mt-16 grid gap-10 sm:grid-cols-3 sm:gap-8"
+          initial="hidden"
+          whileInView="show"
+          viewport={{ once: true, margin: "-80px" }}
+          variants={staggerChildren}
+        >
+          <div
+            aria-hidden
+            className="absolute left-0 right-0 top-3 hidden border-t border-dashed sm:block"
+          />
+
           {STEPS.map((step) => (
-            <div key={step.n} className="relative animate-in fade-in slide-in-from-bottom-2 duration-500">
-              <div className="mb-4 text-4xl font-bold text-primary/20">{step.n}</div>
-              <h3 className="font-semibold">{step.title}</h3>
+            <motion.div key={step.n} variants={fadeUp} className="relative text-center sm:text-left">
+              <div className="relative z-10 inline-flex items-center gap-2 bg-background pr-3 sm:pl-0">
+                <step.icon className="h-4 w-4 text-primary" strokeWidth={1.75} />
+                <span className="text-xs font-semibold tracking-widest text-primary/60">
+                  STEP {step.n}
+                </span>
+              </div>
+              <h3 className="mt-3 font-semibold">{step.title}</h3>
               <p className="mt-2 text-sm text-muted-foreground">{step.desc}</p>
-            </div>
+            </motion.div>
           ))}
-        </div>
+        </motion.div>
       </div>
     </section>
   );

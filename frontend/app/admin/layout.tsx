@@ -8,6 +8,7 @@ import {
   ShieldAlert, Menu, X, Building2, ScrollText, Settings,
 } from "lucide-react";
 import { signOut, useSession } from "next-auth/react";
+import { APP_NAME } from "@/lib/constants";
 
 const NAV = [
   { href: "/admin",                   label: "Overview",  icon: LayoutDashboard },
@@ -56,7 +57,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
           A
         </div>
         <div>
-          <p className="text-sm font-semibold leading-none">ChatCraft AI</p>
+          <p className="text-sm font-semibold leading-none">{APP_NAME}</p>
           <p className="text-[10px] text-rose-600 font-semibold uppercase tracking-wide">Admin</p>
         </div>
       </div>

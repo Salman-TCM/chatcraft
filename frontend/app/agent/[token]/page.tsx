@@ -5,6 +5,7 @@ import { useParams } from "next/navigation";
 import { AlertCircle, Bot, Check, ChevronDown, ChevronUp, Loader2, Send, Zap } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { APP_NAME } from "@/lib/constants";
 
 interface AgentInfo {
   id: string;
@@ -306,7 +307,7 @@ export default function PublicAgentPage() {
           </Button>
         </div>
         <p className="text-center text-[10px] text-muted-foreground/50 mt-2">
-          Powered by ChatCraft AI
+          Powered by {APP_NAME}
         </p>
       </div>
     </div>

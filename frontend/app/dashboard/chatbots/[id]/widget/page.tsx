@@ -23,6 +23,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
 import { apiClient } from "@/lib/api";
+import { APP_NAME } from "@/lib/constants";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -414,7 +415,7 @@ export default function WidgetPage() {
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-sm font-medium">Show Branding</p>
-                <p className="text-xs text-muted-foreground">Display "Powered by ChatCraft AI"</p>
+                <p className="text-xs text-muted-foreground">Display &quot;Powered by {APP_NAME}&quot;</p>
               </div>
               <Toggle checked={showBranding} onChange={setShowBranding} />
             </div>

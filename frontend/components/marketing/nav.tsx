@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import Link from "next/link";
+import { AnimatePresence, motion } from "framer-motion";
 import { ArrowRight, Menu, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Logo } from "@/components/branding/logo";
@@ -23,9 +24,10 @@ export function Nav() {
             <Link
               key={l.href}
               href={l.href}
-              className="text-sm font-medium text-muted-foreground transition-colors hover:text-foreground"
+              className="group relative text-sm font-medium text-muted-foreground transition-colors hover:text-foreground"
             >
               {l.label}
+              <span className="absolute -bottom-1 left-0 h-px w-0 bg-foreground transition-all duration-200 group-hover:w-full" />
             </Link>
           ))}
         </nav>
@@ -55,30 +57,38 @@ export function Nav() {
         </div>
       </div>
 
-      {mobileOpen && (
-        <div className="border-t px-6 py-4 md:hidden">
-          <nav className="flex flex-col gap-4">
-            {NAV_LINKS.map((l) => (
-              <Link
-                key={l.href}
-                href={l.href}
-                onClick={() => setMobileOpen(false)}
-                className="text-sm font-medium text-muted-foreground hover:text-foreground"
-              >
-                {l.label}
-              </Link>
-            ))}
-            <div className="flex flex-col gap-2 pt-2">
-              <Button variant="outline" asChild>
-                <Link href="/login">Log in</Link>
-              </Button>
-              <Button variant="glow" asChild>
-                <Link href="/register">Get started free</Link>
-              </Button>
-            </div>
-          </nav>
-        </div>
-      )}
+      <AnimatePresence>
+        {mobileOpen && (
+          <motion.div
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: "auto", opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            transition={{ duration: 0.2, ease: [0.16, 1, 0.3, 1] }}
+            className="overflow-hidden border-t md:hidden"
+          >
+            <nav className="flex flex-col gap-4 px-6 py-4">
+              {NAV_LINKS.map((l) => (
+                <Link
+                  key={l.href}
+                  href={l.href}
+                  onClick={() => setMobileOpen(false)}
+                  className="text-sm font-medium text-muted-foreground hover:text-foreground"
+                >
+                  {l.label}
+                </Link>
+              ))}
+              <div className="flex flex-col gap-2 pt-2">
+                <Button variant="outline" asChild>
+                  <Link href="/login">Log in</Link>
+                </Button>
+                <Button variant="glow" asChild>
+                  <Link href="/register">Get started free</Link>
+                </Button>
+              </div>
+            </nav>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </header>
   );
 }

@@ -23,6 +23,7 @@ import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { apiClient } from "@/lib/api";
+import { APP_NAME } from "@/lib/constants";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -510,7 +511,7 @@ export default function ChannelsPage() {
       {/* Info box */}
       <Card className="bg-muted/40 p-4">
         <p className="text-xs text-muted-foreground leading-relaxed">
-          <strong>How it works:</strong> When a message arrives on any connected channel, ChatCraft
+          <strong>How it works:</strong> When a message arrives on any connected channel, {APP_NAME}
           creates a contact and conversation, runs the message through your chatbot's AI (with its
           knowledge base), and sends the reply back — all automatically. You can monitor and take
           over conversations from the <strong>Inbox</strong>.

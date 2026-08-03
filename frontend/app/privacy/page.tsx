@@ -1,6 +1,8 @@
+import { APP_NAME } from "@/lib/constants";
+
 export const metadata = {
-  title: "Privacy Policy | ChatCraft AI",
-  description: "How ChatCraft AI collects, uses, and protects your personal data.",
+  title: `Privacy Policy | ${APP_NAME}`,
+  description: `How ${APP_NAME} collects, uses, and protects your personal data.`,
 };
 
 export default function PrivacyPage() {
@@ -16,7 +18,7 @@ export default function PrivacyPage() {
           <h2 className="text-xl font-semibold text-gray-800">Data We Collect</h2>
           <p className="mt-2 text-gray-600">
             We collect information you provide directly, such as your name, email address, and
-            payment details when you register or subscribe to ChatCraft AI. We also collect
+            payment details when you register or subscribe to {APP_NAME}. We also collect
             usage data automatically, including IP addresses, browser type, pages visited, and
             interactions with chatbot widgets you create. This data helps us operate, improve,
             and secure the platform.
@@ -31,7 +33,7 @@ export default function PrivacyPage() {
         <section>
           <h2 className="text-xl font-semibold text-gray-800">How We Use Your Data</h2>
           <p className="mt-2 text-gray-600">
-            Your data is used to provide and improve ChatCraft AI, process payments, send
+            Your data is used to provide and improve {APP_NAME}, process payments, send
             transactional emails (e.g. invoices, password resets), and detect abuse or
             fraudulent activity. We may use aggregated, anonymised analytics to understand
             feature adoption and guide product development.

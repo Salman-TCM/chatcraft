@@ -250,6 +250,7 @@ services:
       NEXT_PUBLIC_API_URL:             ${NEXT_PUBLIC_API_URL:-http://localhost:8000}
       BACKEND_URL:                     http://backend:8000
       NEXT_PUBLIC_APP_URL:             ${NEXT_PUBLIC_APP_URL:-http://localhost:3000}
+      NEXT_PUBLIC_APP_NAME:            ${NEXT_PUBLIC_APP_NAME:-Tiertech}
       NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY: ${STRIPE_PUBLISHABLE_KEY:-}
       NEXT_PUBLIC_POSTHOG_KEY:         ${NEXT_PUBLIC_POSTHOG_KEY:-}
       NEXT_PUBLIC_POSTHOG_HOST:        ${NEXT_PUBLIC_POSTHOG_HOST:-https://eu.posthog.com}
