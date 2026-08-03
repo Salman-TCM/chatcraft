@@ -58,7 +58,10 @@ apiClient.interceptors.response.use(
       return Promise.reject(error);
     }
 
-    if (typeof window !== "undefined" && code === "USAGE_LIMIT_REACHED") {
+    if (
+      typeof window !== "undefined" &&
+      (code === "USAGE_LIMIT_REACHED" || code === "CHATBOT_LIMIT_REACHED" || code === "MODEL_NOT_ALLOWED")
+    ) {
       const { useAppStore } = await import("@/store");
       useAppStore.getState().openUpgradeModal(
         error.response?.data?.detail?.error ?? "You've reached your usage limit"

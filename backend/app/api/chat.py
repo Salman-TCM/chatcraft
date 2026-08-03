@@ -27,6 +27,7 @@ from sqlalchemy.orm import selectinload
 
 from app.core.config import settings
 from app.core.dependencies import DBSession, RedisClient
+from app.core.plan_limits import best_allowed_model
 from app.core.security import decode_token
 from app.db.session import get_db
 from app.models.chatbot_config import ChatbotConfig
@@ -47,6 +48,7 @@ from app.services.llm import (
     SystemPromptContext,
     build_system_prompt,
     sanitize,
+    supported_models,
 )
 from app.services.llm.key_store import get_all_keys
 from app.services.llm.router import get_model_provider
@@ -167,12 +169,19 @@ async def stream_chat(
 
     # ── build LLM message history ─────────────────────────────────────────────
     model_id = bot.default_model
-    if body.model and bot.allow_model_switch:
+    if body.model and bot.allow_model_switch and body.model in supported_models():
         model_id = body.model
 
     # Load the chatbot owner's API keys (BYOK)
     owner_id = bot.user_id
+    owner = await db.get(User, owner_id)
     api_keys = await get_all_keys(owner_id, db)
+    # Defensive: if the owner's plan no longer covers this model (e.g. their
+    # subscription lapsed after the bot was configured), silently downgrade
+    # rather than break a live conversation for their end-visitor — prefer a
+    # free-tier model from a provider they already have a key for.
+    if owner is not None:
+        model_id = best_allowed_model(owner.role, model_id, frozenset(api_keys))
     provider_name = get_model_provider(model_id)
     if not api_keys.get(provider_name):
         raise HTTPException(

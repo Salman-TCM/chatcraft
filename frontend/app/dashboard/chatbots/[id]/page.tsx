@@ -24,9 +24,14 @@ import { Separator } from "@/components/ui/separator";
 import { apiClient } from "@/lib/api";
 import { APP_NAME } from "@/lib/constants";
 
+interface ModelMeta {
+  id: string;
+  allowed: boolean;
+}
+
 interface ProviderMeta {
   label: string;
-  models: string[];
+  models: ModelMeta[];
 }
 
 interface KeyStatus {
@@ -550,6 +555,9 @@ function ModelSelect({
 }) {
   const configured = Object.entries(providerMeta).filter(([p]) => configuredProviders.has(p));
   const unconfigured = Object.entries(providerMeta).filter(([p]) => !configuredProviders.has(p));
+  const lockedByPlan = configured.flatMap(([, info]) =>
+    info.models.filter((m) => !m.allowed).map((m) => ({ ...m, label: info.label }))
+  );
   return (
     <select
       value={value}
@@ -557,18 +565,29 @@ function ModelSelect({
       className="w-full rounded-md border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-ring"
     >
       {includeNone && <option value="">None</option>}
-      {configured.map(([provider, info]) => (
-        <optgroup key={provider} label={info.label}>
-          {info.models.map((m) => (
-            <option key={m} value={m}>{m}</option>
+      {configured.map(([provider, info]) => {
+        const allowedModels = info.models.filter((m) => m.allowed);
+        if (allowedModels.length === 0) return null;
+        return (
+          <optgroup key={provider} label={info.label}>
+            {allowedModels.map((m) => (
+              <option key={m.id} value={m.id}>{m.id}</option>
+            ))}
+          </optgroup>
+        );
+      })}
+      {lockedByPlan.length > 0 && (
+        <optgroup label="── Upgrade to Pro to unlock ──" disabled>
+          {lockedByPlan.map((m) => (
+            <option key={m.id} value={m.id} disabled>{m.label} — {m.id} (Pro)</option>
           ))}
         </optgroup>
-      ))}
+      )}
       {unconfigured.length > 0 && (
         <optgroup label="── No key configured ──" disabled>
           {unconfigured.map(([provider, info]) =>
             info.models.map((m) => (
-              <option key={m} value={m} disabled>{info.label} — {m}</option>
+              <option key={m.id} value={m.id} disabled>{info.label} — {m.id}</option>
             ))
           )}
         </optgroup>
