@@ -27,6 +27,14 @@ from sqlalchemy import func, select
 
 from app.core.dependencies import CurrentUser, DBSession
 from app.models.commerce import CommercePayment, CommerceProduct, CommerceStore
+from app.schemas.commerce import (
+    PaymentConfirm,
+    PaymentIntentCreate,
+    ProductCreate,
+    ProductUpdate,
+    StoreCreate,
+    StoreUpdate,
+)
 
 router = APIRouter(tags=["commerce"])
 
@@ -128,10 +136,8 @@ async def list_stores(
 
 
 @router.post("/api/v1/stores", response_model=dict, status_code=status.HTTP_201_CREATED)
-async def create_store(body: dict, user: CurrentUser, db: DBSession) -> dict:
-    name = (body.get("name") or "").strip()
-    if not name:
-        raise HTTPException(status_code=422, detail="name required")
+async def create_store(body: StoreCreate, user: CurrentUser, db: DBSession) -> dict:
+    name = body.name.strip()
 
     base_slug = _slugify(name)
     slug = base_slug
@@ -147,14 +153,14 @@ async def create_store(body: dict, user: CurrentUser, db: DBSession) -> dict:
         user_id=user.id,
         name=name,
         slug=slug,
-        description=body.get("description"),
-        is_active=body.get("is_active", True),
-        currency=body.get("currency", "USD"),
-        primary_color=body.get("primary_color", "#6366f1"),
-        default_view_mode=body.get("default_view_mode", "grid"),
-        payment_provider=body.get("payment_provider", "stripe"),
-        google_sheet_id=body.get("google_sheet_id"),
-        chatbot_id=body.get("chatbot_id"),
+        description=body.description,
+        is_active=body.is_active,
+        currency=body.currency,
+        primary_color=body.primary_color,
+        default_view_mode=body.default_view_mode,
+        payment_provider=body.payment_provider,
+        google_sheet_id=body.google_sheet_id,
+        chatbot_id=body.chatbot_id,
     )
     db.add(store)
     await db.commit()
@@ -169,12 +175,10 @@ async def get_store(store_id: uuid.UUID, user: CurrentUser, db: DBSession) -> di
 
 
 @router.patch("/api/v1/stores/{store_id}", response_model=dict)
-async def update_store(store_id: uuid.UUID, body: dict, user: CurrentUser, db: DBSession) -> dict:
+async def update_store(store_id: uuid.UUID, body: StoreUpdate, user: CurrentUser, db: DBSession) -> dict:
     store = await _get_store(store_id, user.id, db)
-    for field in ("name", "description", "is_active", "currency", "primary_color",
-                  "default_view_mode", "payment_provider", "google_sheet_id", "chatbot_id"):
-        if field in body:
-            setattr(store, field, body[field])
+    for field, value in body.model_dump(exclude_unset=True).items():
+        setattr(store, field, value)
     await db.commit()
     await db.refresh(store)
     return {"success": True, "data": _store_dict(store)}
@@ -212,26 +216,20 @@ async def list_products(
 
 
 @router.post("/api/v1/stores/{store_id}/products", response_model=dict, status_code=status.HTTP_201_CREATED)
-async def create_product(store_id: uuid.UUID, body: dict, user: CurrentUser, db: DBSession) -> dict:
+async def create_product(store_id: uuid.UUID, body: ProductCreate, user: CurrentUser, db: DBSession) -> dict:
     await _get_store(store_id, user.id, db)
-    name = (body.get("name") or "").strip()
-    if not name:
-        raise HTTPException(status_code=422, detail="name required")
-    price = body.get("price")
-    if price is None:
-        raise HTTPException(status_code=422, detail="price required")
     product = CommerceProduct(
         store_id=store_id,
-        name=name,
-        description=body.get("description"),
-        price=price,
-        compare_at_price=body.get("compare_at_price"),
-        image_url=body.get("image_url"),
-        category=body.get("category"),
-        sku=body.get("sku"),
-        in_stock=body.get("in_stock", True),
-        metadata_=body.get("metadata", {}),
-        sort_order=body.get("sort_order", 0),
+        name=body.name.strip(),
+        description=body.description,
+        price=body.price,
+        compare_at_price=body.compare_at_price,
+        image_url=body.image_url,
+        category=body.category,
+        sku=body.sku,
+        in_stock=body.in_stock,
+        metadata_=body.metadata,
+        sort_order=body.sort_order,
     )
     db.add(product)
     await db.commit()
@@ -242,16 +240,15 @@ async def create_product(store_id: uuid.UUID, body: dict, user: CurrentUser, db:
 @router.patch("/api/v1/stores/{store_id}/products/{product_id}", response_model=dict)
 async def update_product(
     store_id: uuid.UUID, product_id: uuid.UUID,
-    body: dict, user: CurrentUser, db: DBSession,
+    body: ProductUpdate, user: CurrentUser, db: DBSession,
 ) -> dict:
     await _get_store(store_id, user.id, db)
     product = await _get_product(product_id, store_id, db)
-    for field in ("name", "description", "price", "compare_at_price", "image_url",
-                  "category", "sku", "in_stock", "sort_order"):
-        if field in body:
-            setattr(product, field, body[field])
-    if "metadata" in body:
-        product.metadata_ = body["metadata"]
+    for field, value in body.model_dump(exclude_unset=True).items():
+        if field == "metadata":
+            product.metadata_ = value
+        else:
+            setattr(product, field, value)
     await db.commit()
     await db.refresh(product)
     return {"success": True, "data": _product_dict(product)}
@@ -408,11 +405,9 @@ async def public_products(
 # ── Stripe Checkout ────────────────────────────────────────────────────────────
 
 @router.post("/api/commerce/checkout/create-payment-intent", response_model=dict)
-async def create_payment_intent(body: dict, db: DBSession) -> dict:
-    slug = (body.get("store_slug") or "").strip()
-    items: list = body.get("items", [])
-    if not slug or not items:
-        raise HTTPException(status_code=422, detail="store_slug and items required")
+async def create_payment_intent(body: PaymentIntentCreate, db: DBSession) -> dict:
+    slug = body.store_slug.strip()
+    items: list = body.items
 
     result = await db.execute(
         select(CommerceStore).where(CommerceStore.slug == slug, CommerceStore.is_active.is_(True))
@@ -475,10 +470,8 @@ async def create_payment_intent(body: dict, db: DBSession) -> dict:
 
 
 @router.post("/api/commerce/checkout/confirm", response_model=dict)
-async def confirm_payment(body: dict, db: DBSession) -> dict:
-    payment_intent_id = (body.get("payment_intent_id") or "").strip()
-    if not payment_intent_id:
-        raise HTTPException(status_code=422, detail="payment_intent_id required")
+async def confirm_payment(body: PaymentConfirm, db: DBSession) -> dict:
+    payment_intent_id = body.payment_intent_id.strip()
 
     result = await db.execute(
         select(CommercePayment).where(CommercePayment.stripe_payment_intent_id == payment_intent_id)
@@ -498,8 +491,8 @@ async def confirm_payment(body: dict, db: DBSession) -> dict:
         raise HTTPException(status_code=500, detail=f"Stripe error: {exc}")
 
     # Find or create contact
-    email = (body.get("email") or "").strip().lower() or None
-    name = (body.get("name") or "").strip() or None
+    email = (body.email or "").strip().lower() or None
+    name = (body.name or "").strip() or None
     payment.customer_email = email
     payment.customer_name = name
 
