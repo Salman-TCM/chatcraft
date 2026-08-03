@@ -1,8 +1,13 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { useAppStore } from "@/store";
+import { useCallback, useEffect, useState } from "react";
+import { useForm } from "react-hook-form";
+import { zodResolver } from "@hookform/resolvers/zod";
+import { z } from "zod";
 import { UserPlus, Trash2, RefreshCcw, Mail, Shield } from "lucide-react";
+import { apiClient } from "@/lib/api";
+import { toast } from "@/hooks/use-toast";
+import { getErrorMessage, getFieldErrors } from "@/lib/errors";
 
 interface TeamMember {
   id: string;
@@ -12,79 +17,99 @@ interface TeamMember {
   created_at: string;
 }
 
+const inviteSchema = z.object({
+  member_email: z.string().email("Enter a valid email address"),
+  role: z.enum(["agent", "manager"]),
+});
+
+type InviteFormData = z.infer<typeof inviteSchema>;
+
 export default function AgencyTeamPage() {
-  const user = useAppStore((s) => s.user);
   const [members, setMembers] = useState<TeamMember[]>([]);
   const [loading, setLoading] = useState(true);
-  const [inviteEmail, setInviteEmail] = useState("");
-  const [inviteRole, setInviteRole] = useState<"agent" | "manager">("agent");
-  const [inviting, setInviting] = useState(false);
-  const [error, setError] = useState("");
+  const [updatingId, setUpdatingId] = useState<string | null>(null);
+  const [removingId, setRemovingId] = useState<string | null>(null);
 
-  async function load() {
-    if (!user?.accessToken) return;
+  const {
+    register,
+    handleSubmit,
+    reset,
+    setError,
+    formState: { errors, isSubmitting },
+  } = useForm<InviteFormData>({
+    resolver: zodResolver(inviteSchema),
+    defaultValues: { member_email: "", role: "agent" },
+  });
+
+  const load = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/v1/agency/team`, {
-        headers: { Authorization: `Bearer ${user.accessToken}` },
-      });
-      const data = await res.json();
+      const { data } = await apiClient.get("/api/v1/agency/team");
       if (data.success) setMembers(data.data);
+    } catch (err) {
+      toast({
+        variant: "destructive",
+        title: "Failed to load team",
+        description: getErrorMessage(err),
+      });
     } finally {
       setLoading(false);
     }
-  }
+  }, []);
 
-  useEffect(() => { load(); }, [user?.accessToken]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    load();
+  }, [load]);
 
-  async function invite(e: React.FormEvent) {
-    e.preventDefault();
-    if (!user?.accessToken || !inviteEmail.trim()) return;
-    setInviting(true);
-    setError("");
+  async function onInvite(values: InviteFormData) {
     try {
-      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/v1/agency/team`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${user.accessToken}`,
-        },
-        body: JSON.stringify({ member_email: inviteEmail.trim(), role: inviteRole }),
+      await apiClient.post("/api/v1/agency/team", values);
+      reset({ member_email: "", role: "agent" });
+      await load();
+    } catch (err) {
+      const fieldErrors = getFieldErrors(err);
+      (Object.keys(fieldErrors) as (keyof InviteFormData)[]).forEach((field) => {
+        setError(field, { message: fieldErrors[field] });
       });
-      const data = await res.json();
-      if (!data.success) {
-        setError(data.detail ?? "Failed to invite");
-      } else {
-        setInviteEmail("");
-        await load();
-      }
-    } catch {
-      setError("Network error");
-    } finally {
-      setInviting(false);
+      toast({
+        variant: "destructive",
+        title: "Failed to send invite",
+        description: getErrorMessage(err),
+      });
     }
   }
 
   async function updateRole(id: string, role: "agent" | "manager") {
-    if (!user?.accessToken) return;
-    await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/v1/agency/team/${id}`, {
-      method: "PATCH",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${user.accessToken}`,
-      },
-      body: JSON.stringify({ role }),
-    });
-    await load();
+    setUpdatingId(id);
+    try {
+      await apiClient.patch(`/api/v1/agency/team/${id}`, { role });
+      await load();
+    } catch (err) {
+      toast({
+        variant: "destructive",
+        title: "Failed to update role",
+        description: getErrorMessage(err),
+      });
+    } finally {
+      setUpdatingId(null);
+    }
   }
 
   async function remove(id: string) {
-    if (!user?.accessToken || !confirm("Remove this team member?")) return;
-    await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/v1/agency/team/${id}`, {
-      method: "DELETE",
-      headers: { Authorization: `Bearer ${user.accessToken}` },
-    });
-    setMembers((prev) => prev.filter((m) => m.id !== id));
+    if (!confirm("Remove this team member?")) return;
+    setRemovingId(id);
+    try {
+      await apiClient.delete(`/api/v1/agency/team/${id}`);
+      setMembers((prev) => prev.filter((m) => m.id !== id));
+    } catch (err) {
+      toast({
+        variant: "destructive",
+        title: "Failed to remove member",
+        description: getErrorMessage(err),
+      });
+    } finally {
+      setRemovingId(null);
+    }
   }
 
   const statusBadge = (s: string) => {
@@ -111,7 +136,7 @@ export default function AgencyTeamPage() {
       </div>
 
       {/* Invite form */}
-      <form onSubmit={invite} className="rounded-xl border bg-card p-5 space-y-4">
+      <form onSubmit={handleSubmit(onInvite)} className="rounded-xl border bg-card p-5 space-y-4">
         <h2 className="text-sm font-semibold flex items-center gap-2">
           <UserPlus className="h-4 w-4 text-primary" />
           Invite a team member
@@ -123,34 +148,36 @@ export default function AgencyTeamPage() {
               <Mail className="absolute left-2.5 top-2.5 h-3.5 w-3.5 text-muted-foreground" />
               <input
                 type="email"
-                value={inviteEmail}
-                onChange={(e) => setInviteEmail(e.target.value)}
                 placeholder="colleague@example.com"
-                required
+                {...register("member_email")}
                 className="w-full pl-8 pr-3 py-2 text-sm rounded-lg border bg-background focus:outline-none focus:ring-2 focus:ring-primary/30"
               />
             </div>
+            {errors.member_email && (
+              <p className="text-xs text-red-500 mt-1">{errors.member_email.message}</p>
+            )}
           </div>
           <div>
             <label className="block text-xs font-medium mb-1 text-muted-foreground">Role</label>
             <select
-              value={inviteRole}
-              onChange={(e) => setInviteRole(e.target.value as "agent" | "manager")}
+              {...register("role")}
               className="h-9 px-3 py-1 text-sm rounded-lg border bg-background focus:outline-none focus:ring-2 focus:ring-primary/30"
             >
               <option value="agent">Agent</option>
               <option value="manager">Manager</option>
             </select>
+            {errors.role && (
+              <p className="text-xs text-red-500 mt-1">{errors.role.message}</p>
+            )}
           </div>
         </div>
-        {error && <p className="text-xs text-red-500">{error}</p>}
         <button
           type="submit"
-          disabled={inviting}
+          disabled={isSubmitting}
           className="inline-flex items-center gap-1.5 rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-60 transition-colors"
         >
-          {inviting ? <RefreshCcw className="h-3.5 w-3.5 animate-spin" /> : <UserPlus className="h-3.5 w-3.5" />}
-          {inviting ? "Sending…" : "Send Invite"}
+          {isSubmitting ? <RefreshCcw className="h-3.5 w-3.5 animate-spin" /> : <UserPlus className="h-3.5 w-3.5" />}
+          {isSubmitting ? "Sending…" : "Send Invite"}
         </button>
       </form>
 
@@ -187,15 +214,17 @@ export default function AgencyTeamPage() {
                   {statusBadge(m.status)}
                   <select
                     value={m.role}
+                    disabled={updatingId === m.id}
                     onChange={(e) => updateRole(m.id, e.target.value as "agent" | "manager")}
-                    className="h-7 px-2 text-xs rounded border bg-background focus:outline-none focus:ring-1 focus:ring-primary/30"
+                    className="h-7 px-2 text-xs rounded border bg-background focus:outline-none focus:ring-1 focus:ring-primary/30 disabled:opacity-60"
                   >
                     <option value="agent">Agent</option>
                     <option value="manager">Manager</option>
                   </select>
                   <button
                     onClick={() => remove(m.id)}
-                    className="rounded p-1 text-muted-foreground hover:bg-red-50 hover:text-red-600 transition-colors"
+                    disabled={removingId === m.id}
+                    className="rounded p-1 text-muted-foreground hover:bg-red-50 hover:text-red-600 transition-colors disabled:opacity-60"
                     title="Remove"
                   >
                     <Trash2 className="h-3.5 w-3.5" />
