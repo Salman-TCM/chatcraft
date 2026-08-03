@@ -152,14 +152,17 @@ def require_feature(feature: str):
     Dependency factory — enforces that the authenticated user has access to a
     specific feature. Admins always bypass this check.
 
-    User.allowed_features == None  → full access (default, no restriction)
-    User.allowed_features == []    → no features allowed
-    User.allowed_features == ["wallet", "agent_builder"] → only those features
+    User.allowed_features is an explicit per-user admin override:
+      None            → no override; falls back to the caller's plan default
+                         (see app.core.plan_limits.role_default_features)
+      []               → no features allowed, regardless of plan
+      ["wallet", ...]  → only those features, regardless of plan
 
     Usage:
         router = APIRouter(dependencies=[Depends(require_feature("wallet"))])
     """
     from app.core.features import ALL_FEATURE_KEYS
+    from app.core.plan_limits import role_default_features
     from app.models.user import UserRole
 
     if feature not in ALL_FEATURE_KEYS:
@@ -169,7 +172,9 @@ def require_feature(feature: str):
         if user.role in (UserRole.admin, UserRole.superadmin):
             return
         allowed = user.allowed_features
-        # None means unrestricted
+        if allowed is None:
+            allowed = role_default_features(user.role)
+        # None (still, after the plan-default lookup) means unrestricted
         if allowed is None:
             return
         if feature not in allowed:

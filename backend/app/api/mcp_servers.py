@@ -6,14 +6,15 @@ import uuid
 from typing import Any
 
 import httpx
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy import select
 
-from app.core.dependencies import CurrentUser, DBSession
+from app.core.dependencies import CurrentUser, DBSession, require_feature
+from app.core.features import MCP_SERVERS
 from app.models.mcp import MCPServerConfig
 
-router = APIRouter(prefix="/api/v1/mcp-servers", tags=["mcp"])
+router = APIRouter(prefix="/api/v1/mcp-servers", tags=["mcp"], dependencies=[Depends(require_feature(MCP_SERVERS))])
 
 
 # ─── CRUD ─────────────────────────────────────────────────────────────────────

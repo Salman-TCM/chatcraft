@@ -5,14 +5,15 @@ import io
 from typing import Annotated
 
 import httpx
-from fastapi import APIRouter, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from app.core.config import settings
-from app.core.dependencies import CurrentUser
+from app.core.dependencies import CurrentUser, require_feature
+from app.core.features import VOICE_LAB
 
-router = APIRouter(prefix="/api/v1/voice-lab", tags=["voice-lab"])
+router = APIRouter(prefix="/api/v1/voice-lab", tags=["voice-lab"], dependencies=[Depends(require_feature(VOICE_LAB))])
 
 _EL_BASE = "https://api.elevenlabs.io/v1"
 

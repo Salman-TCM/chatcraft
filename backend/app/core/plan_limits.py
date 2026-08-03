@@ -7,12 +7,27 @@ Message caps (free/trial/premium) live in Settings (app/core/config.py)
 since they're operationally tunable. Chatbot count and model access are
 structural product limits and live here instead.
 """
+from app.core.features import ALL_FEATURE_KEYS
 from app.models.user import UserRole
 
 # Max chatbots a role may create. Absent from the dict = unlimited.
 _CHATBOT_CAPS: dict[UserRole, int] = {
     UserRole.free: 1,
 }
+
+# Feature areas available on Free — the baseline CRM/automation toolset
+# marketed as included on the landing page's core "Everything you need"
+# section. Anything not listed here is Pro+ (see below).
+FREE_TIER_FEATURES: frozenset[str] = frozenset({
+    "chatbots", "inbox", "contacts", "flows", "automations", "campaigns",
+    "social", "forms", "landing_pages", "wallet", "keywords", "sequences",
+    "pipelines", "stores",
+})
+
+# Feature areas exclusive to Enterprise (the "creator" role), matching the
+# pricing page's "Custom branding & white-label" Enterprise-only bullet.
+# Pro (premium/trial) gets every other feature.
+ENTERPRISE_ONLY_FEATURES: frozenset[str] = frozenset({"white_label"})
 
 # Models available on the Free plan ("Basic AI models" in pricing copy) —
 # the cheapest/fastest model from each provider, so free users still get a
@@ -40,6 +55,21 @@ DEFAULT_MODEL: str = "claude-haiku-4-5"
 def chatbot_cap(role: UserRole) -> int | None:
     """Max chatbots this role may create. None = unlimited."""
     return _CHATBOT_CAPS.get(role)
+
+
+def role_default_features(role: UserRole) -> list[str] | None:
+    """Effective feature allowlist for a role that has no explicit
+    per-user override (User.allowed_features is None).
+
+    None = unrestricted (all features). An explicit per-user override set
+    by an admin always takes precedence over this default — see
+    app.core.dependencies.require_feature.
+    """
+    if role == UserRole.free:
+        return sorted(FREE_TIER_FEATURES)
+    if role in (UserRole.trial, UserRole.premium):
+        return sorted(ALL_FEATURE_KEYS - ENTERPRISE_ONLY_FEATURES)
+    return None  # creator, admin, superadmin: unrestricted
 
 
 def is_model_allowed(role: UserRole, model: str) -> bool:
