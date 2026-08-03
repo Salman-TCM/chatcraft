@@ -1,7 +1,8 @@
 import uuid
 from datetime import datetime
+from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from app.models.crm import CustomFieldType
 
@@ -111,6 +112,33 @@ class ContactResponse(BaseModel):
 class ContactFieldsUpdate(BaseModel):
     # dict of field_key → value
     fields: dict[str, str | None]
+
+
+class ContactTagsAdd(BaseModel):
+    tag_ids: list[uuid.UUID] = []
+
+
+# Channel values mirror the `conversation_channel` DB enum
+# (see app/models/conversation.py: Conversation.channel).
+ConversationChannel = Literal[
+    "web", "facebook", "instagram", "whatsapp", "telegram", "discord",
+    "sms", "phone", "twitter", "tiktok", "email",
+]
+
+
+class ContactMessageSend(BaseModel):
+    chatbot_id: uuid.UUID | None = None
+    channel: ConversationChannel = "web"
+    text: str | None = Field(None, max_length=10000)
+    message: str | None = Field(None, max_length=10000)
+
+    @model_validator(mode="after")
+    def _require_text(self) -> "ContactMessageSend":
+        combined = (self.text or self.message or "").strip()
+        if not combined:
+            raise ValueError("text required")
+        self.text = combined
+        return self
 
 
 # ── Pipelines ─────────────────────────────────────────────────────────────────

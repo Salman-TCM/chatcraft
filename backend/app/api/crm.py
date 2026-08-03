@@ -24,7 +24,9 @@ from app.models.crm import (
 from app.schemas.crm import (
     ContactCreate,
     ContactFieldsUpdate,
+    ContactMessageSend,
     ContactResponse,
+    ContactTagsAdd,
     ContactUpdate,
     CustomFieldCreate,
     CustomFieldResponse,
@@ -174,11 +176,11 @@ async def delete_contact(contact_id: uuid.UUID, user: CurrentUser, db: DBSession
 @router.post("/contacts/{contact_id}/tags", response_model=dict, status_code=status.HTTP_201_CREATED)
 async def add_tags_to_contact(
     contact_id: uuid.UUID,
-    body: dict,
+    body: ContactTagsAdd,
     user: CurrentUser,
     db: DBSession,
 ) -> dict:
-    tag_ids: list[uuid.UUID] = [uuid.UUID(t) for t in body.get("tag_ids", [])]
+    tag_ids = body.tag_ids
     contact = await _get_contact(contact_id, user.id, db)
 
     # Verify tags belong to user
@@ -612,18 +614,16 @@ async def remove_deal(
 @router.post("/contacts/{contact_id}/messages", response_model=dict, status_code=201)
 async def send_message_to_contact(
     contact_id: uuid.UUID,
-    body: dict,
+    body: ContactMessageSend,
     user: CurrentUser,
     db: DBSession,
 ) -> dict:
     """Send a message to a contact via their most recent chatbot conversation."""
     contact = await _get_contact(contact_id, user.id, db)
 
-    chatbot_id = body.get("chatbot_id")
-    channel = body.get("channel", "web")
-    text = (body.get("text") or body.get("message") or "").strip()
-    if not text:
-        raise HTTPException(status_code=422, detail="text required")
+    chatbot_id = body.chatbot_id
+    channel = body.channel
+    text = body.text
 
     from app.models.conversation import Conversation
     from app.models.message import Message, MessageRole
@@ -632,7 +632,7 @@ async def send_message_to_contact(
     # Find an existing conversation for this contact
     stmt = select(Conversation).where(Conversation.contact_id == contact_id)
     if chatbot_id:
-        stmt = stmt.where(Conversation.chatbot_id == uuid.UUID(str(chatbot_id)))
+        stmt = stmt.where(Conversation.chatbot_id == chatbot_id)
     stmt = stmt.order_by(Conversation.created_at.desc())
     result = await db.execute(stmt)
     conv = result.scalars().first()
@@ -648,9 +648,9 @@ async def send_message_to_contact(
             bot = bot_result.scalar_one_or_none()
             if not bot:
                 raise HTTPException(status_code=422, detail="chatbot_id required")
-            chatbot_id = str(bot.id)
+            chatbot_id = bot.id
         conv = Conversation(
-            chatbot_id=uuid.UUID(str(chatbot_id)),
+            chatbot_id=chatbot_id,
             contact_id=contact_id,
             channel=channel,
             external_id=str(contact_id),
