@@ -2,6 +2,7 @@ from contextlib import asynccontextmanager
 from typing import AsyncGenerator
 
 from fastapi import FastAPI
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from slowapi import _rate_limit_exceeded_handler
@@ -47,6 +48,7 @@ from app.api.voice_calls import router as voice_calls_router
 from app.api.settings_comms import router as settings_comms_router
 from app.api.google_sheets import router as google_sheets_router
 from app.api.models import router as models_router
+from app.core.error_handlers import validation_exception_handler
 from app.core.security_headers import SecurityHeadersMiddleware
 from app.core.ip_abuse import IPAbuseMiddleware
 from app.core.config import settings
@@ -80,6 +82,7 @@ app = FastAPI(
 # Attach the limiter so slowapi can find it via app.state
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+app.add_exception_handler(RequestValidationError, validation_exception_handler)
 
 app.add_middleware(SecurityHeadersMiddleware)
 app.add_middleware(IPAbuseMiddleware)
