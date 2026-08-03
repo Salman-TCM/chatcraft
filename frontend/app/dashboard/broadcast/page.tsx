@@ -6,11 +6,16 @@ import {
   Mail, MessageSquare, Phone, Bell, Eye, FlaskConical,
   Clock, Users, Tag, CheckCircle2, Type, Image, MousePointerClick, Minus, AlignLeft, ChevronUp, ChevronDown,
 } from "lucide-react";
+import { useForm, Controller } from "react-hook-form";
+import { zodResolver } from "@hookform/resolvers/zod";
+import { z } from "zod";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { apiClient } from "@/lib/api";
+import { toast } from "@/hooks/use-toast";
+import { getErrorMessage, getFieldErrors } from "@/lib/errors";
 
 interface Campaign {
   id: string;
@@ -33,7 +38,11 @@ interface Chatbot {
   name: string;
 }
 
-const CHANNELS = [
+const CHANNEL_VALUES = [
+  "email", "sms", "telegram", "whatsapp", "messenger", "push", "phone",
+] as const;
+
+const CHANNELS: { value: (typeof CHANNEL_VALUES)[number]; label: string; icon: typeof Mail }[] = [
   { value: "email",     label: "Email",     icon: Mail },
   { value: "sms",       label: "SMS",       icon: MessageSquare },
   { value: "telegram",  label: "Telegram",  icon: MessageSquare },
@@ -42,6 +51,24 @@ const CHANNELS = [
   { value: "push",      label: "Push",      icon: Bell },
   { value: "phone",     label: "Phone",     icon: Phone },
 ];
+
+const campaignSchema = z.object({
+  name: z.string().min(1, "Campaign name is required"),
+  channel: z.enum(CHANNEL_VALUES),
+  subject: z.string().optional(),
+  message_template: z.string().optional(),
+  html_content: z.string().optional(),
+  scheduled_at: z.string().optional(),
+  tags: z.string().optional(),
+  segment: z.string().optional(),
+  chatbot_id: z.string().optional(),
+});
+type CampaignFormData = z.infer<typeof campaignSchema>;
+
+const testSendSchema = z.object({
+  to: z.string().min(1, "Recipient is required"),
+});
+type TestSendFormData = z.infer<typeof testSendSchema>;
 
 const STATUS_COLORS: Record<string, string> = {
   draft:     "bg-muted text-muted-foreground",
@@ -69,26 +96,26 @@ export default function BroadcastPage() {
   // Compose modal
   const [showModal, setShowModal] = useState(false);
   const [editing, setEditing] = useState<Campaign | null>(null);
-  const [saving, setSaving] = useState(false);
 
-  // Form state
-  const [fName, setFName] = useState("");
-  const [fChannel, setFChannel] = useState("email");
-  const [fSubject, setFSubject] = useState("");
-  const [fMessage, setFMessage] = useState("");
-  const [fHtml, setFHtml] = useState("");
-  const [fScheduled, setFScheduled] = useState("");
-  const [fTags, setFTags] = useState("");
-  const [fSegment, setFSegment] = useState("all");
-  const [fChatbotId, setFChatbotId] = useState("");
+  // Form
+  const form = useForm<CampaignFormData>({
+    resolver: zodResolver(campaignSchema),
+    defaultValues: {
+      name: "", channel: "email", subject: "", message_template: "",
+      html_content: "", scheduled_at: "", tags: "", segment: "all", chatbot_id: "",
+    },
+  });
+  const fChannel = form.watch("channel");
 
   // Preview modal
   const [previewTarget, setPreviewTarget] = useState<Campaign | null>(null);
 
   // Test send
   const [testTarget, setTestTarget] = useState<Campaign | null>(null);
-  const [testTo, setTestTo] = useState("");
-  const [testSending, setTestSending] = useState(false);
+  const testForm = useForm<TestSendFormData>({
+    resolver: zodResolver(testSendSchema),
+    defaultValues: { to: "" },
+  });
   const [testResult, setTestResult] = useState<string | null>(null);
 
   // Stats modal
@@ -109,7 +136,9 @@ export default function BroadcastPage() {
       ]);
       setCampaigns(campRes.data.data ?? []);
       setChatbots(botRes.data.data ?? []);
-    } catch {}
+    } catch (err) {
+      toast({ variant: "destructive", title: "Failed to load campaigns", description: getErrorMessage(err) });
+    }
     setLoading(false);
   }, [activeChannel]);
 
@@ -117,34 +146,39 @@ export default function BroadcastPage() {
 
   function openCreate() {
     setEditing(null);
-    setFName(""); setFChannel("email"); setFSubject(""); setFMessage("");
-    setFHtml(""); setFScheduled(""); setFTags(""); setFSegment("all"); setFChatbotId("");
+    form.reset({
+      name: "", channel: "email", subject: "", message_template: "",
+      html_content: "", scheduled_at: "", tags: "", segment: "all", chatbot_id: "",
+    });
     setShowModal(true);
   }
 
   function openEdit(c: Campaign) {
     setEditing(c);
-    setFName(c.name); setFChannel(c.channel);
-    setFSubject(c.subject ?? ""); setFMessage(c.message_template);
-    setFHtml(c.html_content ?? ""); setFScheduled(c.scheduled_at ?? "");
-    setFTags(((c.target_filter.tags as string[]) ?? []).join(", "));
-    setFSegment((c.target_filter.segment as string) ?? "all");
-    setFChatbotId((c.target_filter.chatbot_id as string) ?? "");
+    form.reset({
+      name: c.name,
+      channel: c.channel as CampaignFormData["channel"],
+      subject: c.subject ?? "",
+      message_template: c.message_template,
+      html_content: c.html_content ?? "",
+      scheduled_at: c.scheduled_at ?? "",
+      tags: ((c.target_filter.tags as string[]) ?? []).join(", "),
+      segment: (c.target_filter.segment as string) ?? "all",
+      chatbot_id: (c.target_filter.chatbot_id as string) ?? "",
+    });
     setShowModal(true);
   }
 
-  async function save() {
-    if (!fName.trim()) return;
-    setSaving(true);
+  async function onSubmit(data: CampaignFormData) {
     const payload = {
-      name: fName.trim(), channel: fChannel,
-      subject: fSubject || null, message_template: fMessage,
-      html_content: fHtml || null,
-      scheduled_at: fScheduled || null,
+      name: data.name.trim(), channel: data.channel,
+      subject: data.subject || null, message_template: data.message_template ?? "",
+      html_content: data.html_content || null,
+      scheduled_at: data.scheduled_at || null,
       target_filter: {
-        segment: fSegment,
-        chatbot_id: fChatbotId || null,
-        tags: fTags ? fTags.split(",").map((s) => s.trim()).filter(Boolean) : [],
+        segment: data.segment ?? "all",
+        chatbot_id: data.chatbot_id || null,
+        tags: data.tags ? data.tags.split(",").map((s) => s.trim()).filter(Boolean) : [],
       },
     };
     try {
@@ -155,8 +189,17 @@ export default function BroadcastPage() {
       }
       setShowModal(false);
       await load();
-    } catch {}
-    setSaving(false);
+    } catch (err) {
+      toast({
+        variant: "destructive",
+        title: editing ? "Failed to update campaign" : "Failed to create campaign",
+        description: getErrorMessage(err),
+      });
+      const fieldErrors = getFieldErrors(err);
+      Object.entries(fieldErrors).forEach(([field, message]) => {
+        form.setError(field as keyof CampaignFormData, { message });
+      });
+    }
   }
 
   async function deleteCampaign(id: string) {
@@ -164,7 +207,9 @@ export default function BroadcastPage() {
     try {
       await apiClient.delete(`/api/v1/broadcasts/${id}`);
       setCampaigns((p) => p.filter((c) => c.id !== id));
-    } catch {}
+    } catch (err) {
+      toast({ variant: "destructive", title: "Failed to delete campaign", description: getErrorMessage(err) });
+    }
   }
 
   async function sendCampaign(id: string) {
@@ -173,21 +218,26 @@ export default function BroadcastPage() {
       const res = await apiClient.post(`/api/v1/broadcasts/${id}/send`);
       setCampaigns((p) => p.map((c) => c.id === id ? { ...c, ...res.data.data } : c));
       await load();
-    } catch {}
+    } catch (err) {
+      toast({ variant: "destructive", title: "Failed to send campaign", description: getErrorMessage(err) });
+    }
     setSending(null);
   }
 
-  async function doTestSend() {
-    if (!testTarget || !testTo.trim()) return;
-    setTestSending(true);
+  async function onTestSubmit(data: TestSendFormData) {
+    if (!testTarget) return;
     setTestResult(null);
     try {
-      await apiClient.post(`/api/v1/broadcasts/${testTarget.id}/test`, { to: testTo.trim() });
+      await apiClient.post(`/api/v1/broadcasts/${testTarget.id}/test`, { to: data.to.trim() });
       setTestResult("success");
-    } catch {
+    } catch (err) {
       setTestResult("error");
+      toast({ variant: "destructive", title: "Failed to send test", description: getErrorMessage(err) });
+      const fieldErrors = getFieldErrors(err);
+      Object.entries(fieldErrors).forEach(([field, message]) => {
+        testForm.setError(field as keyof TestSendFormData, { message });
+      });
     }
-    setTestSending(false);
   }
 
   async function loadStats(c: Campaign) {
@@ -195,7 +245,10 @@ export default function BroadcastPage() {
     try {
       const res = await apiClient.get(`/api/v1/broadcasts/${c.id}/stats`);
       setStats(res.data.data);
-    } catch {}
+    } catch (err) {
+      toast({ variant: "destructive", title: "Failed to load stats", description: getErrorMessage(err) });
+      setStatsTarget(null);
+    }
   }
 
   const visible = activeChannel === "all" ? campaigns : campaigns.filter((c) => c.channel === activeChannel);
@@ -286,7 +339,7 @@ export default function BroadcastPage() {
                     </Button>
                     {(c.status === "draft" || c.status === "scheduled") && (
                       <>
-                        <Button variant="ghost" size="sm" onClick={() => { setTestTarget(c); setTestTo(""); setTestResult(null); }} title="Test send">
+                        <Button variant="ghost" size="sm" onClick={() => { setTestTarget(c); testForm.reset({ to: "" }); setTestResult(null); }} title="Test send">
                           <FlaskConical className="h-4 w-4" />
                         </Button>
                         <Button variant="ghost" size="sm" onClick={() => sendCampaign(c.id)} disabled={sending === c.id} title="Send now">
@@ -321,78 +374,92 @@ export default function BroadcastPage() {
               <h2 className="font-semibold">{editing ? "Edit Campaign" : "New Campaign"}</h2>
               <button onClick={() => setShowModal(false)}><X className="h-5 w-5 text-muted-foreground" /></button>
             </div>
-            <div className="flex-1 overflow-y-auto p-4 space-y-4">
-              <div className="grid grid-cols-2 gap-3">
-                <div className="space-y-1 col-span-2">
-                  <Label>Campaign Name *</Label>
-                  <Input value={fName} onChange={(e) => setFName(e.target.value)} placeholder="e.g. Summer Sale" />
+            <form onSubmit={form.handleSubmit(onSubmit)} className="flex flex-col flex-1 min-h-0">
+              <div className="flex-1 overflow-y-auto p-4 space-y-4">
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-1 col-span-2">
+                    <Label>Campaign Name *</Label>
+                    <Input {...form.register("name")} placeholder="e.g. Summer Sale" />
+                    {form.formState.errors.name && (
+                      <p className="text-sm text-destructive">{form.formState.errors.name.message}</p>
+                    )}
+                  </div>
+                  <div className="space-y-1">
+                    <Label>Channel</Label>
+                    <select {...form.register("channel")}
+                      className="w-full h-9 rounded-md border bg-background px-2 text-sm" disabled={!!editing}>
+                      {CHANNELS.map((c) => <option key={c.value} value={c.value}>{c.label}</option>)}
+                    </select>
+                    {form.formState.errors.channel && (
+                      <p className="text-sm text-destructive">{form.formState.errors.channel.message}</p>
+                    )}
+                  </div>
+                  <div className="space-y-1">
+                    <Label>Audience Segment</Label>
+                    <select {...form.register("segment")}
+                      className="w-full h-9 rounded-md border bg-background px-2 text-sm">
+                      <option value="all">All Contacts</option>
+                      <option value="contacts">Contacts Only</option>
+                      <option value="subscribers">Channel Subscribers</option>
+                    </select>
+                  </div>
                 </div>
-                <div className="space-y-1">
-                  <Label>Channel</Label>
-                  <select value={fChannel} onChange={(e) => setFChannel(e.target.value)}
-                    className="w-full h-9 rounded-md border bg-background px-2 text-sm" disabled={!!editing}>
-                    {CHANNELS.map((c) => <option key={c.value} value={c.value}>{c.label}</option>)}
-                  </select>
-                </div>
-                <div className="space-y-1">
-                  <Label>Audience Segment</Label>
-                  <select value={fSegment} onChange={(e) => setFSegment(e.target.value)}
-                    className="w-full h-9 rounded-md border bg-background px-2 text-sm">
-                    <option value="all">All Contacts</option>
-                    <option value="contacts">Contacts Only</option>
-                    <option value="subscribers">Channel Subscribers</option>
-                  </select>
-                </div>
-              </div>
 
-              {/* Audience filters */}
-              <div className="grid grid-cols-2 gap-3">
-                <div className="space-y-1">
-                  <Label className="flex items-center gap-1.5"><Users className="h-3.5 w-3.5" /> Filter by Agent</Label>
-                  <select value={fChatbotId} onChange={(e) => setFChatbotId(e.target.value)}
-                    className="w-full h-9 rounded-md border bg-background px-2 text-sm">
-                    <option value="">All Agents</option>
-                    {chatbots.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
-                  </select>
+                {/* Audience filters */}
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-1">
+                    <Label className="flex items-center gap-1.5"><Users className="h-3.5 w-3.5" /> Filter by Agent</Label>
+                    <select {...form.register("chatbot_id")}
+                      className="w-full h-9 rounded-md border bg-background px-2 text-sm">
+                      <option value="">All Agents</option>
+                      {chatbots.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
+                    </select>
+                  </div>
+                  <div className="space-y-1">
+                    <Label className="flex items-center gap-1.5"><Tag className="h-3.5 w-3.5" /> Filter by Tags</Label>
+                    <Input {...form.register("tags")} placeholder="vip, summer" />
+                  </div>
                 </div>
-                <div className="space-y-1">
-                  <Label className="flex items-center gap-1.5"><Tag className="h-3.5 w-3.5" /> Filter by Tags</Label>
-                  <Input value={fTags} onChange={(e) => setFTags(e.target.value)} placeholder="vip, summer" />
-                </div>
-              </div>
 
-              {fChannel === "email" && (
+                {fChannel === "email" && (
+                  <div className="space-y-1">
+                    <Label>Subject Line</Label>
+                    <Input {...form.register("subject")} placeholder="Your subject here" />
+                  </div>
+                )}
                 <div className="space-y-1">
-                  <Label>Subject Line</Label>
-                  <Input value={fSubject} onChange={(e) => setFSubject(e.target.value)} placeholder="Your subject here" />
+                  <Label>Message {`(supports {{first_name}}, {{last_name}}, {{email}})`}</Label>
+                  <textarea
+                    className="w-full h-28 p-2 text-sm rounded-md border bg-background resize-none"
+                    {...form.register("message_template")}
+                    placeholder="Hello {{first_name}}, ..."
+                  />
                 </div>
-              )}
-              <div className="space-y-1">
-                <Label>Message {`(supports {{first_name}}, {{last_name}}, {{email}})`}</Label>
-                <textarea
-                  className="w-full h-28 p-2 text-sm rounded-md border bg-background resize-none"
-                  value={fMessage} onChange={(e) => setFMessage(e.target.value)}
-                  placeholder="Hello {{first_name}}, ..."
-                />
-              </div>
-              {fChannel === "email" && (
+                {fChannel === "email" && (
+                  <div className="space-y-1">
+                    <Label>Email Template <span className="text-muted-foreground font-normal">(drag-and-drop builder)</span></Label>
+                    <Controller
+                      control={form.control}
+                      name="html_content"
+                      render={({ field }) => (
+                        <EmailTemplateBuilder value={field.value ?? ""} onChange={field.onChange} />
+                      )}
+                    />
+                  </div>
+                )}
                 <div className="space-y-1">
-                  <Label>Email Template <span className="text-muted-foreground font-normal">(drag-and-drop builder)</span></Label>
-                  <EmailTemplateBuilder value={fHtml} onChange={setFHtml} />
+                  <Label className="flex items-center gap-1.5"><Clock className="h-3.5 w-3.5" /> Schedule <span className="text-muted-foreground font-normal">(leave empty to send now)</span></Label>
+                  <Input type="datetime-local" {...form.register("scheduled_at")} />
                 </div>
-              )}
-              <div className="space-y-1">
-                <Label className="flex items-center gap-1.5"><Clock className="h-3.5 w-3.5" /> Schedule <span className="text-muted-foreground font-normal">(leave empty to send now)</span></Label>
-                <Input type="datetime-local" value={fScheduled} onChange={(e) => setFScheduled(e.target.value)} />
               </div>
-            </div>
-            <div className="flex justify-end gap-2 p-4 border-t">
-              <Button variant="outline" onClick={() => setShowModal(false)}>Cancel</Button>
-              <Button onClick={save} disabled={saving || !fName.trim()}>
-                {saving ? <Loader2 className="h-4 w-4 animate-spin mr-1" /> : null}
-                {editing ? "Save Changes" : "Create Campaign"}
-              </Button>
-            </div>
+              <div className="flex justify-end gap-2 p-4 border-t">
+                <Button type="button" variant="outline" onClick={() => setShowModal(false)}>Cancel</Button>
+                <Button type="submit" disabled={form.formState.isSubmitting}>
+                  {form.formState.isSubmitting ? <Loader2 className="h-4 w-4 animate-spin mr-1" /> : null}
+                  {editing ? "Save Changes" : "Create Campaign"}
+                </Button>
+              </div>
+            </form>
           </div>
         </div>
       )}
@@ -445,10 +512,12 @@ export default function BroadcastPage() {
               <div className="space-y-1">
                 <Label>{testTarget.channel === "email" ? "Email Address" : "Phone / Chat ID"}</Label>
                 <Input
-                  value={testTo}
-                  onChange={(e) => setTestTo(e.target.value)}
+                  {...testForm.register("to")}
                   placeholder={testTarget.channel === "email" ? "you@example.com" : "+1234567890"}
                 />
+                {testForm.formState.errors.to && (
+                  <p className="text-sm text-destructive">{testForm.formState.errors.to.message}</p>
+                )}
               </div>
               {testResult === "success" && (
                 <p className="text-sm text-green-600 dark:text-green-400 flex items-center gap-1.5">
@@ -461,8 +530,11 @@ export default function BroadcastPage() {
             </div>
             <div className="flex justify-end gap-2 p-4 border-t">
               <Button variant="outline" onClick={() => setTestTarget(null)}>Cancel</Button>
-              <Button onClick={doTestSend} disabled={testSending || !testTo.trim()}>
-                {testSending ? <Loader2 className="h-4 w-4 animate-spin mr-1" /> : <FlaskConical className="h-4 w-4 mr-1" />}
+              <Button
+                onClick={testForm.handleSubmit(onTestSubmit)}
+                disabled={testForm.formState.isSubmitting || !testForm.watch("to")?.trim()}
+              >
+                {testForm.formState.isSubmitting ? <Loader2 className="h-4 w-4 animate-spin mr-1" /> : <FlaskConical className="h-4 w-4 mr-1" />}
                 Send Test
               </Button>
             </div>
