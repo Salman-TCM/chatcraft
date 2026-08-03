@@ -5,11 +5,16 @@ import {
   Share2, Plus, Loader2, Trash2, X, Sparkles, Image as ImageIcon,
   Calendar, CheckCircle2, AlertCircle, Clock,
 } from "lucide-react";
+import { useForm } from "react-hook-form";
+import { zodResolver } from "@hookform/resolvers/zod";
+import { z } from "zod";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { apiClient } from "@/lib/api";
+import { toast } from "@/hooks/use-toast";
+import { getErrorMessage, getFieldErrors } from "@/lib/errors";
 
 interface SocialAccount {
   id: string;
@@ -45,6 +50,49 @@ const STATUS_ICONS: Record<string, React.ReactNode> = {
   draft:     <Clock className="h-4 w-4 text-muted-foreground" />,
 };
 
+// ── Validation schemas ──────────────────────────────────────────────────────
+// Mirrors backend/app/schemas/broadcast.py
+
+const connectSchema = z.object({
+  platform: z.enum(["facebook", "instagram", "x"]),
+  name: z.string().trim().min(1, "Display name is required").max(255),
+  account_id: z.string().max(255).optional().default(""),
+  access_token: z.string().trim().min(1, "Access token is required").max(4096),
+  page_id: z.string().max(255).optional().default(""),
+  page_access_token: z.string().max(4096).optional().default(""),
+});
+type ConnectFormData = z.infer<typeof connectSchema>;
+const connectDefaults: ConnectFormData = {
+  platform: "facebook", name: "", account_id: "", access_token: "", page_id: "", page_access_token: "",
+};
+
+const composeSchema = z
+  .object({
+    content: z.string().trim().min(1, "Caption is required").max(5000),
+    image_url: z.string().trim().max(1000).optional().default(""),
+    account_ids: z.array(z.string()).min(1, "Select at least one account to post to"),
+    publish_now: z.boolean(),
+    scheduled_at: z.string().optional().default(""),
+  })
+  .superRefine((data, ctx) => {
+    if (!data.publish_now && !data.scheduled_at) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Pick a date and time to schedule the post",
+        path: ["scheduled_at"],
+      });
+    }
+  });
+type ComposeFormData = z.infer<typeof composeSchema>;
+const composeDefaults: ComposeFormData = {
+  content: "", image_url: "", account_ids: [], publish_now: true, scheduled_at: "",
+};
+
+const captionSchema = z.object({
+  prompt: z.string().trim().min(1, "Describe what you'd like to post about"),
+});
+type CaptionFormData = z.infer<typeof captionSchema>;
+
 export default function SocialPage() {
   const [accounts, setAccounts] = useState<SocialAccount[]>([]);
   const [posts, setPosts] = useState<SocialPost[]>([]);
@@ -52,24 +100,23 @@ export default function SocialPage() {
   const [showCompose, setShowCompose] = useState(false);
   const [showConnect, setShowConnect] = useState(false);
 
-  // Compose state
-  const [content, setContent] = useState("");
-  const [imageUrl, setImageUrl] = useState("");
-  const [selectedAccounts, setSelectedAccounts] = useState<string[]>([]);
-  const [scheduledAt, setScheduledAt] = useState("");
-  const [publishNow, setPublishNow] = useState(true);
-  const [generatingCaption, setGeneratingCaption] = useState(false);
-  const [captionPrompt, setCaptionPrompt] = useState("");
-  const [publishing, setPublishing] = useState(false);
+  const composeForm = useForm<ComposeFormData>({
+    resolver: zodResolver(composeSchema),
+    defaultValues: composeDefaults,
+  });
+  const captionForm = useForm<CaptionFormData>({
+    resolver: zodResolver(captionSchema),
+    defaultValues: { prompt: "" },
+  });
+  const connectForm = useForm<ConnectFormData>({
+    resolver: zodResolver(connectSchema),
+    defaultValues: connectDefaults,
+  });
 
-  // Connect account state
-  const [connPlatform, setConnPlatform] = useState("facebook");
-  const [connName, setConnName] = useState("");
-  const [connToken, setConnToken] = useState("");
-  const [connAccountId, setConnAccountId] = useState("");
-  const [connPageId, setConnPageId] = useState("");
-  const [connPageToken, setConnPageToken] = useState("");
-  const [connecting, setConnecting] = useState(false);
+  const content = composeForm.watch("content") ?? "";
+  const selectedAccounts = composeForm.watch("account_ids") ?? [];
+  const publishNow = composeForm.watch("publish_now");
+  const connPlatform = connectForm.watch("platform");
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -80,39 +127,59 @@ export default function SocialPage() {
       ]);
       setAccounts(accRes.data.data ?? []);
       setPosts(postRes.data.data ?? []);
-    } catch {}
+    } catch (err) {
+      toast({
+        variant: "destructive",
+        title: "Couldn't load social data",
+        description: getErrorMessage(err),
+      });
+    }
     setLoading(false);
   }, []);
 
   useEffect(() => { load(); }, [load]);
 
-  async function generateCaption() {
-    if (!captionPrompt.trim()) return;
-    setGeneratingCaption(true);
+  async function onGenerateCaption(data: CaptionFormData) {
     try {
-      const res = await apiClient.post("/api/v1/social/posts/generate-caption", { prompt: captionPrompt });
-      setContent(res.data.data.caption);
-      setCaptionPrompt("");
-    } catch {}
-    setGeneratingCaption(false);
+      const res = await apiClient.post("/api/v1/social/posts/generate-caption", { prompt: data.prompt });
+      composeForm.setValue("content", res.data.data.caption, { shouldValidate: true });
+      captionForm.reset({ prompt: "" });
+    } catch (err) {
+      const fieldErrors = getFieldErrors(err);
+      Object.entries(fieldErrors).forEach(([field, message]) => {
+        captionForm.setError(field as keyof CaptionFormData, { message });
+      });
+      toast({
+        variant: "destructive",
+        title: "Couldn't generate caption",
+        description: getErrorMessage(err),
+      });
+    }
   }
 
-  async function publish() {
-    if (!content.trim() || selectedAccounts.length === 0) return;
-    setPublishing(true);
+  async function onPublish(data: ComposeFormData) {
     try {
       await apiClient.post("/api/v1/social/posts", {
-        content,
-        image_url: imageUrl || null,
-        account_ids: selectedAccounts,
-        publish_now: publishNow,
-        scheduled_at: !publishNow && scheduledAt ? scheduledAt : null,
+        content: data.content,
+        image_url: data.image_url || null,
+        account_ids: data.account_ids,
+        publish_now: data.publish_now,
+        scheduled_at: !data.publish_now && data.scheduled_at ? data.scheduled_at : null,
       });
       setShowCompose(false);
-      setContent(""); setImageUrl(""); setSelectedAccounts([]); setScheduledAt(""); setPublishNow(true);
+      composeForm.reset(composeDefaults);
       await load();
-    } catch {}
-    setPublishing(false);
+    } catch (err) {
+      const fieldErrors = getFieldErrors(err);
+      Object.entries(fieldErrors).forEach(([field, message]) => {
+        composeForm.setError(field as keyof ComposeFormData, { message });
+      });
+      toast({
+        variant: "destructive",
+        title: "Couldn't publish post",
+        description: getErrorMessage(err),
+      });
+    }
   }
 
   async function deletePost(id: string) {
@@ -120,25 +187,39 @@ export default function SocialPage() {
     try {
       await apiClient.delete(`/api/v1/social/posts/${id}`);
       setPosts((p) => p.filter((post) => post.id !== id));
-    } catch {}
+    } catch (err) {
+      toast({
+        variant: "destructive",
+        title: "Couldn't delete post",
+        description: getErrorMessage(err),
+      });
+    }
   }
 
-  async function connectAccount() {
-    setConnecting(true);
+  async function onConnectAccount(data: ConnectFormData) {
     try {
       await apiClient.post("/api/v1/social/accounts", {
-        platform: connPlatform,
-        name: connName,
-        access_token: connToken,
-        account_id: connAccountId,
-        page_id: connPageId || null,
-        page_access_token: connPageToken || null,
+        platform: data.platform,
+        name: data.name,
+        access_token: data.access_token,
+        account_id: data.account_id || "",
+        page_id: data.page_id || null,
+        page_access_token: data.page_access_token || null,
       });
       setShowConnect(false);
-      setConnName(""); setConnToken(""); setConnAccountId(""); setConnPageId(""); setConnPageToken("");
+      connectForm.reset(connectDefaults);
       await load();
-    } catch {}
-    setConnecting(false);
+    } catch (err) {
+      const fieldErrors = getFieldErrors(err);
+      Object.entries(fieldErrors).forEach(([field, message]) => {
+        connectForm.setError(field as keyof ConnectFormData, { message });
+      });
+      toast({
+        variant: "destructive",
+        title: "Couldn't connect account",
+        description: getErrorMessage(err),
+      });
+    }
   }
 
   async function disconnectAccount(id: string) {
@@ -146,13 +227,30 @@ export default function SocialPage() {
     try {
       await apiClient.delete(`/api/v1/social/accounts/${id}`);
       setAccounts((p) => p.filter((a) => a.id !== id));
-    } catch {}
+    } catch (err) {
+      toast({
+        variant: "destructive",
+        title: "Couldn't disconnect account",
+        description: getErrorMessage(err),
+      });
+    }
   }
 
   function toggleAccount(id: string) {
-    setSelectedAccounts((prev) =>
-      prev.includes(id) ? prev.filter((a) => a !== id) : [...prev, id]
-    );
+    const current = composeForm.getValues("account_ids") ?? [];
+    const next = current.includes(id) ? current.filter((a) => a !== id) : [...current, id];
+    composeForm.setValue("account_ids", next, { shouldValidate: true });
+  }
+
+  function openCompose() {
+    composeForm.reset(composeDefaults);
+    captionForm.reset({ prompt: "" });
+    setShowCompose(true);
+  }
+
+  function openConnect() {
+    connectForm.reset(connectDefaults);
+    setShowConnect(true);
   }
 
   return (
@@ -163,10 +261,10 @@ export default function SocialPage() {
           <h1 className="text-2xl font-semibold">Social Poster</h1>
         </div>
         <div className="flex gap-2">
-          <Button variant="outline" onClick={() => setShowConnect(true)}>
+          <Button variant="outline" onClick={openConnect}>
             <Plus className="h-4 w-4 mr-1" /> Connect Account
           </Button>
-          <Button onClick={() => setShowCompose(true)} disabled={accounts.length === 0}>
+          <Button onClick={openCompose} disabled={accounts.length === 0}>
             <Plus className="h-4 w-4 mr-1" /> New Post
           </Button>
         </div>
@@ -195,13 +293,13 @@ export default function SocialPage() {
           <Share2 className="h-10 w-10 mx-auto text-muted-foreground mb-3" />
           <p className="font-medium mb-1">No social accounts connected</p>
           <p className="text-sm text-muted-foreground mb-4">Connect Facebook, Instagram, or X to start posting.</p>
-          <Button onClick={() => setShowConnect(true)}><Plus className="h-4 w-4 mr-1" /> Connect Account</Button>
+          <Button onClick={openConnect}><Plus className="h-4 w-4 mr-1" /> Connect Account</Button>
         </Card>
       ) : posts.length === 0 ? (
         <Card className="p-12 text-center">
           <p className="font-medium mb-1">No posts yet</p>
           <p className="text-sm text-muted-foreground mb-4">Compose your first post across all your connected accounts.</p>
-          <Button onClick={() => setShowCompose(true)}><Plus className="h-4 w-4 mr-1" /> New Post</Button>
+          <Button onClick={openCompose}><Plus className="h-4 w-4 mr-1" /> New Post</Button>
         </Card>
       ) : (
         <div className="space-y-3">
@@ -273,6 +371,9 @@ export default function SocialPage() {
                     </button>
                   ))}
                 </div>
+                {composeForm.formState.errors.account_ids && (
+                  <p className="text-xs text-destructive">{composeForm.formState.errors.account_ids.message}</p>
+                )}
               </div>
 
               {/* AI caption */}
@@ -280,52 +381,82 @@ export default function SocialPage() {
                 <Label className="text-xs flex items-center gap-1"><Sparkles className="h-3.5 w-3.5 text-purple-500" /> AI Caption</Label>
                 <div className="flex gap-2">
                   <Input
-                    value={captionPrompt}
-                    onChange={(e) => setCaptionPrompt(e.target.value)}
+                    {...captionForm.register("prompt")}
                     placeholder="Describe your post topic..."
                     className="h-8 text-sm"
-                    onKeyDown={(e) => e.key === "Enter" && generateCaption()}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") {
+                        e.preventDefault();
+                        captionForm.handleSubmit(onGenerateCaption)();
+                      }
+                    }}
                   />
-                  <Button size="sm" variant="outline" onClick={generateCaption} disabled={generatingCaption || !captionPrompt.trim()} className="shrink-0">
-                    {generatingCaption ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={captionForm.handleSubmit(onGenerateCaption)}
+                    disabled={captionForm.formState.isSubmitting}
+                    className="shrink-0"
+                  >
+                    {captionForm.formState.isSubmitting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
                   </Button>
                 </div>
+                {captionForm.formState.errors.prompt && (
+                  <p className="text-xs text-destructive">{captionForm.formState.errors.prompt.message}</p>
+                )}
               </div>
 
               <div className="space-y-1">
                 <Label>Caption *</Label>
                 <textarea
                   className="w-full h-32 p-3 text-sm rounded-md border bg-background resize-none"
-                  value={content}
-                  onChange={(e) => setContent(e.target.value)}
+                  {...composeForm.register("content")}
                   placeholder="What's on your mind?"
                 />
                 <p className="text-xs text-muted-foreground text-right">{content.length} chars</p>
+                {composeForm.formState.errors.content && (
+                  <p className="text-xs text-destructive">{composeForm.formState.errors.content.message}</p>
+                )}
               </div>
 
               <div className="space-y-1">
                 <Label>Image URL <span className="text-muted-foreground font-normal">(required for Instagram)</span></Label>
-                <Input value={imageUrl} onChange={(e) => setImageUrl(e.target.value)} placeholder="https://..." />
+                <Input {...composeForm.register("image_url")} placeholder="https://..." />
               </div>
 
               <div className="space-y-2">
                 <div className="flex items-center gap-2">
-                  <input type="radio" id="now" checked={publishNow} onChange={() => setPublishNow(true)} />
+                  <input
+                    type="radio"
+                    id="now"
+                    checked={publishNow}
+                    onChange={() => composeForm.setValue("publish_now", true, { shouldValidate: true })}
+                  />
                   <Label htmlFor="now" className="cursor-pointer">Publish Now</Label>
                 </div>
                 <div className="flex items-center gap-2">
-                  <input type="radio" id="schedule" checked={!publishNow} onChange={() => setPublishNow(false)} />
+                  <input
+                    type="radio"
+                    id="schedule"
+                    checked={!publishNow}
+                    onChange={() => composeForm.setValue("publish_now", false, { shouldValidate: true })}
+                  />
                   <Label htmlFor="schedule" className="cursor-pointer">Schedule</Label>
                 </div>
                 {!publishNow && (
-                  <Input type="datetime-local" value={scheduledAt} onChange={(e) => setScheduledAt(e.target.value)} />
+                  <>
+                    <Input type="datetime-local" {...composeForm.register("scheduled_at")} />
+                    {composeForm.formState.errors.scheduled_at && (
+                      <p className="text-xs text-destructive">{composeForm.formState.errors.scheduled_at.message}</p>
+                    )}
+                  </>
                 )}
               </div>
             </div>
             <div className="flex justify-end gap-2 p-4 border-t">
               <Button variant="outline" onClick={() => setShowCompose(false)}>Cancel</Button>
-              <Button onClick={publish} disabled={publishing || !content.trim() || selectedAccounts.length === 0}>
-                {publishing ? <Loader2 className="h-4 w-4 animate-spin mr-1" /> : null}
+              <Button onClick={composeForm.handleSubmit(onPublish)} disabled={composeForm.formState.isSubmitting}>
+                {composeForm.formState.isSubmitting ? <Loader2 className="h-4 w-4 animate-spin mr-1" /> : null}
                 {publishNow ? "Publish Now" : "Schedule Post"}
               </Button>
             </div>
@@ -344,7 +475,7 @@ export default function SocialPage() {
             <div className="p-4 space-y-3">
               <div className="space-y-1">
                 <Label>Platform</Label>
-                <select value={connPlatform} onChange={(e) => setConnPlatform(e.target.value)}
+                <select {...connectForm.register("platform")}
                   className="w-full h-9 rounded-md border bg-background px-2 text-sm">
                   <option value="facebook">Facebook</option>
                   <option value="instagram">Instagram</option>
@@ -353,33 +484,39 @@ export default function SocialPage() {
               </div>
               <div className="space-y-1">
                 <Label>Display Name</Label>
-                <Input value={connName} onChange={(e) => setConnName(e.target.value)} placeholder="My Facebook Page" />
+                <Input {...connectForm.register("name")} placeholder="My Facebook Page" />
+                {connectForm.formState.errors.name && (
+                  <p className="text-xs text-destructive">{connectForm.formState.errors.name.message}</p>
+                )}
               </div>
               <div className="space-y-1">
                 <Label>Account / User ID</Label>
-                <Input value={connAccountId} onChange={(e) => setConnAccountId(e.target.value)} placeholder="123456789" />
+                <Input {...connectForm.register("account_id")} placeholder="123456789" />
               </div>
               <div className="space-y-1">
                 <Label>Access Token</Label>
-                <Input type="password" value={connToken} onChange={(e) => setConnToken(e.target.value)} placeholder="Long-lived access token" />
+                <Input type="password" {...connectForm.register("access_token")} placeholder="Long-lived access token" />
+                {connectForm.formState.errors.access_token && (
+                  <p className="text-xs text-destructive">{connectForm.formState.errors.access_token.message}</p>
+                )}
               </div>
               {connPlatform === "facebook" && (
                 <>
                   <div className="space-y-1">
                     <Label>Page ID <span className="text-muted-foreground font-normal">(for posting to a Page)</span></Label>
-                    <Input value={connPageId} onChange={(e) => setConnPageId(e.target.value)} placeholder="Page ID" />
+                    <Input {...connectForm.register("page_id")} placeholder="Page ID" />
                   </div>
                   <div className="space-y-1">
                     <Label>Page Access Token</Label>
-                    <Input type="password" value={connPageToken} onChange={(e) => setConnPageToken(e.target.value)} placeholder="Page access token" />
+                    <Input type="password" {...connectForm.register("page_access_token")} placeholder="Page access token" />
                   </div>
                 </>
               )}
             </div>
             <div className="flex justify-end gap-2 p-4 border-t">
               <Button variant="outline" onClick={() => setShowConnect(false)}>Cancel</Button>
-              <Button onClick={connectAccount} disabled={connecting || !connName.trim() || !connToken.trim()}>
-                {connecting ? <Loader2 className="h-4 w-4 animate-spin mr-1" /> : null} Connect
+              <Button onClick={connectForm.handleSubmit(onConnectAccount)} disabled={connectForm.formState.isSubmitting}>
+                {connectForm.formState.isSubmitting ? <Loader2 className="h-4 w-4 animate-spin mr-1" /> : null} Connect
               </Button>
             </div>
           </div>
