@@ -5,6 +5,7 @@ import { Loader2, QrCode, CheckCircle, AlertCircle, RefreshCw } from "lucide-rea
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { toast } from "@/hooks/use-toast";
 
 interface ProgramInfo {
   program_id: string;
@@ -25,6 +26,41 @@ const ACTION_LABELS: Record<string, string> = {
   deduct_balance: "Deduct Balance",
   set_tier: "Set Tier",
 };
+
+// Scanner-permitted subset accepted by POST /api/wallet/scan/{token}/action
+// — see backend/app/schemas/wallet.py `_ScannerAction`. Some program types
+// (e.g. membership) surface a "set_tier" quick action from the info endpoint
+// that this scanner action endpoint does not actually accept, so we still
+// need to guard rather than trust `quick_actions` blindly.
+const SCANNER_ACTIONS = [
+  "add_punch",
+  "redeem",
+  "add_points",
+  "redeem_points_reward",
+  "check_in",
+  "deduct_balance",
+  "redeem_coupon",
+] as const;
+
+const GENERIC_ERROR_MESSAGE = "Something went wrong. Please try again.";
+
+/** Parses a fetch error body into a display message. The API returns two
+ * shapes: a plain string `detail` (hand-rolled HTTPException(detail="...")
+ * calls) and the structured {success, code, error, fields} shape produced
+ * for Pydantic validation errors — see backend/app/core/error_handlers.py.
+ * Handles both so we don't lose the specific message on the string-detail
+ * path (e.g. "Card is not active", "Insufficient balance: ..."). */
+function parseApiError(body: unknown): string {
+  const detail = (body as { detail?: unknown } | null | undefined)?.detail;
+  if (typeof detail === "string" && detail) {
+    return detail;
+  }
+  if (detail && typeof detail === "object") {
+    const d = detail as { error?: string };
+    return d.error || GENERIC_ERROR_MESSAGE;
+  }
+  return GENERIC_ERROR_MESSAGE;
+}
 
 export default function ScanPage({ params }: { params: { token: string } }) {
   const token = params.token;
@@ -62,6 +98,35 @@ export default function ScanPage({ params }: { params: { token: string } }) {
   async function handleScan(e: React.FormEvent) {
     e.preventDefault();
     if (!serial.trim() || !selectedAction) return;
+
+    // Client-side guards before hitting the network:
+    // 1. the action must be one the scan-action endpoint actually accepts
+    //    (quick_actions can include actions — e.g. "set_tier" for membership
+    //    programs — that this endpoint's schema rejects).
+    if (!(SCANNER_ACTIONS as readonly string[]).includes(selectedAction)) {
+      const message = "This action isn't available from the scanner.";
+      setResult({ success: false, message });
+      toast({ variant: "destructive", title: "Couldn't apply action", description: message });
+      return;
+    }
+
+    // 2. if a numeric value is being collected, it must be a valid
+    //    non-negative number before we submit it.
+    let numericValue: string | undefined = undefined;
+    if (needsValue) {
+      const trimmed = actionValue.trim();
+      if (trimmed) {
+        const parsed = Number(trimmed);
+        if (!Number.isFinite(parsed) || parsed < 0) {
+          const message = "Enter a valid non-negative number.";
+          setResult({ success: false, message });
+          toast({ variant: "destructive", title: "Invalid value", description: message });
+          return;
+        }
+        numericValue = trimmed;
+      }
+    }
+
     setSubmitting(true);
     setResult(null);
     try {
@@ -71,11 +136,17 @@ export default function ScanPage({ params }: { params: { token: string } }) {
         body: JSON.stringify({
           serial: serial.trim(),
           action: selectedAction,
-          value: actionValue || undefined,
+          value: numericValue,
         }),
       });
+      if (!res.ok) {
+        const body = await res.json().catch(() => null);
+        const message = parseApiError(body);
+        setResult({ success: false, message });
+        toast({ variant: "destructive", title: "Couldn't apply action", description: message });
+        return;
+      }
       const data = await res.json();
-      if (!res.ok) throw new Error(data.detail || "Action failed");
       setResult({ success: true, message: data.message || "Action applied successfully." });
       setSerial("");
       setActionValue("");
@@ -83,11 +154,9 @@ export default function ScanPage({ params }: { params: { token: string } }) {
         setResult(null);
         serialInputRef.current?.focus();
       }, 3000);
-    } catch (err: unknown) {
-      setResult({
-        success: false,
-        message: err instanceof Error ? err.message : "Something went wrong.",
-      });
+    } catch {
+      setResult({ success: false, message: GENERIC_ERROR_MESSAGE });
+      toast({ variant: "destructive", title: "Couldn't apply action", description: GENERIC_ERROR_MESSAGE });
     } finally {
       setSubmitting(false);
     }
