@@ -7,6 +7,7 @@ import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { apiClient } from "@/lib/api";
+import { APP_NAME } from "@/lib/constants";
 
 interface ProviderMeta {
   label: string;
@@ -106,7 +107,7 @@ export default function IntegrationsPage() {
       <div>
         <h1 className="text-2xl font-semibold">AI Model Integrations</h1>
         <p className="text-sm text-muted-foreground mt-1">
-          Connect your own API keys. You pay the provider directly — ChatCraft doesn't charge per message.
+          Connect your own API keys. You pay the provider directly — {APP_NAME} doesn't charge per message.
         </p>
       </div>
 

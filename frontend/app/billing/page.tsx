@@ -12,6 +12,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
+import { APP_NAME } from "@/lib/constants";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 
@@ -64,7 +65,7 @@ export default function BillingPage() {
       <Card>
         <CardHeader>
           <CardTitle>Current plan</CardTitle>
-          <CardDescription>Your active ChatCraft AI subscription.</CardDescription>
+          <CardDescription>Your active {APP_NAME} subscription.</CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="flex items-center justify-between">

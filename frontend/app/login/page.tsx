@@ -12,6 +12,7 @@ import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle }
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
+import { Logo } from "@/components/branding/logo";
 
 const schema = z.object({
   email: z.string().email("Enter a valid email"),
@@ -62,8 +63,14 @@ export default function LoginPage() {
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-background px-4">
-      <Card className="w-full max-w-md">
+    <div className="relative flex min-h-screen items-center justify-center overflow-hidden bg-background px-4">
+      <div className="bg-hero-glow pointer-events-none absolute inset-x-0 top-0 -z-10 h-[500px]" />
+
+      <Link href="/" className="absolute left-6 top-6 hidden items-center gap-2 sm:flex">
+        <Logo size="sm" />
+      </Link>
+
+      <Card className="w-full max-w-md shadow-lg">
         <CardHeader className="space-y-1">
           <CardTitle className="text-2xl font-bold">Sign in</CardTitle>
           <CardDescription>Enter your email and password to access your account</CardDescription>
@@ -71,12 +78,12 @@ export default function LoginPage() {
 
         <CardContent className="space-y-4">
           {passwordReset && (
-            <p className="text-sm text-green-600 bg-green-50 border border-green-200 rounded-md px-3 py-2">
+            <p className="text-sm text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-md px-3 py-2 dark:bg-emerald-500/10 dark:text-emerald-400 dark:border-emerald-500/20">
               Password updated — sign in with your new password.
             </p>
           )}
           {isSuspended && (
-            <p className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-md px-3 py-2">
+            <p className="text-sm text-destructive bg-destructive/10 border border-destructive/20 rounded-md px-3 py-2">
               Your account has been suspended. Please contact support.
             </p>
           )}

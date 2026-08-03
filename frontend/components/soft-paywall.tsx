@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useAppStore } from "@/store";
 import { Button } from "@/components/ui/button";
+import { APP_NAME } from "@/lib/constants";
 
 const ROLE_ORDER: Record<string, number> = {
   free: 0,
@@ -27,7 +28,7 @@ interface SoftPaywallProps {
 export function SoftPaywall({
   requiredRole = "premium",
   title = "Pro feature",
-  description = "Upgrade to ChatCraft AI Pro to unlock this feature.",
+  description = `Upgrade to ${APP_NAME} Pro to unlock this feature.`,
   children,
 }: SoftPaywallProps) {
   const role = useAppStore((s) => s.user?.role ?? null);

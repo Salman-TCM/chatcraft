@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useAppStore } from "@/store";
 import { Button } from "@/components/ui/button";
+import { APP_NAME } from "@/lib/constants";
 import {
   Dialog,
   DialogContent,
@@ -34,7 +35,7 @@ export function UpgradeModal() {
             {reason || "You've reached your usage limit"}
           </DialogTitle>
           <DialogDescription>
-            Upgrade to ChatCraft AI Pro to keep the conversation going.
+            Upgrade to {APP_NAME} Pro to keep the conversation going.
           </DialogDescription>
         </DialogHeader>
 

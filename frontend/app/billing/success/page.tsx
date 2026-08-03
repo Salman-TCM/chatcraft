@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useSession } from "next-auth/react";
 import { Button } from "@/components/ui/button";
+import { APP_NAME } from "@/lib/constants";
 import {
   Card,
   CardContent,
@@ -57,7 +58,7 @@ export default function BillingSuccessPage() {
           </div>
           <CardTitle className="text-2xl font-bold">Payment successful!</CardTitle>
           <CardDescription>
-            Welcome to ChatCraft AI Pro. Your account has been upgraded and all
+            Welcome to {APP_NAME} Pro. Your account has been upgraded and all
             Pro features are now unlocked.
           </CardDescription>
         </CardHeader>

@@ -1,6 +1,8 @@
+import { APP_NAME } from "@/lib/constants";
+
 export const metadata = {
-  title: "Terms of Service | ChatCraft AI",
-  description: "The terms and conditions governing your use of ChatCraft AI.",
+  title: `Terms of Service | ${APP_NAME}`,
+  description: `The terms and conditions governing your use of ${APP_NAME}.`,
 };
 
 export default function TermsPage() {
@@ -15,7 +17,7 @@ export default function TermsPage() {
         <section>
           <h2 className="text-xl font-semibold text-gray-800">Acceptance of Terms</h2>
           <p className="mt-2 text-gray-600">
-            By creating an account or using ChatCraft AI (the "Service"), you agree to be bound
+            By creating an account or using {APP_NAME} (the "Service"), you agree to be bound
             by these Terms of Service and our Privacy Policy. If you do not agree, you must not
             use the Service. We reserve the right to update these terms at any time; continued
             use after changes are posted constitutes acceptance.
@@ -26,7 +28,7 @@ export default function TermsPage() {
           <h2 className="text-xl font-semibold text-gray-800">Use of Service</h2>
           <p className="mt-2 text-gray-600">
             You are granted a limited, non-exclusive, non-transferable licence to access and use
-            ChatCraft AI for your own business or personal purposes in accordance with these
+            {" "}{APP_NAME} for your own business or personal purposes in accordance with these
             terms. You are responsible for maintaining the security of your account credentials
             and for all activity that occurs under your account.
           </p>
@@ -40,7 +42,7 @@ export default function TermsPage() {
         <section>
           <h2 className="text-xl font-semibold text-gray-800">Prohibited Activities</h2>
           <p className="mt-2 text-gray-600">
-            You must not use ChatCraft AI to generate, distribute, or facilitate illegal content,
+            You must not use {APP_NAME} to generate, distribute, or facilitate illegal content,
             harassment, spam, phishing, or any form of deception. You must not attempt to reverse
             engineer, scrape, or overload our infrastructure, or access any part of the Service
             except through the official API and interfaces we provide.
@@ -54,13 +56,13 @@ export default function TermsPage() {
         <section>
           <h2 className="text-xl font-semibold text-gray-800">Intellectual Property</h2>
           <p className="mt-2 text-gray-600">
-            All software, branding, and content comprising ChatCraft AI is the exclusive property
-            of ChatCraft AI Ltd and is protected by copyright and other intellectual property
+            All software, branding, and content comprising {APP_NAME} is the exclusive property
+            of {APP_NAME} Ltd and is protected by copyright and other intellectual property
             laws. You retain ownership of the content and data you upload or create through the
             Service.
           </p>
           <p className="mt-2 text-gray-600">
-            By uploading content you grant ChatCraft AI a limited licence to process and store
+            By uploading content you grant {APP_NAME} a limited licence to process and store
             that content solely for the purpose of delivering the Service to you.
           </p>
         </section>
@@ -68,7 +70,7 @@ export default function TermsPage() {
         <section>
           <h2 className="text-xl font-semibold text-gray-800">Limitation of Liability</h2>
           <p className="mt-2 text-gray-600">
-            To the fullest extent permitted by applicable law, ChatCraft AI Ltd shall not be
+            To the fullest extent permitted by applicable law, {APP_NAME} Ltd shall not be
             liable for any indirect, incidental, special, consequential, or punitive damages,
             including loss of profits or data, arising from your use of or inability to use the
             Service.

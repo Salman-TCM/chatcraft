@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useSession } from "next-auth/react";
 import { Button } from "@/components/ui/button";
+import { APP_NAME } from "@/lib/constants";
 import {
   Card,
   CardContent,
@@ -30,7 +31,7 @@ interface Plan {
 const PLANS: Plan[] = [
   {
     name: "Free",
-    description: "Try ChatCraft AI at no cost",
+    description: `Try ${APP_NAME} at no cost`,
     price: "$0",
     priceDetail: "forever",
     priceId: null,
