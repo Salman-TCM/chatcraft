@@ -8,6 +8,7 @@ import { UpgradeModal } from "@/components/upgrade-modal";
 import { HardPaywallModal } from "@/components/hard-paywall-modal";
 import { CookieConsent } from "@/components/cookie-consent";
 import { ThemeInjector } from "@/components/agency-theme";
+import { ThemeProvider } from "@/components/theme-provider";
 import { PwaRegister } from "@/components/pwa-register";
 import "./globals.css";
 
@@ -78,16 +79,18 @@ export default async function RootLayout({
   return (
     <html lang="en" suppressHydrationWarning>
       <body className={`${inter.variable} font-sans antialiased`}>
-        <SessionProvider>
-          <ThemeInjector theme={agencyTheme} />
-          <SessionSync />
-          <TrialBanner />
-          <UpgradeModal />
-          <HardPaywallModal />
-          <CookieConsent />
-          <PwaRegister />
-          {children}
-        </SessionProvider>
+        <ThemeProvider attribute="class" defaultTheme="dark" enableSystem disableTransitionOnChange>
+          <SessionProvider>
+            <ThemeInjector theme={agencyTheme} />
+            <SessionSync />
+            <TrialBanner />
+            <UpgradeModal />
+            <HardPaywallModal />
+            <CookieConsent />
+            <PwaRegister />
+            {children}
+          </SessionProvider>
+        </ThemeProvider>
       </body>
     </html>
   );
