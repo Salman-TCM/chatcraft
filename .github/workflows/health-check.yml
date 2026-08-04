@@ -1,0 +1,38 @@
+name: Health Check
+
+# External synthetic monitor — runs on a GitHub-hosted runner (deliberately
+# NOT the self-hosted one) so it also catches problems the server itself
+# can't see: DNS misconfiguration, the firewall blocking 443, an expired
+# cert, nginx down entirely. Hits the public site exactly as a browser would.
+
+on:
+  schedule:
+    - cron: "*/15 * * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: health-check
+  cancel-in-progress: true
+
+jobs:
+  check:
+    name: Check production
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    env:
+      SLACK_ALERT_WEBHOOK_URL: ${{ secrets.SLACK_ALERT_WEBHOOK_URL }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run health check
+        run: bash scripts/deploy/health_check.sh https://tiertech.com.bd
+
+      - name: Notify on failure
+        if: failure()
+        run: |
+          curl -s -X POST "$SLACK_ALERT_WEBHOOK_URL" \
+            -H 'Content-type: application/json' \
+            --data '{"text":"🚨 *tiertech.com.bd health check failed* — production may be down. Check <${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|workflow run>."}' \
+            || true

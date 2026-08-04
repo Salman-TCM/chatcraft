@@ -1,0 +1,9 @@
+# Bootstrap template ONLY — copied to upstream-backend.conf (gitignored,
+# untracked) on first server setup. From then on, upstream-backend.conf is
+# the live, runtime-only state that scripts/deploy/deploy.sh rewrites on
+# every deploy. It must stay untracked: this repo directory gets
+# `git reset --hard` on every deploy, which would otherwise clobber
+# whichever slot is actually live with whatever's committed here.
+upstream backend_upstream {
+  server backend_blue:8000;
+}

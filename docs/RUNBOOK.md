@@ -2,11 +2,20 @@
 
 ## Database Migrations (Zero-Downtime)
 
-### Apply a migration in production
+Migrations run automatically as part of every backend deploy — see
+`scripts/deploy/migrate.sh` — against whichever slot (blue/green) is about
+to receive traffic, before the cutover happens. Manual steps below are for
+inspecting state or intervening outside the normal deploy flow.
+
+### Apply a migration manually
 
 ```bash
-# 1. SSH into the backend container or Railway shell
-railway run bash
+# On the deploy server, against whichever slot is currently active —
+# check nginx/conf.d/upstream-backend.conf, or:
+docker compose -f docker-compose.yml -f docker-compose.prod.yml ps backend_blue backend_green
+
+# 1. Exec into the active container
+docker exec -it backend_blue bash   # or backend_green
 
 # 2. Verify pending migrations before applying
 alembic history --verbose
@@ -29,65 +38,74 @@ alembic downgrade -1
 alembic downgrade 000000000008
 ```
 
-### Emergency downgrade procedure
-1. Put the app in maintenance mode (set `MAINTENANCE_MODE=true` env var if supported, or scale replicas to 0 on Railway).
-2. Run `alembic downgrade -1`.
-3. Deploy the previous backend image tag.
-4. Scale replicas back up.
-5. Verify health: `GET /health/ready`.
+### Emergency downgrade procedure — database only
+Automated rollback (below) never runs `alembic downgrade` — see
+`docs/deployment/CICD.md` for why. Only do this by hand, and only if a
+migration is actually destructive:
+1. Confirm no traffic is being served by a slot that expects the new schema
+   (both blue and green should be stopped or pointed at code that tolerates
+   the downgrade).
+2. Run `alembic downgrade -1` inside the active backend container.
+3. Deploy the previous backend image tag (see Rollback Procedure below).
+4. Verify health: `GET /health`.
 
 ---
 
 ## Deployment
 
-### Backend (Railway)
+CI/CD is fully described in `docs/deployment/CICD.md`. Short version:
+push to `master`/`main` → `.github/workflows/deploy.yml` runs on the
+self-hosted runner living on the server itself and blue/green-swaps traffic
+via `scripts/deploy/deploy.sh`. No SSH, no Railway, no Vercel.
 
 ```bash
-# Deploy latest main branch
-railway up --service backend
+# Manually re-run a deploy for one service (from the server):
+bash scripts/deploy/deploy.sh backend production <git-sha>
+bash scripts/deploy/deploy.sh frontend production <git-sha>
 
-# Check logs
-railway logs --service backend --tail 200
-
-# Restart the service
-railway service restart backend
-```
-
-### Frontend (Vercel)
-
-```bash
-# Trigger a production deploy
-vercel --prod
-
-# Rollback to previous deployment
-vercel rollback
+# Tail logs for the currently active slot:
+docker compose -f docker-compose.yml -f docker-compose.prod.yml logs -f backend_blue   # check upstream-backend.conf for which slot is live
 ```
 
 ---
 
 ## Rollback Procedure
 
-1. **Identify the last known-good commit:**
+Automated rollback already happens inside `deploy.sh`: a failed health check
+or migration never cuts nginx over, so a bad deploy never reaches real
+traffic in the first place. Use this procedure when a deploy *looked*
+healthy at cutover but a problem surfaces afterwards.
+
+1. **Identify what's wrong** — Sentry error spike, `/health` degraded, etc.
+2. **Roll back the affected service:**
    ```bash
-   git log --oneline -10
+   bash scripts/deploy/rollback.sh backend    # or frontend
    ```
-2. **Tag it for reference:** `git tag rollback-$(date +%Y%m%d)`
-3. **Backend rollback on Railway:** In the Railway dashboard → Deployments → select previous deployment → Redeploy.
-4. **Frontend rollback on Vercel:** In the Vercel dashboard → Deployments → previous deployment → Promote to Production.
-5. **Database:** Only roll back if the migration is destructive. Use `alembic downgrade -1`.
-6. **Verify:** `GET /health/live` and `GET /health/ready` must both return 200.
+   This swaps nginx back to the previous slot (which was stopped, not
+   removed, so no rebuild is needed) and posts to Slack.
+3. **Database:** only roll back the schema if the migration is destructive
+   — see "Emergency downgrade procedure" above. Most migrations should be
+   additive/backward-compatible with the previous release specifically so
+   this step is never needed.
+4. **Verify:** `GET /health/live` and `GET /health` must both return 200.
 
 ---
 
 ## Database Backup Strategy
 
-- **Provider:** Supabase automatic daily backups (Point-in-Time Recovery enabled on Pro plan).
-- **Retention:** 30 days.
+- **Provider:** self-hosted Postgres (Docker), backed up by
+  `.github/workflows/backup.yml` running nightly on the deploy server via
+  `scripts/backup_db.sh` — no external DB-as-a-service backup to rely on.
+- **Retention:** last 30 backups kept locally under `./backups/postgres/`;
+  optionally mirrored to S3 if `AWS_ACCESS_KEY_ID`/`AWS_S3_BUCKET` are set.
+- **Integrity:** every backup is gzip- and format-verified immediately after
+  the dump; a corrupt backup is deleted and the job fails loudly (Slack)
+  rather than silently keeping a broken file.
 - **Manual snapshot before risky migrations:**
   ```bash
-  pg_dump $DATABASE_URL > backup_$(date +%Y%m%d_%H%M%S).sql
+  bash scripts/backup_db.sh --compose-file docker-compose.prod.yml
   ```
-- **Restore test:** Run monthly — restore the latest backup to a staging DB and verify row counts.
+- **Restore test:** run monthly — see `docs/deployment/CICD.md` §Disaster Recovery.
 
 ---
 
@@ -104,18 +122,18 @@ vercel rollback
 ## Alerting
 
 - **Sentry** — exceptions and error rates; alert threshold: >10 errors/minute.
-- **Railway** — automatic restart on crash (ON_FAILURE policy, max 3 retries).
-- **Uptime monitoring** — configure Better Uptime or UptimeRobot to ping `/health/live` every 60 seconds.
-- **Slack alerts** — `app/core/alerts.py` sends to `SLACK_WEBHOOK_URL` on critical errors.
+- **Docker** — automatic restart on crash (`restart: unless-stopped` in `docker-compose.prod.yml`).
+- **`.github/workflows/health-check.yml`** — external synthetic monitor, every 15 minutes from a GitHub-hosted runner (catches DNS/firewall/cert issues the server itself can't see).
+- **Slack alerts** — deploys, backups, cleanup, and health checks all post to `SLACK_ALERT_WEBHOOK_URL` on failure (see `scripts/deploy/lib.sh:notify_slack`).
 
 ---
 
 ## Common Issues
 
 ### Backend container unhealthy
-1. Check `railway logs` for startup errors.
-2. Verify all required env vars are set (see `.env.example`).
-3. Check DB connectivity: `railway run python -c "import asyncio; from app.db.redis import ping_redis; print(asyncio.run(ping_redis()))"`.
+1. Check logs: `docker compose -f docker-compose.yml -f docker-compose.prod.yml logs backend_blue` (or `_green` — check `nginx/conf.d/upstream-backend.conf` for which slot is live).
+2. Verify all required env vars are set in the server's `.env` (see `.env.example`).
+3. Check dependency connectivity directly: `curl https://tiertech.com.bd/health` — the response body reports Postgres and Redis status individually.
 
 ### Alembic "Target database is not up to date"
 Run `alembic upgrade head` — a previous deploy may have left migrations pending.

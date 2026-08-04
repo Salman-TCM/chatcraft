@@ -1,76 +1,72 @@
 #!/usr/bin/env bash
-# Daily PostgreSQL backup — dumps to S3 with 30-day retention.
-# Usage: ./scripts/backup_db.sh [--local]
-#   --local  Save to ./backups/ instead of uploading to S3
-
+# Nightly PostgreSQL backup — runs locally on the server via
+# `docker compose exec`, so it needs no DB credentials of its own (it reads
+# the same running container the app uses) and no GitHub secret at all.
+# Keeps the last 30 backups locally; optionally mirrors to S3 if AWS
+# credentials are present in the server's .env (best-effort, off by default).
+#
+# Usage: scripts/backup_db.sh [--compose-file docker-compose.prod.yml]
 set -euo pipefail
 
-# ── Config ─────────────────────────────────────────────────────────────────────
+cd "$(dirname "${BASH_SOURCE[0]}")/.."
+
+COMPOSE_FILE="docker-compose.prod.yml"
+for arg in "$@"; do
+  case "$arg" in
+    --compose-file) shift ;;
+    *) [[ -f "$arg" ]] && COMPOSE_FILE="$arg" ;;
+  esac
+done
+
 TIMESTAMP=$(date -u +"%Y%m%dT%H%M%SZ")
 DB_NAME="${POSTGRES_DB:-chatcraft}"
 DB_USER="${POSTGRES_USER:-chatcraft}"
-DB_HOST="${DB_HOST:-localhost}"
-DB_PORT="${DB_PORT:-5432}"
+BACKUP_DIR="./backups/postgres"
+RETENTION_COUNT=30
 BACKUP_FILE="chatcraft_${DB_NAME}_${TIMESTAMP}.sql.gz"
-S3_BUCKET="${BACKUP_S3_BUCKET:-${AWS_S3_BUCKET:-chatcraft-uploads}}"
-S3_PREFIX="backups/postgres"
-RETENTION_DAYS="${BACKUP_RETENTION_DAYS:-30}"
-LOCAL_DIR="./backups"
 
-LOCAL_MODE=false
-for arg in "$@"; do
-  [[ "$arg" == "--local" ]] && LOCAL_MODE=true
-done
+log() { echo "[backup] $*"; }
 
-# ── Dump ───────────────────────────────────────────────────────────────────────
-echo "[backup] Starting dump of ${DB_NAME} at ${TIMESTAMP}"
+mkdir -p "$BACKUP_DIR"
 
-PGPASSWORD="${POSTGRES_PASSWORD:-chatcraft}" \
-  pg_dump \
-    -h "$DB_HOST" \
-    -p "$DB_PORT" \
-    -U "$DB_USER" \
-    -d "$DB_NAME" \
-    --no-password \
-    --format=plain \
-    --verbose \
-  | gzip -9 > "/tmp/${BACKUP_FILE}"
+log "Dumping ${DB_NAME} at ${TIMESTAMP}..."
+docker compose -f docker-compose.yml -f "$COMPOSE_FILE" exec -T postgres \
+  pg_dump -U "$DB_USER" -d "$DB_NAME" --format=plain --no-password \
+  | gzip -9 > "${BACKUP_DIR}/${BACKUP_FILE}"
 
-SIZE=$(du -sh "/tmp/${BACKUP_FILE}" | cut -f1)
-echo "[backup] Dump complete — ${SIZE}"
+SIZE=$(du -sh "${BACKUP_DIR}/${BACKUP_FILE}" | cut -f1)
+log "Dump complete — ${SIZE}"
 
-# ── Upload or save locally ─────────────────────────────────────────────────────
-if [[ "$LOCAL_MODE" == "true" ]]; then
-  mkdir -p "$LOCAL_DIR"
-  mv "/tmp/${BACKUP_FILE}" "${LOCAL_DIR}/${BACKUP_FILE}"
-  echo "[backup] Saved to ${LOCAL_DIR}/${BACKUP_FILE}"
-else
-  echo "[backup] Uploading to s3://${S3_BUCKET}/${S3_PREFIX}/${BACKUP_FILE}"
-  aws s3 cp \
-    "/tmp/${BACKUP_FILE}" \
-    "s3://${S3_BUCKET}/${S3_PREFIX}/${BACKUP_FILE}" \
-    --storage-class STANDARD_IA \
-    --sse AES256
+# ── Integrity check ─────────────────────────────────────────────────────────
+log "Verifying archive integrity..."
+if ! gzip -t "${BACKUP_DIR}/${BACKUP_FILE}"; then
+  log "ERROR: ${BACKUP_FILE} failed gzip integrity check — deleting corrupt backup."
+  rm -f "${BACKUP_DIR}/${BACKUP_FILE}"
+  exit 1
+fi
+if ! zcat "${BACKUP_DIR}/${BACKUP_FILE}" | head -1 | grep -q "PostgreSQL database dump"; then
+  log "ERROR: ${BACKUP_FILE} does not look like a valid pg_dump — deleting."
+  rm -f "${BACKUP_DIR}/${BACKUP_FILE}"
+  exit 1
+fi
+log "Integrity check passed."
 
-  echo "[backup] Upload complete"
-  rm "/tmp/${BACKUP_FILE}"
-
-  # ── Purge old backups ────────────────────────────────────────────────────────
-  echo "[backup] Pruning backups older than ${RETENTION_DAYS} days"
-  CUTOFF=$(date -u -d "${RETENTION_DAYS} days ago" +"%Y-%m-%dT%H:%M:%SZ" 2>/dev/null \
-           || date -u -v-"${RETENTION_DAYS}"d +"%Y-%m-%dT%H:%M:%SZ")  # macOS fallback
-
-  aws s3api list-objects \
-    --bucket "$S3_BUCKET" \
-    --prefix "${S3_PREFIX}/" \
-    --query "Contents[?LastModified<='${CUTOFF}'].Key" \
-    --output text \
-  | tr '\t' '\n' \
-  | grep -v '^$' \
-  | while read -r key; do
-      echo "[backup]   Deleting s3://${S3_BUCKET}/${key}"
-      aws s3 rm "s3://${S3_BUCKET}/${key}"
-    done
+# ── Optional offsite mirror ─────────────────────────────────────────────────
+if [[ -n "${AWS_ACCESS_KEY_ID:-}" && -n "${AWS_S3_BUCKET:-}" ]]; then
+  log "Mirroring to s3://${AWS_S3_BUCKET}/backups/postgres/${BACKUP_FILE}"
+  aws s3 cp "${BACKUP_DIR}/${BACKUP_FILE}" \
+    "s3://${AWS_S3_BUCKET}/backups/postgres/${BACKUP_FILE}" \
+    --storage-class STANDARD_IA --sse AES256 \
+    || log "WARNING: S3 mirror failed — local backup is still intact, continuing."
 fi
 
-echo "[backup] Done."
+# ── Retention: keep only the last N locally ─────────────────────────────────
+log "Enforcing local retention (last ${RETENTION_COUNT})..."
+# shellcheck disable=SC2012
+ls -1t "${BACKUP_DIR}"/chatcraft_*.sql.gz 2>/dev/null | tail -n +$((RETENTION_COUNT + 1)) | while read -r old; do
+  log "  Deleting old backup: ${old}"
+  rm -f "$old"
+done
+
+COUNT=$(ls -1 "${BACKUP_DIR}"/chatcraft_*.sql.gz 2>/dev/null | wc -l)
+log "Done. ${COUNT} backup(s) retained locally."

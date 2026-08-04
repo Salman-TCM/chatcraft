@@ -1,0 +1,34 @@
+name: Docker Cleanup
+
+# Weekly disk-space reclaim on the deploy server. Never touches named data
+# volumes — see scripts/deploy/cleanup_docker.sh for why that's excluded.
+
+on:
+  schedule:
+    - cron: "0 3 * * 0"   # 03:00 UTC every Sunday
+  workflow_dispatch:
+
+concurrency:
+  group: docker-cleanup
+  cancel-in-progress: false
+
+jobs:
+  cleanup:
+    name: Prune images, containers, build cache
+    runs-on: [self-hosted, chatcraft-deploy]
+    timeout-minutes: 15
+
+    env:
+      SLACK_ALERT_WEBHOOK_URL: ${{ secrets.SLACK_ALERT_WEBHOOK_URL }}
+
+    steps:
+      - name: Run cleanup
+        run: bash scripts/deploy/cleanup_docker.sh
+
+      - name: Notify on failure
+        if: failure()
+        run: |
+          curl -s -X POST "$SLACK_ALERT_WEBHOOK_URL" \
+            -H 'Content-type: application/json' \
+            --data '{"text":"⚠️ Docker cleanup job failed — check <${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|workflow run>"}' \
+            || true

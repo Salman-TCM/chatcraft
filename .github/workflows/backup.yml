@@ -1,0 +1,38 @@
+name: Database Backup
+
+# Nightly Postgres backup, run locally on the server (self-hosted runner) via
+# `docker compose exec` — no DB_HOST/credentials needed as GitHub secrets,
+# since the job already has direct access to the running container.
+
+on:
+  schedule:
+    - cron: "0 2 * * *"   # 02:00 UTC daily
+  workflow_dispatch:
+
+concurrency:
+  group: backup-db
+  cancel-in-progress: false
+
+jobs:
+  backup:
+    name: pg_dump -> local (30-day retention)
+    runs-on: [self-hosted, chatcraft-deploy]
+    timeout-minutes: 15
+
+    env:
+      SLACK_ALERT_WEBHOOK_URL: ${{ secrets.SLACK_ALERT_WEBHOOK_URL }}
+      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+      AWS_S3_BUCKET: ${{ secrets.AWS_S3_BUCKET }}
+
+    steps:
+      - name: Run backup
+        run: bash scripts/backup_db.sh --compose-file docker-compose.prod.yml
+
+      - name: Notify on failure
+        if: failure()
+        run: |
+          curl -s -X POST "$SLACK_ALERT_WEBHOOK_URL" \
+            -H 'Content-type: application/json' \
+            --data '{"text":"⚠️ *ChatCraft DB backup failed* — check <${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|workflow run>"}' \
+            || true

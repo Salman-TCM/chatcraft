@@ -1,0 +1,5 @@
+# Bootstrap template ONLY — see upstream-backend.conf.template for why the
+# live upstream-frontend.conf must stay untracked and gitignored.
+upstream frontend_upstream {
+  server frontend_blue:3000;
+}

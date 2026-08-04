@@ -1,0 +1,114 @@
+name: Deploy
+
+# Runs on the self-hosted runner living on the target Ubuntu server itself
+# (label: chatcraft-deploy) — no SSH, no inbound ports opened for GitHub.
+# The runner IS the deploy target; it updates its own working copy in place.
+#
+# master/main -> production (docker-compose.prod.yml, nginx blue/green)
+# develop     -> staging    (docker-compose.staging.yml, single-slot)
+
+on:
+  push:
+    branches: [master, main, develop]
+
+concurrency:
+  group: deploy-${{ github.ref }}
+  cancel-in-progress: false  # never cancel an in-flight deploy — see rollback.sh instead
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # Path filtering — only deploy the service(s) that actually changed.
+  # Runs on a GitHub-hosted runner: it's just a git diff, no need to touch
+  # the deploy target for this.
+  # ---------------------------------------------------------------------------
+  changes:
+    name: Detect changed services
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      backend: ${{ steps.filter.outputs.backend }}
+      frontend: ${{ steps.filter.outputs.frontend }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            backend:
+              - 'backend/**'
+              - 'docker-compose.prod.yml'
+              - 'docker-compose.staging.yml'
+              - 'nginx/**'
+              - 'scripts/deploy/**'
+              - '.github/workflows/deploy.yml'
+            frontend:
+              - 'frontend/**'
+              - 'shared/**'   # @chatcraft/shared is a frontend-only TS package
+              - 'docker-compose.prod.yml'
+              - 'docker-compose.staging.yml'
+              - 'nginx/**'
+              - 'scripts/deploy/**'
+              - '.github/workflows/deploy.yml'
+
+  # ---------------------------------------------------------------------------
+  # Deploy — self-hosted, on the box itself.
+  # ---------------------------------------------------------------------------
+  deploy:
+    name: Deploy (${{ github.ref_name == 'develop' && 'staging' || 'production' }})
+    needs: changes
+    if: needs.changes.outputs.backend == 'true' || needs.changes.outputs.frontend == 'true'
+    runs-on: [self-hosted, chatcraft-deploy]
+    timeout-minutes: 30
+    environment:
+      name: ${{ github.ref_name == 'develop' && 'staging' || 'production' }}
+      url: ${{ github.ref_name == 'develop' && '' || 'https://tiertech.com.bd' }}
+
+    env:
+      TARGET_ENV: ${{ github.ref_name == 'develop' && 'staging' || 'production' }}
+      SLACK_ALERT_WEBHOOK_URL: ${{ secrets.SLACK_ALERT_WEBHOOK_URL }}
+
+    steps:
+      # No actions/checkout — this runner's working copy at
+      # /home/salman/Salman/deployment/chatcraft *is* the running stack.
+      # Updating it in place (rather than a fresh clone) means the
+      # untracked/.env-configured runtime state (nginx's live upstream
+      # files, .deploy/state) survives every deploy. See lib.sh.
+      - name: Sync working copy to ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          git fetch origin ${{ github.ref_name }}
+          git reset --hard ${{ github.sha }}
+
+      - name: Verify git commit
+        run: |
+          set -euo pipefail
+          ACTUAL="$(git rev-parse HEAD)"
+          if [[ "$ACTUAL" != "${{ github.sha }}" ]]; then
+            echo "Checked-out commit ($ACTUAL) does not match expected (${{ github.sha }})"
+            exit 1
+          fi
+          echo "Verified: HEAD is ${{ github.sha }}"
+
+      - name: Deploy backend
+        if: needs.changes.outputs.backend == 'true'
+        run: bash scripts/deploy/deploy.sh backend "$TARGET_ENV" "${{ github.sha }}"
+
+      - name: Deploy frontend
+        if: needs.changes.outputs.frontend == 'true'
+        run: bash scripts/deploy/deploy.sh frontend "$TARGET_ENV" "${{ github.sha }}"
+
+      - name: External health check
+        run: |
+          if [[ "$TARGET_ENV" == "production" ]]; then
+            bash scripts/deploy/health_check.sh https://tiertech.com.bd
+          else
+            echo "Skipping external check for staging (internal-network only, see docker-compose.staging.yml)"
+          fi
+
+      - name: Notify on workflow-level failure
+        if: failure()
+        run: |
+          curl -s -X POST "$SLACK_ALERT_WEBHOOK_URL" \
+            -H 'Content-type: application/json' \
+            --data "{\"text\":\"❌ Deploy workflow failed for ${TARGET_ENV} at commit ${{ github.sha }} — check <${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|workflow run>. Per-service Slack alerts above (if any) have the specific reason.\"}" \
+            || true
