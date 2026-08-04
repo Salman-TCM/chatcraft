@@ -51,10 +51,19 @@ EOF
     log "nginx is not running — starting it now..."
     compose up -d --no-deps nginx
     local waited=0
-    until compose exec -T nginx true >/dev/null 2>&1; do
-      sleep 2; waited=$((waited + 2))
-      (( waited > 30 )) && { log "nginx failed to start within 30s"; return 1; }
+    # Use `if` for the timeout check — `(( expr ))` returns exit code 1 when
+    # the expression is false, which would trigger set -e inside a loop body.
+    while ! compose exec -T nginx true >/dev/null 2>&1; do
+      sleep 2
+      waited=$((waited + 2))
+      if (( waited > 30 )); then
+        log "nginx failed to start within 30s"
+        log "nginx container logs:"
+        compose logs --tail=30 nginx || true
+        return 1
+      fi
     done
+    log "nginx is up"
   fi
 
   compose exec -T nginx nginx -t
