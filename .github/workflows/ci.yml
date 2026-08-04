@@ -242,7 +242,7 @@ jobs:
       # reviewed; flip exit-code to "1" (removing continue-on-error) once
       # any real CRITICAL/HIGH findings are triaged or accepted.
       - name: Scan image for vulnerabilities (Trivy)
-        uses: aquasecurity/trivy-action@0.32.0
+        uses: aquasecurity/trivy-action@v0.32.0
         with:
           image-ref: chatcraft-${{ matrix.service }}:ci
           severity: CRITICAL,HIGH
