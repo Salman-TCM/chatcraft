@@ -78,8 +78,12 @@ EOF
   if compose exec -T nginx true >/dev/null 2>&1; then
     nginx_running=1
   else
-    log "nginx is not running — starting it now..."
-    compose up -d --no-deps nginx
+    # nginx is either absent or stuck in a restart loop with stale config.
+    # `compose up -d` is a no-op on an existing container, so a container
+    # crash-looping with the OLD config would never pick up the new files
+    # we just wrote to disk. --force-recreate tears down and rebuilds it.
+    log "nginx is not responsive — force-recreating with fresh config..."
+    compose up -d --force-recreate --no-deps nginx
     local waited=0
     while (( waited <= 30 )); do
       if compose exec -T nginx true >/dev/null 2>&1; then
