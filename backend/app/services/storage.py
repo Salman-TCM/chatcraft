@@ -3,7 +3,7 @@ File storage abstraction.
 Uploads to S3 when AWS credentials are configured; falls back to Supabase Storage.
 Returns a public or pre-signed URL that the document processor can download.
 """
-import mimetypes
+
 import uuid
 from pathlib import PurePosixPath
 from urllib.parse import urlsplit
@@ -99,7 +99,10 @@ async def delete_file(file_url: str) -> None:
     """
     try:
         parts = urlsplit(file_url)
-        if settings.aws_s3_bucket and parts.hostname == f"{settings.aws_s3_bucket}.s3.{settings.aws_region}.amazonaws.com":
+        if (
+            settings.aws_s3_bucket
+            and parts.hostname == f"{settings.aws_s3_bucket}.s3.{settings.aws_region}.amazonaws.com"
+        ):
             key = parts.path.lstrip("/")
             await _delete_s3(key)
         elif settings.supabase_url and file_url.startswith(settings.supabase_url):
@@ -108,7 +111,7 @@ async def delete_file(file_url: str) -> None:
             if idx == -1:
                 logger.warning(f"Could not parse Supabase storage key from {file_url!r}")
                 return
-            key = file_url[idx + len(marker):]
+            key = file_url[idx + len(marker) :]
             await _delete_supabase(key)
         else:
             logger.warning(f"Unrecognized storage URL, skipping delete: {file_url!r}")
@@ -123,7 +126,9 @@ async def _delete_s3(key: str) -> None:
 
     loop = asyncio.get_event_loop()
     client = _s3_client()
-    await loop.run_in_executor(None, lambda: client.delete_object(Bucket=settings.aws_s3_bucket, Key=key))
+    await loop.run_in_executor(
+        None, lambda: client.delete_object(Bucket=settings.aws_s3_bucket, Key=key)
+    )
 
 
 async def _delete_supabase(key: str) -> None:

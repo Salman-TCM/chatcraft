@@ -1,5 +1,5 @@
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import bcrypt
 from jose import JWTError, jwt
@@ -19,6 +19,7 @@ REFRESH_TOKEN_COOKIE = "refresh_token"
 # Password hashing
 # ---------------------------------------------------------------------------
 
+
 def hash_password(plain: str) -> str:
     return bcrypt.hashpw(plain.encode(), bcrypt.gensalt(rounds=_BCRYPT_ROUNDS)).decode()
 
@@ -34,18 +35,22 @@ def verify_password(plain: str, hashed: str) -> bool:
 # JWT tokens
 # ---------------------------------------------------------------------------
 
+
 def create_access_token(
     user_id,
     role: str,
     expires_minutes: int | None = None,
     allowed_features: list | None = None,
 ) -> str:
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     payload = {
         "sub": str(user_id),
         "role": role,
         "iat": now,
-        "exp": now + timedelta(minutes=expires_minutes if expires_minutes is not None else ACCESS_TOKEN_EXPIRE_MINUTES),
+        "exp": now
+        + timedelta(
+            minutes=expires_minutes if expires_minutes is not None else ACCESS_TOKEN_EXPIRE_MINUTES
+        ),
         "type": "access",
     }
     # Only include in token when restricted — None means unrestricted
@@ -57,7 +62,7 @@ def create_access_token(
 def create_refresh_token(user_id) -> tuple[str, str]:
     """Return (token_string, jti). jti is stored in Redis for revocation."""
     jti = str(uuid.uuid4())
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     payload = {
         "sub": str(user_id),
         "jti": jti,

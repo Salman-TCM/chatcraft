@@ -1,6 +1,7 @@
 """
 Pydantic request schemas for the Broadcast Hub & Social Tools API.
 """
+
 from typing import Literal
 
 from pydantic import BaseModel, Field
@@ -21,6 +22,7 @@ ResponseType = Literal["ai", "text"]
 
 
 # ── Broadcast campaigns ─────────────────────────────────────────────────────────
+
 
 class CreateCampaignRequest(BaseModel):
     name: str = Field(min_length=1, max_length=255)
@@ -47,6 +49,7 @@ class TestCampaignRequest(BaseModel):
 
 # ── Social accounts ────────────────────────────────────────────────────────────
 
+
 class ConnectAccountRequest(BaseModel):
     platform: SocialPlatform
     account_id: str = Field(default="", max_length=255)
@@ -59,6 +62,7 @@ class ConnectAccountRequest(BaseModel):
 
 
 # ── Social posts ───────────────────────────────────────────────────────────────
+
 
 class CreatePostRequest(BaseModel):
     content: str = Field(min_length=1, max_length=5000)
@@ -74,6 +78,7 @@ class GenerateCaptionRequest(BaseModel):
 
 
 # ── Comment automations ─────────────────────────────────────────────────────────
+
 
 class CreateCommentAutomationRequest(BaseModel):
     platform: CommentPlatform

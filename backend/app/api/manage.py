@@ -17,6 +17,7 @@ PUT  /api/manage/functions/{id}                  — update function
 DELETE /api/manage/functions/{id}                — delete function
 POST /api/manage/functions/{id}/toggle           — toggle active
 """
+
 import uuid
 
 from fastapi import APIRouter, HTTPException, status
@@ -42,12 +43,14 @@ router = APIRouter(tags=["manage"])
 
 # ── /api/v1/me ────────────────────────────────────────────────────────────────
 
+
 @router.get("/api/v1/me", response_model=MeResponse)
 async def get_me(user: CurrentUser) -> MeResponse:
     return MeResponse(data=UserResponse.model_validate(user))
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
+
 
 async def _owned_bot(bot_id: uuid.UUID, user_id: uuid.UUID, db: AsyncSession) -> ChatbotConfig:
     bot = await db.get(ChatbotConfig, bot_id)
@@ -61,16 +64,21 @@ async def _owned_bot(bot_id: uuid.UUID, user_id: uuid.UUID, db: AsyncSession) ->
 
 def _widget_dict(bot: ChatbotConfig, wc: WidgetConfig | None) -> dict:
     d = ChatbotResponse.model_validate(bot).model_dump()
-    d["widget"] = {
-        "embed_token": wc.embed_token if wc else None,
-        "allowed_domains": wc.allowed_domains if wc else None,
-        "position": wc.position if wc else "bottom-right",
-        "show_branding": wc.show_branding if wc else True,
-    } if wc else None
+    d["widget"] = (
+        {
+            "embed_token": wc.embed_token if wc else None,
+            "allowed_domains": wc.allowed_domains if wc else None,
+            "position": wc.position if wc else "bottom-right",
+            "show_branding": wc.show_branding if wc else True,
+        }
+        if wc
+        else None
+    )
     return d
 
 
 # ── Widget endpoints ──────────────────────────────────────────────────────────
+
 
 @router.get("/api/manage/widgets", response_model=dict)
 async def list_widgets(user: CurrentUser, db: DBSession) -> dict:
@@ -99,23 +107,21 @@ async def list_widgets(user: CurrentUser, db: DBSession) -> dict:
 @router.get("/api/manage/widgets/{widget_id}", response_model=dict)
 async def get_widget(widget_id: uuid.UUID, user: CurrentUser, db: DBSession) -> dict:
     bot = await _owned_bot(widget_id, user.id, db)
-    result = await db.execute(
-        select(WidgetConfig).where(WidgetConfig.chatbot_id == bot.id)
-    )
+    result = await db.execute(select(WidgetConfig).where(WidgetConfig.chatbot_id == bot.id))
     wc = result.scalar_one_or_none()
     return {"success": True, "data": _widget_dict(bot, wc)}
 
 
 @router.put("/api/manage/widgets/{widget_id}", response_model=dict)
-async def update_widget(widget_id: uuid.UUID, body: UpdateWidgetRequest, user: CurrentUser, db: DBSession) -> dict:
+async def update_widget(
+    widget_id: uuid.UUID, body: UpdateWidgetRequest, user: CurrentUser, db: DBSession
+) -> dict:
     bot = await _owned_bot(widget_id, user.id, db)
     for k, v in body.model_dump(exclude_unset=True).items():
         setattr(bot, k, v)
     await db.commit()
     await db.refresh(bot)
-    result = await db.execute(
-        select(WidgetConfig).where(WidgetConfig.chatbot_id == bot.id)
-    )
+    result = await db.execute(select(WidgetConfig).where(WidgetConfig.chatbot_id == bot.id))
     wc = result.scalar_one_or_none()
     return {"success": True, "data": _widget_dict(bot, wc)}
 
@@ -145,7 +151,9 @@ async def unpause_widget(widget_id: uuid.UUID, user: CurrentUser, db: DBSession)
 
 
 @router.post("/api/manage/widgets/{widget_id}/enable-ai", response_model=dict)
-async def enable_ai_channel(widget_id: uuid.UUID, body: EnableAiChannelRequest, user: CurrentUser, db: DBSession) -> dict:
+async def enable_ai_channel(
+    widget_id: uuid.UUID, body: EnableAiChannelRequest, user: CurrentUser, db: DBSession
+) -> dict:
     """Toggle AI on/off for a specific channel or all channels."""
     bot = await _owned_bot(widget_id, user.id, db)
     channel = body.channel
@@ -157,6 +165,7 @@ async def enable_ai_channel(widget_id: uuid.UUID, body: EnableAiChannelRequest, 
         return {"success": True, "data": {"channel": "all", "enabled": enabled}}
 
     from app.models.channel_integration import ChannelIntegration
+
     result = await db.execute(
         select(ChannelIntegration).where(
             ChannelIntegration.chatbot_id == bot.id,
@@ -167,7 +176,11 @@ async def enable_ai_channel(widget_id: uuid.UUID, body: EnableAiChannelRequest, 
     if not ci:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail={"success": False, "error": f"Channel '{channel}' not configured", "code": "NOT_FOUND"},
+            detail={
+                "success": False,
+                "error": f"Channel '{channel}' not configured",
+                "code": "NOT_FOUND",
+            },
         )
     ci.is_active = enabled
     await db.commit()
@@ -175,6 +188,7 @@ async def enable_ai_channel(widget_id: uuid.UUID, body: EnableAiChannelRequest, 
 
 
 # ── Helper ────────────────────────────────────────────────────────────────────
+
 
 def _fn_dict(fn: ChatbotFunction) -> dict:
     return {
@@ -203,6 +217,7 @@ async def _owned_fn(fn_id: uuid.UUID, user_id: uuid.UUID, db: AsyncSession) -> C
 
 # ── Widget ↔ Functions ────────────────────────────────────────────────────────
 
+
 @router.get("/api/manage/widgets/{bot_id}/functions", response_model=dict)
 async def list_widget_functions(bot_id: uuid.UUID, user: CurrentUser, db: DBSession) -> dict:
     bot = await _owned_bot(bot_id, user.id, db)
@@ -212,9 +227,7 @@ async def list_widget_functions(bot_id: uuid.UUID, user: CurrentUser, db: DBSess
     assignments = result.scalars().all()
     assigned_ids = {a.function_id for a in assignments}
 
-    all_fn_res = await db.execute(
-        select(ChatbotFunction).where(ChatbotFunction.user_id == user.id)
-    )
+    all_fn_res = await db.execute(select(ChatbotFunction).where(ChatbotFunction.user_id == user.id))
     all_fns = all_fn_res.scalars().all()
 
     return {
@@ -227,7 +240,9 @@ async def list_widget_functions(bot_id: uuid.UUID, user: CurrentUser, db: DBSess
 
 
 @router.put("/api/manage/widgets/{bot_id}/functions", response_model=dict)
-async def set_widget_functions(bot_id: uuid.UUID, body: SetWidgetFunctionsRequest, user: CurrentUser, db: DBSession) -> dict:
+async def set_widget_functions(
+    bot_id: uuid.UUID, body: SetWidgetFunctionsRequest, user: CurrentUser, db: DBSession
+) -> dict:
     """Replace the full set of assigned functions for a widget."""
     bot = await _owned_bot(bot_id, user.id, db)
     function_ids = body.function_ids
@@ -251,10 +266,12 @@ async def set_widget_functions(bot_id: uuid.UUID, body: SetWidgetFunctionsReques
 
 # ── Global Functions CRUD ─────────────────────────────────────────────────────
 
+
 @router.get("/api/manage/functions", response_model=dict)
 async def list_functions(user: CurrentUser, db: DBSession) -> dict:
     result = await db.execute(
-        select(ChatbotFunction).where(ChatbotFunction.user_id == user.id)
+        select(ChatbotFunction)
+        .where(ChatbotFunction.user_id == user.id)
         .order_by(ChatbotFunction.created_at.desc())
     )
     fns = result.scalars().all()
@@ -285,7 +302,9 @@ async def get_function(fn_id: uuid.UUID, user: CurrentUser, db: DBSession) -> di
 
 
 @router.put("/api/manage/functions/{fn_id}", response_model=dict)
-async def update_function(fn_id: uuid.UUID, body: UpdateFunctionRequest, user: CurrentUser, db: DBSession) -> dict:
+async def update_function(
+    fn_id: uuid.UUID, body: UpdateFunctionRequest, user: CurrentUser, db: DBSession
+) -> dict:
     fn = await _owned_fn(fn_id, user.id, db)
     for k, v in body.model_dump(exclude_unset=True).items():
         setattr(fn, k, v)

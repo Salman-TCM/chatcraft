@@ -1,6 +1,5 @@
 import pytest
 
-
 SUMMARY_URL = "/api/usage/summary"
 HISTORY_URL = "/api/usage/history"
 COST_URL = "/api/usage/cost"

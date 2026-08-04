@@ -1,0 +1,54 @@
+# Root .dockerignore — applies to the frontend build (context = repo root).
+# Keeps the build context tiny so BuildKit only invalidates caches when files
+# that actually matter change.
+
+# Version control
+.git
+.gitignore
+
+# Local dev / OS noise
+.DS_Store
+.vscode
+.idea
+*.swp
+
+# Node
+node_modules
+**/node_modules
+npm-debug.log*
+yarn-error.log
+.npm
+
+# Next.js
+frontend/.next
+frontend/out
+frontend/coverage
+
+# Python
+**/__pycache__
+**/*.pyc
+**/*.pyo
+**/venv
+**/.venv
+**/.pytest_cache
+**/.mypy_cache
+**/.ruff_cache
+
+# CI / infra artifacts
+.github
+.deploy
+scripts/deploy
+docker-compose*.yml
+Dockerfile
+**/Dockerfile
+.env
+.env.*
+!.env.example
+
+# Docs / meta — don't invalidate builds when README changes
+*.md
+LICENSE
+
+# Test outputs
+**/test-results
+**/playwright-report

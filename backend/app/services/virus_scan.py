@@ -5,9 +5,9 @@ Uses the clamd Unix socket or TCP interface.  When ClamAV is not configured
 (CLAMAV_HOST unset / socket absent) the scan is skipped and a warning is logged
 so local dev and CI environments are unaffected.
 """
+
 import asyncio
 import socket
-from typing import Literal
 
 from loguru import logger
 
@@ -49,7 +49,7 @@ async def scan_bytes(data: bytes) -> VirusScanResult:
             _scan(data, host=host, port=port, unix_socket=unix_socket),
             timeout=30,
         )
-    except asyncio.TimeoutError:
+    except TimeoutError:
         logger.warning("ClamAV scan timed out — allowing upload")
         return VirusScanResult(clean=True)
     except OSError as exc:

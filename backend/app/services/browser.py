@@ -5,6 +5,7 @@ Provides:
   fetch_content(url)   — visit a URL and return extracted text
   research(query, max_pages)  — search + visit top results, return combined summary
 """
+
 import re
 
 import httpx

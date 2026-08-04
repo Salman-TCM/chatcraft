@@ -1,5 +1,7 @@
 """Celery tasks for drip sequence step delivery."""
+
 import uuid
+from datetime import UTC
 
 from app.workers.celery_app import celery_app
 
@@ -10,7 +12,7 @@ def advance_enrollment(self, enrollment_id: str) -> None:
     import asyncio
 
     async def _advance() -> None:
-        from datetime import datetime, timezone
+        from datetime import datetime
 
         from sqlalchemy import select
 
@@ -33,7 +35,7 @@ def advance_enrollment(self, enrollment_id: str) -> None:
 
             if step_idx >= len(steps):
                 enrollment.status = "completed"
-                enrollment.completed_at = datetime.now(timezone.utc)
+                enrollment.completed_at = datetime.now(UTC)
                 await db.commit()
                 return
 
@@ -46,8 +48,13 @@ def advance_enrollment(self, enrollment_id: str) -> None:
                 result = await db.execute(
                     select(Conversation)
                     .join(
-                        __import__("app.models.chatbot_config", fromlist=["ChatbotConfig"]).ChatbotConfig,
-                        Conversation.chatbot_id == __import__("app.models.chatbot_config", fromlist=["ChatbotConfig"]).ChatbotConfig.id,
+                        __import__(
+                            "app.models.chatbot_config", fromlist=["ChatbotConfig"]
+                        ).ChatbotConfig,
+                        Conversation.chatbot_id
+                        == __import__(
+                            "app.models.chatbot_config", fromlist=["ChatbotConfig"]
+                        ).ChatbotConfig.id,
                     )
                     .where(
                         Conversation.contact_id == enrollment.contact_id,
@@ -59,19 +66,21 @@ def advance_enrollment(self, enrollment_id: str) -> None:
                 conv = result.scalar_one_or_none()
 
                 if conv:
-                    db.add(Message(
-                        conversation_id=conv.id,
-                        role=MessageRole.assistant,
-                        content=msg_text,
-                    ))
-                    conv.last_message_at = datetime.now(timezone.utc)
+                    db.add(
+                        Message(
+                            conversation_id=conv.id,
+                            role=MessageRole.assistant,
+                            content=msg_text,
+                        )
+                    )
+                    conv.last_message_at = datetime.now(UTC)
 
             # Advance to next step
             enrollment.current_step = step_idx + 1
 
             if enrollment.current_step >= len(steps):
                 enrollment.status = "completed"
-                enrollment.completed_at = datetime.now(timezone.utc)
+                enrollment.completed_at = datetime.now(UTC)
                 await db.commit()
                 return
 

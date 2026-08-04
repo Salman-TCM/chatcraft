@@ -57,12 +57,8 @@ class KnowledgeBaseDocument(TimestampMixin, Base):
     )
 
     # Populated after processing completes
-    chunk_count: Mapped[int] = mapped_column(
-        Integer, nullable=False, default=0, server_default="0"
-    )
-    token_count: Mapped[int] = mapped_column(
-        Integer, nullable=False, default=0, server_default="0"
-    )
+    chunk_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    token_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
 
     # Human-readable error message when status=error
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -98,14 +94,10 @@ class KnowledgeBaseChunk(TimestampMixin, Base):
 
     chunk_index: Mapped[int] = mapped_column(Integer, nullable=False)
     content: Mapped[str] = mapped_column(Text, nullable=False)
-    token_count: Mapped[int] = mapped_column(
-        Integer, nullable=False, default=0, server_default="0"
-    )
+    token_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
 
     # 1536-dim vector from text-embedding-3-small
-    embedding: Mapped[list[float] | None] = mapped_column(
-        Vector(EMBEDDING_DIM), nullable=True
-    )
+    embedding: Mapped[list[float] | None] = mapped_column(Vector(EMBEDDING_DIM), nullable=True)
 
     # Relationships
     document: Mapped["KnowledgeBaseDocument"] = relationship(

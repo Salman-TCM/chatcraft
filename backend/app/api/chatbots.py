@@ -25,6 +25,7 @@ def _assert_model_allowed(user: User, model: str | None) -> None:
             },
         )
 
+
 router = APIRouter(prefix="/api/chatbots", tags=["chatbots"])
 
 
@@ -135,7 +136,11 @@ async def upload_logo(
     if file.content_type not in ALLOWED:
         raise HTTPException(
             status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
-            detail={"success": False, "error": "Logo must be PNG, JPEG, WebP, or GIF", "code": "INVALID_MIME"},
+            detail={
+                "success": False,
+                "error": "Logo must be PNG, JPEG, WebP, or GIF",
+                "code": "INVALID_MIME",
+            },
         )
 
     data = await file.read()
@@ -149,7 +154,9 @@ async def upload_logo(
 
     ext = (file.filename or "logo").rsplit(".", 1)[-1].lower()
     filename = f"logo_{chatbot_id}.{ext}"
-    url = await storage_svc.upload_logo(data, filename, file.content_type or "image/png", str(chatbot_id))
+    url = await storage_svc.upload_logo(
+        data, filename, file.content_type or "image/png", str(chatbot_id)
+    )
 
     bot.logo_url = url
     await db.commit()
@@ -170,6 +177,8 @@ async def delete_chatbot(
 
 
 # ── Rich content template generator ─────────────────────────────────────────
+
+from datetime import UTC
 
 from pydantic import BaseModel as _BaseModel
 
@@ -196,10 +205,10 @@ async def generate_rich_template(
     api_keys = await get_all_keys(user.id, db)
 
     examples = {
-        "carousel": '''{"type":"carousel","items":[{"title":"Plan A","subtitle":"Basic features","image_url":"","buttons":[{"type":"url","label":"Sign up","value":"https://example.com"}]},{"title":"Plan B","subtitle":"Pro features","image_url":"","buttons":[{"type":"url","label":"Sign up","value":"https://example.com"}]}]}''',
-        "card": '''{"type":"card","title":"Product Name","subtitle":"Short description","image_url":"","buttons":[{"type":"url","label":"Learn more","value":"https://example.com"},{"type":"postback","label":"Add to cart","value":"add_to_cart"}]}''',
-        "buttons": '''{"type":"buttons","text":"What would you like to do?","buttons":[{"type":"postback","label":"Option A","value":"option_a"},{"type":"postback","label":"Option B","value":"option_b"}]}''',
-        "quick_replies": '''{"type":"quick_replies","text":"Choose an option:","replies":[{"label":"Yes","value":"yes"},{"label":"No","value":"no"},{"label":"Maybe","value":"maybe"}]}''',
+        "carousel": """{"type":"carousel","items":[{"title":"Plan A","subtitle":"Basic features","image_url":"","buttons":[{"type":"url","label":"Sign up","value":"https://example.com"}]},{"title":"Plan B","subtitle":"Pro features","image_url":"","buttons":[{"type":"url","label":"Sign up","value":"https://example.com"}]}]}""",
+        "card": """{"type":"card","title":"Product Name","subtitle":"Short description","image_url":"","buttons":[{"type":"url","label":"Learn more","value":"https://example.com"},{"type":"postback","label":"Add to cart","value":"add_to_cart"}]}""",
+        "buttons": """{"type":"buttons","text":"What would you like to do?","buttons":[{"type":"postback","label":"Option A","value":"option_a"},{"type":"postback","label":"Option B","value":"option_b"}]}""",
+        "quick_replies": """{"type":"quick_replies","text":"Choose an option:","replies":[{"label":"Yes","value":"yes"},{"label":"No","value":"no"},{"label":"Maybe","value":"maybe"}]}""",
     }
     example = examples.get(body.template_type, examples["carousel"])
 
@@ -248,6 +257,7 @@ Rules:
 
     # Validate JSON
     import json as _json
+
     try:
         parsed = _json.loads(raw)
     except Exception:
@@ -258,6 +268,7 @@ Rules:
 
 
 # ── Google Docs system prompt sync ──────────────────────────────────────────
+
 
 class _DocsSyncRequest(_BaseModel):
     doc_id: str | None = None  # None to unlink
@@ -279,10 +290,15 @@ async def set_docs_system_prompt(
     if body.doc_id:
         # Trigger immediate sync
         await _sync_doc_to_prompt(bot, db)
-    return {"success": True, "data": {
-        "doc_id": bot.docs_system_prompt_doc_id,
-        "synced_at": bot.docs_system_prompt_synced_at.isoformat() if bot.docs_system_prompt_synced_at else None,
-    }}
+    return {
+        "success": True,
+        "data": {
+            "doc_id": bot.docs_system_prompt_doc_id,
+            "synced_at": bot.docs_system_prompt_synced_at.isoformat()
+            if bot.docs_system_prompt_synced_at
+            else None,
+        },
+    }
 
 
 @router.post("/{chatbot_id}/docs-system-prompt/sync", response_model=dict)
@@ -296,19 +312,26 @@ async def sync_docs_system_prompt(
     if not bot.docs_system_prompt_doc_id:
         raise HTTPException(status_code=400, detail="No Google Doc linked for this chatbot")
     content = await _sync_doc_to_prompt(bot, db)
-    return {"success": True, "data": {
-        "synced_at": bot.docs_system_prompt_synced_at.isoformat() if bot.docs_system_prompt_synced_at else None,
-        "chars": len(content),
-    }}
+    return {
+        "success": True,
+        "data": {
+            "synced_at": bot.docs_system_prompt_synced_at.isoformat()
+            if bot.docs_system_prompt_synced_at
+            else None,
+            "chars": len(content),
+        },
+    }
 
 
 async def _sync_doc_to_prompt(bot, db) -> str:
     """Fetch Google Doc content and update the chatbot's system prompt."""
     import json as _json
-    from datetime import datetime, timezone
+    from datetime import datetime
+
     try:
         from google.oauth2.service_account import Credentials
         from googleapiclient.discovery import build
+
         from app.core.config import settings
 
         creds_json = getattr(settings, "google_service_account_json", None)
@@ -331,7 +354,7 @@ async def _sync_doc_to_prompt(bot, db) -> str:
 
         if content:
             bot.system_prompt = content
-            bot.docs_system_prompt_synced_at = datetime.now(timezone.utc)
+            bot.docs_system_prompt_synced_at = datetime.now(UTC)
             await db.commit()
         return content
     except Exception:
@@ -339,6 +362,7 @@ async def _sync_doc_to_prompt(bot, db) -> str:
 
 
 # ── helpers ──────────────────────────────────────────────────────────────────
+
 
 async def _get_owned_bot(
     chatbot_id: uuid.UUID, user_id: uuid.UUID, db: AsyncSession

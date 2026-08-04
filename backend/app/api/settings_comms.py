@@ -11,12 +11,12 @@ PUT    /api/settings/sms           — create or update SMS config
 DELETE /api/settings/sms           — remove SMS config
 POST   /api/settings/sms/test      — send a test SMS via saved config
 """
+
 import asyncio
 import smtplib
 import ssl
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
-from typing import Any
 
 import httpx
 from fastapi import APIRouter, HTTPException, status
@@ -57,6 +57,7 @@ async def _get_setting(user_id, type_: str, db) -> UserCommunicationSetting | No
 
 
 # ─── SMTP ─────────────────────────────────────────────────────────────────────
+
 
 class SmtpConfig(BaseModel):
     smtp_host: str
@@ -123,8 +124,15 @@ async def test_smtp(body: SmtpTestRequest, user: CurrentUser, db: DBSession) -> 
         msg["Subject"] = "ChatCraft SMTP Test"
         msg["From"] = f"{from_name} <{from_email}>" if from_name else from_email
         msg["To"] = body.to_email
-        msg.attach(MIMEText("This is a test email from your ChatCraft SMTP configuration.", "plain"))
-        msg.attach(MIMEText("<p>This is a test email from your <strong>ChatCraft</strong> SMTP configuration.</p>", "html"))
+        msg.attach(
+            MIMEText("This is a test email from your ChatCraft SMTP configuration.", "plain")
+        )
+        msg.attach(
+            MIMEText(
+                "<p>This is a test email from your <strong>ChatCraft</strong> SMTP configuration.</p>",
+                "html",
+            )
+        )
 
         context = ssl.create_default_context()
         if port == 465:
@@ -146,6 +154,7 @@ async def test_smtp(body: SmtpTestRequest, user: CurrentUser, db: DBSession) -> 
 
 
 # ─── SMS (Twilio) ──────────────────────────────────────────────────────────────
+
 
 class SmsConfig(BaseModel):
     account_sid: str

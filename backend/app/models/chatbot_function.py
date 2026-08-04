@@ -2,11 +2,12 @@
 ChatbotFunction — custom functions/tools that can be assigned to chatbots.
 These appear as callable tools during AI inference (function calling).
 """
+
 import uuid
 
 from sqlalchemy import Boolean, ForeignKey, String, Text
 from sqlalchemy.dialects.postgresql import JSONB, UUID
-from sqlalchemy.orm import Mapped, mapped_column, relationship
+from sqlalchemy.orm import Mapped, mapped_column
 
 from app.models.base import Base, TimestampMixin
 
@@ -25,7 +26,9 @@ class ChatbotFunction(TimestampMixin, Base):
     description: Mapped[str] = mapped_column(Text, nullable=False, default="")
 
     # JSON schema for function parameters (OpenAI function-calling format)
-    parameters_schema: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict, server_default="{}")
+    parameters_schema: Mapped[dict] = mapped_column(
+        JSONB, nullable=False, default=dict, server_default="{}"
+    )
 
     # Template for the output message sent to user after function executes
     output_message: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -49,6 +52,7 @@ class ChatbotFunction(TimestampMixin, Base):
 
 class WidgetFunctionAssignment(Base):
     """Many-to-many: which functions are assigned to which widgets."""
+
     __tablename__ = "widget_function_assignments"
 
     widget_id: Mapped[uuid.UUID] = mapped_column(

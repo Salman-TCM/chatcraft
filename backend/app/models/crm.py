@@ -72,7 +72,9 @@ class Tag(TimestampMixin, Base):
         index=True,
     )
     name: Mapped[str] = mapped_column(String(100), nullable=False)
-    color: Mapped[str] = mapped_column(String(7), nullable=False, default="#6366f1", server_default="#6366f1")
+    color: Mapped[str] = mapped_column(
+        String(7), nullable=False, default="#6366f1", server_default="#6366f1"
+    )
 
     contacts: Mapped[list["Contact"]] = relationship(
         "Contact", secondary="contact_tags", back_populates="tags"
@@ -81,6 +83,7 @@ class Tag(TimestampMixin, Base):
 
 class ContactTag(Base):
     """Junction table — no TimestampMixin, no surrogate PK."""
+
     __tablename__ = "contact_tags"
 
     contact_id: Mapped[uuid.UUID] = mapped_column(
@@ -132,10 +135,9 @@ class CustomField(TimestampMixin, Base):
 
 class ContactFieldValue(Base):
     """Stores the actual value of a custom field for a contact."""
+
     __tablename__ = "contact_field_values"
-    __table_args__ = (
-        UniqueConstraint("contact_id", "field_id", name="uq_contact_field"),
-    )
+    __table_args__ = (UniqueConstraint("contact_id", "field_id", name="uq_contact_field"),)
 
     id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
@@ -176,7 +178,9 @@ class Pipeline(TimestampMixin, Base):
     )
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
-    color: Mapped[str] = mapped_column(String(7), nullable=False, default="#6366f1", server_default="#6366f1")
+    color: Mapped[str] = mapped_column(
+        String(7), nullable=False, default="#6366f1", server_default="#6366f1"
+    )
     is_active: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=True, server_default="true"
     )
@@ -203,13 +207,13 @@ class PipelineStage(TimestampMixin, Base):
         index=True,
     )
     name: Mapped[str] = mapped_column(String(255), nullable=False)
-    color: Mapped[str] = mapped_column(String(7), nullable=False, default="#6366f1", server_default="#6366f1")
+    color: Mapped[str] = mapped_column(
+        String(7), nullable=False, default="#6366f1", server_default="#6366f1"
+    )
     order: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
 
     pipeline: Mapped["Pipeline"] = relationship("Pipeline", back_populates="stages")
-    deals: Mapped[list["PipelineDeal"]] = relationship(
-        "PipelineDeal", back_populates="stage"
-    )
+    deals: Mapped[list["PipelineDeal"]] = relationship("PipelineDeal", back_populates="stage")
 
 
 class PipelineDeal(TimestampMixin, Base):
@@ -239,4 +243,6 @@ class PipelineDeal(TimestampMixin, Base):
 
     pipeline: Mapped["Pipeline"] = relationship("Pipeline", back_populates="deals")
     stage: Mapped["PipelineStage"] = relationship("PipelineStage", back_populates="deals")
-    contact: Mapped["Contact"] = relationship("Contact", back_populates="pipeline_deals", lazy="selectin")
+    contact: Mapped["Contact"] = relationship(
+        "Contact", back_populates="pipeline_deals", lazy="selectin"
+    )

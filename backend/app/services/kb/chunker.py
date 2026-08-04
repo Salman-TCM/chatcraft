@@ -2,13 +2,14 @@
 Token-aware chunking using LangChain's RecursiveCharacterTextSplitter
 with tiktoken encoding. Produces 500-token chunks with 50-token overlap.
 """
+
 from dataclasses import dataclass
 
 import tiktoken
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 
-CHUNK_SIZE = 500       # tokens
-CHUNK_OVERLAP = 50     # tokens
+CHUNK_SIZE = 500  # tokens
+CHUNK_OVERLAP = 50  # tokens
 ENCODING = "cl100k_base"  # matches text-embedding-3-small
 
 

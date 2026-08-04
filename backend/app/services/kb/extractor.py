@@ -2,11 +2,11 @@
 Text extraction for each supported document type.
 All functions return raw text; cleaning is handled downstream.
 """
+
 import asyncio
 import io
 import ipaddress
 import socket
-import tempfile
 from urllib.parse import urlsplit
 
 import httpx
@@ -141,7 +141,9 @@ async def extract_url(url: str) -> str:
     return main.get_text(separator="\n")
 
 
-async def extract_text_for_document(doc_type: str, file_url: str | None, source_url: str | None, raw_content: str | None) -> str:
+async def extract_text_for_document(
+    doc_type: str, file_url: str | None, source_url: str | None, raw_content: str | None
+) -> str:
     """
     Dispatch to the right extractor based on document type.
     Returns raw extracted text.

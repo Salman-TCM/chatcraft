@@ -28,15 +28,11 @@ class Payment(TimestampMixin, Base):
     stripe_payment_intent_id: Mapped[str | None] = mapped_column(
         String(255), unique=True, nullable=True, index=True
     )
-    stripe_invoice_id: Mapped[str | None] = mapped_column(
-        String(255), nullable=True, index=True
-    )
+    stripe_invoice_id: Mapped[str | None] = mapped_column(String(255), nullable=True, index=True)
 
     # Amount in smallest currency unit (e.g. cents for USD)
     amount: Mapped[int] = mapped_column(Integer, nullable=False)
-    currency: Mapped[str] = mapped_column(
-        String(3), nullable=False, server_default="usd"
-    )
+    currency: Mapped[str] = mapped_column(String(3), nullable=False, server_default="usd")
 
     status: Mapped[PaymentStatus] = mapped_column(
         Enum(PaymentStatus, name="payment_status"),

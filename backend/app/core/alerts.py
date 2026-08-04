@@ -4,6 +4,7 @@ Post error alerts to a Slack incoming webhook.
 Configure SLACK_ALERT_WEBHOOK_URL in the environment to enable.
 If the URL is absent the helpers are silent no-ops.
 """
+
 from __future__ import annotations
 
 import traceback

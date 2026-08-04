@@ -4,11 +4,12 @@ Revision ID: 000000000019
 Revises: 000000000018
 Create Date: 2026-05-18
 """
-from alembic import op
+
 import sqlalchemy as sa
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 
-from app.models.base import set_updated_at_trigger, drop_updated_at_trigger
+from alembic import op
+from app.models.base import drop_updated_at_trigger, set_updated_at_trigger
 
 revision = "000000000019"
 down_revision = "000000000018"
@@ -19,10 +20,21 @@ depends_on = None
 def upgrade() -> None:
     op.create_table(
         "broadcast_campaigns",
-        sa.Column("id", UUID(as_uuid=True), primary_key=True, server_default=sa.text("gen_random_uuid()")),
-        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
-        sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
-        sa.Column("user_id", UUID(as_uuid=True), sa.ForeignKey("users.id", ondelete="CASCADE"), nullable=False),
+        sa.Column(
+            "id", UUID(as_uuid=True), primary_key=True, server_default=sa.text("gen_random_uuid()")
+        ),
+        sa.Column(
+            "created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False
+        ),
+        sa.Column(
+            "updated_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False
+        ),
+        sa.Column(
+            "user_id",
+            UUID(as_uuid=True),
+            sa.ForeignKey("users.id", ondelete="CASCADE"),
+            nullable=False,
+        ),
         sa.Column("name", sa.String(255), nullable=False),
         sa.Column("channel", sa.String(30), nullable=False),
         sa.Column("status", sa.String(20), nullable=False, server_default="draft"),
@@ -42,10 +54,21 @@ def upgrade() -> None:
 
     op.create_table(
         "social_accounts",
-        sa.Column("id", UUID(as_uuid=True), primary_key=True, server_default=sa.text("gen_random_uuid()")),
-        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
-        sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
-        sa.Column("user_id", UUID(as_uuid=True), sa.ForeignKey("users.id", ondelete="CASCADE"), nullable=False),
+        sa.Column(
+            "id", UUID(as_uuid=True), primary_key=True, server_default=sa.text("gen_random_uuid()")
+        ),
+        sa.Column(
+            "created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False
+        ),
+        sa.Column(
+            "updated_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False
+        ),
+        sa.Column(
+            "user_id",
+            UUID(as_uuid=True),
+            sa.ForeignKey("users.id", ondelete="CASCADE"),
+            nullable=False,
+        ),
         sa.Column("platform", sa.String(20), nullable=False),
         sa.Column("account_id", sa.String(255), nullable=False),
         sa.Column("access_token", sa.Text, nullable=False),
@@ -61,10 +84,21 @@ def upgrade() -> None:
 
     op.create_table(
         "social_posts",
-        sa.Column("id", UUID(as_uuid=True), primary_key=True, server_default=sa.text("gen_random_uuid()")),
-        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
-        sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
-        sa.Column("user_id", UUID(as_uuid=True), sa.ForeignKey("users.id", ondelete="CASCADE"), nullable=False),
+        sa.Column(
+            "id", UUID(as_uuid=True), primary_key=True, server_default=sa.text("gen_random_uuid()")
+        ),
+        sa.Column(
+            "created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False
+        ),
+        sa.Column(
+            "updated_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False
+        ),
+        sa.Column(
+            "user_id",
+            UUID(as_uuid=True),
+            sa.ForeignKey("users.id", ondelete="CASCADE"),
+            nullable=False,
+        ),
         sa.Column("account_ids", JSONB, nullable=False, server_default="[]"),
         sa.Column("content", sa.Text, nullable=False),
         sa.Column("image_url", sa.String(1000), nullable=True),
@@ -80,10 +114,21 @@ def upgrade() -> None:
 
     op.create_table(
         "comment_automations",
-        sa.Column("id", UUID(as_uuid=True), primary_key=True, server_default=sa.text("gen_random_uuid()")),
-        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
-        sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
-        sa.Column("user_id", UUID(as_uuid=True), sa.ForeignKey("users.id", ondelete="CASCADE"), nullable=False),
+        sa.Column(
+            "id", UUID(as_uuid=True), primary_key=True, server_default=sa.text("gen_random_uuid()")
+        ),
+        sa.Column(
+            "created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False
+        ),
+        sa.Column(
+            "updated_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False
+        ),
+        sa.Column(
+            "user_id",
+            UUID(as_uuid=True),
+            sa.ForeignKey("users.id", ondelete="CASCADE"),
+            nullable=False,
+        ),
         sa.Column("platform", sa.String(20), nullable=False),
         sa.Column("page_id", sa.String(255), nullable=False),
         sa.Column("page_name", sa.String(255), nullable=True),

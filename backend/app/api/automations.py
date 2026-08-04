@@ -26,6 +26,7 @@ Keywords:
   PATCH  /api/v1/keywords/{id}
   DELETE /api/v1/keywords/{id}
 """
+
 import uuid
 from typing import Annotated
 
@@ -35,18 +36,29 @@ from sqlalchemy import func, select
 from app.core.dependencies import CurrentUser, DBSession, require_feature
 from app.core.features import AUTOMATIONS
 from app.models.automation import (
-    Automation, AutomationRun, Keyword, Sequence, SequenceEnrollment,
+    Automation,
+    AutomationRun,
+    Keyword,
+    Sequence,
+    SequenceEnrollment,
 )
 from app.schemas.automations import (
-    AutomationCreate, AutomationUpdate,
-    KeywordCreate, KeywordUpdate,
-    SequenceCreate, SequenceEnrollRequest, SequenceUpdate,
+    AutomationCreate,
+    AutomationUpdate,
+    KeywordCreate,
+    KeywordUpdate,
+    SequenceCreate,
+    SequenceEnrollRequest,
+    SequenceUpdate,
 )
 
-router = APIRouter(prefix="/api/v1", tags=["automations"], dependencies=[Depends(require_feature(AUTOMATIONS))])
+router = APIRouter(
+    prefix="/api/v1", tags=["automations"], dependencies=[Depends(require_feature(AUTOMATIONS))]
+)
 
 
 # ── Helpers ────────────────────────────────────────────────────────────────────
+
 
 def _auto_dict(a: Automation) -> dict:
     return {
@@ -99,21 +111,28 @@ def _kw_dict(k: Keyword) -> dict:
 # AUTOMATIONS
 # ══════════════════════════════════════════════════════════════════════════════
 
+
 @router.get("/automations", response_model=dict)
 async def list_automations(
-    user: CurrentUser, db: DBSession,
+    user: CurrentUser,
+    db: DBSession,
     page: Annotated[int, Query(ge=1)] = 1,
     limit: Annotated[int, Query(ge=1, le=100)] = 30,
 ) -> dict:
     offset = (page - 1) * limit
     result = await db.execute(
-        select(Automation).where(Automation.user_id == user.id)
-        .order_by(Automation.created_at.desc()).offset(offset).limit(limit)
+        select(Automation)
+        .where(Automation.user_id == user.id)
+        .order_by(Automation.created_at.desc())
+        .offset(offset)
+        .limit(limit)
     )
     automations = result.scalars().all()
-    total = (await db.execute(
-        select(func.count()).select_from(Automation).where(Automation.user_id == user.id)
-    )).scalar_one()
+    total = (
+        await db.execute(
+            select(func.count()).select_from(Automation).where(Automation.user_id == user.id)
+        )
+    ).scalar_one()
     return {"success": True, "data": [_auto_dict(a) for a in automations], "total": total}
 
 
@@ -144,7 +163,9 @@ async def get_automation(auto_id: uuid.UUID, user: CurrentUser, db: DBSession) -
 
 
 @router.patch("/automations/{auto_id}", response_model=dict)
-async def update_automation(auto_id: uuid.UUID, body: AutomationUpdate, user: CurrentUser, db: DBSession) -> dict:
+async def update_automation(
+    auto_id: uuid.UUID, body: AutomationUpdate, user: CurrentUser, db: DBSession
+) -> dict:
     a = await db.get(Automation, auto_id)
     if not a or a.user_id != user.id:
         raise HTTPException(status_code=404, detail="Automation not found")
@@ -215,6 +236,7 @@ async def list_automation_runs(
 # SEQUENCES
 # ══════════════════════════════════════════════════════════════════════════════
 
+
 @router.get("/sequences", response_model=dict)
 async def list_sequences(user: CurrentUser, db: DBSession) -> dict:
     result = await db.execute(
@@ -250,7 +272,9 @@ async def get_sequence(seq_id: uuid.UUID, user: CurrentUser, db: DBSession) -> d
 
 
 @router.patch("/sequences/{seq_id}", response_model=dict)
-async def update_sequence(seq_id: uuid.UUID, body: SequenceUpdate, user: CurrentUser, db: DBSession) -> dict:
+async def update_sequence(
+    seq_id: uuid.UUID, body: SequenceUpdate, user: CurrentUser, db: DBSession
+) -> dict:
     s = await db.get(Sequence, seq_id)
     if not s or s.user_id != user.id:
         raise HTTPException(status_code=404, detail="Sequence not found")
@@ -272,7 +296,9 @@ async def delete_sequence(seq_id: uuid.UUID, user: CurrentUser, db: DBSession) -
 
 
 @router.post("/sequences/{seq_id}/enroll", response_model=dict, status_code=status.HTTP_201_CREATED)
-async def enroll_contact(seq_id: uuid.UUID, body: SequenceEnrollRequest, user: CurrentUser, db: DBSession) -> dict:
+async def enroll_contact(
+    seq_id: uuid.UUID, body: SequenceEnrollRequest, user: CurrentUser, db: DBSession
+) -> dict:
     s = await db.get(Sequence, seq_id)
     if not s or s.user_id != user.id:
         raise HTTPException(status_code=404, detail="Sequence not found")
@@ -305,6 +331,7 @@ async def enroll_contact(seq_id: uuid.UUID, body: SequenceEnrollRequest, user: C
         first_step = s.steps[0]
         delay_s = _step_delay(first_step)
         from app.workers.sequence_worker import advance_enrollment
+
         advance_enrollment.apply_async(args=[str(enrollment.id)], countdown=delay_s)
 
     return {
@@ -358,7 +385,9 @@ async def list_enrollments(seq_id: uuid.UUID, user: CurrentUser, db: DBSession) 
 
 
 @router.delete("/sequences/{seq_id}/enrollments/{enrollment_id}", response_model=dict)
-async def unenroll(seq_id: uuid.UUID, enrollment_id: uuid.UUID, user: CurrentUser, db: DBSession) -> dict:
+async def unenroll(
+    seq_id: uuid.UUID, enrollment_id: uuid.UUID, user: CurrentUser, db: DBSession
+) -> dict:
     s = await db.get(Sequence, seq_id)
     if not s or s.user_id != user.id:
         raise HTTPException(status_code=404, detail="Sequence not found")
@@ -380,12 +409,18 @@ def _step_delay(step: dict) -> int:
 # KEYWORDS
 # ══════════════════════════════════════════════════════════════════════════════
 
+
 @router.get("/keywords", response_model=dict)
 async def list_keywords(
-    user: CurrentUser, db: DBSession,
+    user: CurrentUser,
+    db: DBSession,
     chatbot_id: uuid.UUID | None = None,
 ) -> dict:
-    stmt = select(Keyword).where(Keyword.user_id == user.id).order_by(Keyword.priority.desc(), Keyword.created_at)
+    stmt = (
+        select(Keyword)
+        .where(Keyword.user_id == user.id)
+        .order_by(Keyword.priority.desc(), Keyword.created_at)
+    )
     if chatbot_id:
         stmt = stmt.where(Keyword.chatbot_id == chatbot_id)
     result = await db.execute(stmt)
@@ -420,7 +455,9 @@ async def get_keyword(kw_id: uuid.UUID, user: CurrentUser, db: DBSession) -> dic
 
 
 @router.patch("/keywords/{kw_id}", response_model=dict)
-async def update_keyword(kw_id: uuid.UUID, body: KeywordUpdate, user: CurrentUser, db: DBSession) -> dict:
+async def update_keyword(
+    kw_id: uuid.UUID, body: KeywordUpdate, user: CurrentUser, db: DBSession
+) -> dict:
     k = await db.get(Keyword, kw_id)
     if not k or k.user_id != user.id:
         raise HTTPException(status_code=404, detail="Keyword not found")

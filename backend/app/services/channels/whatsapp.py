@@ -12,6 +12,7 @@ Rich payload shapes supported in send_rich():
                   "sections": [{"title":"..","rows":[{"id":"..","title":"..","description":".."}]}] }
   template   — { "type": "template", "name": "...", "language": "en_US", "components": [...] }
 """
+
 import httpx
 
 from app.services.channels.base import ChannelSender

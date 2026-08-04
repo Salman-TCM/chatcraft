@@ -2,15 +2,15 @@
 OpenAI text-embedding-3-small embedding generation with batching.
 Handles rate limits via exponential back-off on retry.
 """
+
 import asyncio
-from typing import AsyncIterator
 
 from openai import AsyncOpenAI
 
 from app.core.config import settings
 
 EMBEDDING_MODEL = "text-embedding-3-small"
-BATCH_SIZE = 100          # OpenAI allows up to 2048 inputs per call; 100 is safe
+BATCH_SIZE = 100  # OpenAI allows up to 2048 inputs per call; 100 is safe
 MAX_TOKENS_PER_BATCH = 300_000  # stay well under 1M TPM limit
 
 _client: AsyncOpenAI | None = None
@@ -47,9 +47,9 @@ async def embed_texts(texts: list[str]) -> list[list[float]]:
                 vectors = await embed_batch(batch)
                 all_vectors.extend(vectors)
                 break
-            except Exception as exc:
+            except Exception:
                 if attempt == 2:
                     raise
-                wait = 2 ** attempt * 5  # 5s, 10s, then raise
+                wait = 2**attempt * 5  # 5s, 10s, then raise
                 await asyncio.sleep(wait)
     return all_vectors

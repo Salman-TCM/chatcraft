@@ -12,6 +12,12 @@
 #               Tunnel, so it doesn't need the blue/green machinery).
 set -euo pipefail
 
+# Ensure BuildKit is on — the Dockerfiles use `# syntax=` and cache mounts
+# (--mount=type=cache) which require it. Default in Docker 23+ but explicit
+# guards against older engines and any env that unsets it.
+export DOCKER_BUILDKIT=1
+export COMPOSE_DOCKER_CLI_BUILD=1
+
 SERVICE="${1:?Usage: deploy.sh <backend|frontend> <production|staging> <git_sha>}"
 TARGET_ENV="${2:?Usage: deploy.sh <backend|frontend> <production|staging> <git_sha>}"
 GIT_SHA="${3:?Usage: deploy.sh <backend|frontend> <production|staging> <git_sha>}"

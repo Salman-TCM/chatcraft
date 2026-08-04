@@ -12,6 +12,7 @@ Rich payload shapes for send_rich():
   reply_keyboard  — { "type": "reply_keyboard", "text": "...",
                        "keyboard": [["A","B"],["C"]] }
 """
+
 import httpx
 
 from app.services.channels.base import ChannelSender
@@ -112,8 +113,7 @@ class TelegramSender(ChannelSender):
             elif msg_type == "reply_keyboard":
                 rows = payload.get("keyboard", [])
                 formatted_rows = [
-                    [btn if isinstance(btn, dict) else {"text": btn} for btn in row]
-                    for row in rows
+                    [btn if isinstance(btn, dict) else {"text": btn} for btn in row] for row in rows
                 ]
                 r = await client.post(
                     self._api("sendMessage"),

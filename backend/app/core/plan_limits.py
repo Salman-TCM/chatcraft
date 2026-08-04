@@ -7,6 +7,7 @@ Message caps (free/trial/premium) live in Settings (app/core/config.py)
 since they're operationally tunable. Chatbot count and model access are
 structural product limits and live here instead.
 """
+
 from app.core.features import ALL_FEATURE_KEYS
 from app.models.user import UserRole
 
@@ -18,11 +19,24 @@ _CHATBOT_CAPS: dict[UserRole, int] = {
 # Feature areas available on Free — the baseline CRM/automation toolset
 # marketed as included on the landing page's core "Everything you need"
 # section. Anything not listed here is Pro+ (see below).
-FREE_TIER_FEATURES: frozenset[str] = frozenset({
-    "chatbots", "inbox", "contacts", "flows", "automations", "campaigns",
-    "social", "forms", "landing_pages", "wallet", "keywords", "sequences",
-    "pipelines", "stores",
-})
+FREE_TIER_FEATURES: frozenset[str] = frozenset(
+    {
+        "chatbots",
+        "inbox",
+        "contacts",
+        "flows",
+        "automations",
+        "campaigns",
+        "social",
+        "forms",
+        "landing_pages",
+        "wallet",
+        "keywords",
+        "sequences",
+        "pipelines",
+        "stores",
+    }
+)
 
 # Feature areas exclusive to Enterprise (the "creator" role), matching the
 # pricing page's "Custom branding & white-label" Enterprise-only bullet.
@@ -35,13 +49,13 @@ ENTERPRISE_ONLY_FEATURES: frozenset[str] = frozenset({"white_label"})
 # Every other role (trial, premium, creator, admin, superadmin) gets every
 # model in app.services.llm.costs.supported_models().
 FREE_TIER_MODELS_BY_PROVIDER: dict[str, str] = {
-    "anthropic":  "claude-haiku-4-5",
-    "openai":     "gpt-4o-mini",
-    "google":     "gemini-2.5-flash",
-    "groq":       "llama-3.1-8b-instant",
-    "deepseek":   "deepseek-v4-flash",
+    "anthropic": "claude-haiku-4-5",
+    "openai": "gpt-4o-mini",
+    "google": "gemini-2.5-flash",
+    "groq": "llama-3.1-8b-instant",
+    "deepseek": "deepseek-v4-flash",
     "perplexity": "sonar",
-    "xai":        "grok-3-mini",
+    "xai": "grok-3-mini",
 }
 FREE_TIER_MODELS: frozenset[str] = frozenset(FREE_TIER_MODELS_BY_PROVIDER.values())
 

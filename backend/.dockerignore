@@ -20,3 +20,9 @@ tests/
 README.md
 Dockerfile
 .dockerignore
+.vscode/
+.idea/
+.DS_Store
+*.swp
+test-results/
+railway.toml

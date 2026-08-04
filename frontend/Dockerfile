@@ -1,6 +1,10 @@
+# syntax=docker/dockerfile:1.7
 # =============================================================================
 # ChatCraft AI — Next.js 14 Frontend
 # Multi-stage build: deps → builder → final standalone image
+#
+# BuildKit is required (default in Docker 23+). Enable in older Docker with:
+#   DOCKER_BUILDKIT=1 docker build ...
 # =============================================================================
 
 # -----------------------------------------------------------------------------
@@ -13,13 +17,18 @@ WORKDIR /app
 # Install libc compat for Alpine (required by some native modules)
 RUN apk add --no-cache libc6-compat
 
-# Copy workspace manifests
-COPY package.json ./
+# Copy workspace manifests AND lockfile — the lockfile is what `npm ci` uses
+# to install a byte-identical tree. Without it, npm falls back to `install`
+# semantics and the cache invalidates on every deploy even when nothing changed.
+COPY package.json package-lock.json ./
 COPY frontend/package.json ./frontend/
 COPY shared/package.json ./shared/
 
-# Install all workspace deps
-RUN npm install --workspaces
+# `npm ci` is deterministic (lockfile-strict, no writes to lockfile) and
+# considerably faster than `npm install` for cold caches. The BuildKit cache
+# mount persists ~/.npm across builds so unchanged deps re-hydrate in seconds.
+RUN --mount=type=cache,target=/root/.npm \
+    npm ci
 
 
 # -----------------------------------------------------------------------------
@@ -60,7 +69,11 @@ ENV NEXT_TELEMETRY_DISABLED=1
 
 WORKDIR /app/frontend
 
-RUN npm run build
+# Persist Next.js's incremental build cache across deploys — same idea as the
+# npm cache above. First deploy pays full build cost, subsequent code-only
+# changes reuse compiled/typechecked chunks.
+RUN --mount=type=cache,target=/app/frontend/.next/cache \
+    npm run build
 
 
 # -----------------------------------------------------------------------------

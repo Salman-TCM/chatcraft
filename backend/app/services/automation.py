@@ -14,14 +14,14 @@ Trigger config matching (all optional — empty config matches any):
   tag_added      → {tag: "VIP"}           — only fire for this tag
   field_updated  → {field_key: "email"}   — only fire for this field
 """
+
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.automation import Automation, AutomationRun
-
 
 TRIGGER_TYPES = {
     "new_contact",
@@ -76,17 +76,19 @@ async def dispatch(
             try:
                 await _execute_action(auto, context, db)
                 auto.execution_count = (auto.execution_count or 0) + 1
-                auto.last_executed_at = datetime.now(timezone.utc)
+                auto.last_executed_at = datetime.now(UTC)
             except Exception as exc:
                 run_status = "failed"
                 run_error = str(exc)
-            db.add(AutomationRun(
-                automation_id=auto.id,
-                trigger_type=auto.trigger_type,
-                action_type=auto.action_type,
-                status=run_status,
-                error=run_error,
-            ))
+            db.add(
+                AutomationRun(
+                    automation_id=auto.id,
+                    trigger_type=auto.trigger_type,
+                    action_type=auto.action_type,
+                    status=run_status,
+                    error=run_error,
+                )
+            )
 
     await db.commit()
 
@@ -110,12 +112,16 @@ async def _execute_action(auto: Automation, context: dict, db: AsyncSession) -> 
             if flow_id_str:
                 from app.models.flow import Flow
                 from app.services.flow.executor import start_run
+
                 flow = await db.get(Flow, uuid.UUID(flow_id_str))
                 if flow and flow.is_active:
                     await start_run(
-                        flow, db,
+                        flow,
+                        db,
                         contact_id=uuid.UUID(str(contact_id)) if contact_id else None,
-                        conversation_id=uuid.UUID(str(conversation_id)) if conversation_id else None,
+                        conversation_id=uuid.UUID(str(conversation_id))
+                        if conversation_id
+                        else None,
                         trigger_data=context,
                     )
 
@@ -124,19 +130,23 @@ async def _execute_action(auto: Automation, context: dict, db: AsyncSession) -> 
             if text and conversation_id:
                 from app.models.conversation import Conversation
                 from app.models.message import Message, MessageRole
+
                 conv = await db.get(Conversation, uuid.UUID(str(conversation_id)))
                 if conv:
-                    db.add(Message(
-                        conversation_id=conv.id,
-                        role=MessageRole.assistant,
-                        content=text,
-                    ))
-                    conv.last_message_at = datetime.now(timezone.utc)
+                    db.add(
+                        Message(
+                            conversation_id=conv.id,
+                            role=MessageRole.assistant,
+                            content=text,
+                        )
+                    )
+                    conv.last_message_at = datetime.now(UTC)
 
         case "add_tag":
             tag_name = cfg.get("tag", "")
             if tag_name and contact_id:
-                from app.models.crm import Tag, ContactTag
+                from app.models.crm import ContactTag, Tag
+
                 r = await db.execute(
                     select(Tag).where(Tag.name == tag_name, Tag.user_id == auto.user_id)
                 )
@@ -149,15 +159,14 @@ async def _execute_action(auto: Automation, context: dict, db: AsyncSession) -> 
                         )
                     )
                     if not existing.scalar_one_or_none():
-                        db.add(ContactTag(
-                            contact_id=uuid.UUID(str(contact_id)), tag_id=tag.id
-                        ))
+                        db.add(ContactTag(contact_id=uuid.UUID(str(contact_id)), tag_id=tag.id))
 
         case "set_field":
             field_key = cfg.get("field_key", "")
             value = cfg.get("value", "")
             if field_key and contact_id:
-                from app.models.crm import CustomField, ContactFieldValue
+                from app.models.crm import ContactFieldValue, CustomField
+
                 r = await db.execute(
                     select(CustomField).where(
                         CustomField.field_key == field_key,
@@ -176,16 +185,19 @@ async def _execute_action(auto: Automation, context: dict, db: AsyncSession) -> 
                     if fv:
                         fv.value = value
                     else:
-                        db.add(ContactFieldValue(
-                            contact_id=uuid.UUID(str(contact_id)),
-                            field_id=field.id,
-                            value=value,
-                        ))
+                        db.add(
+                            ContactFieldValue(
+                                contact_id=uuid.UUID(str(contact_id)),
+                                field_id=field.id,
+                                value=value,
+                            )
+                        )
 
         case "send_webhook":
             url = cfg.get("url", "")
             if url:
                 import httpx
+
                 payload = {"trigger_type": auto.trigger_type, "context": context}
                 try:
                     async with httpx.AsyncClient(timeout=10) as client:

@@ -1,4 +1,3 @@
-from typing import List
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -19,7 +18,7 @@ class Settings(BaseSettings):
     database_url: str = "postgresql+asyncpg://postgres:postgres@localhost:5432/chatcraft"
     redis_url: str = "redis://localhost:6379/0"
 
-    cors_origins: List[str] = ["http://localhost:3000"]
+    cors_origins: list[str] = ["http://localhost:3000"]
 
     google_oauth_client_id: str = ""
     google_oauth_client_secret: str = ""
@@ -108,9 +107,9 @@ class Settings(BaseSettings):
     vapid_email: str = "mailto:admin@chatcraft.ai"
 
     # ClamAV virus scanning (optional — upload proceeds if not configured)
-    clamav_host: str = ""        # e.g. "clamav" (Docker service name)
+    clamav_host: str = ""  # e.g. "clamav" (Docker service name)
     clamav_port: int = 3310
-    clamav_socket: str = ""      # Unix socket path (overrides host when set)
+    clamav_socket: str = ""  # Unix socket path (overrides host when set)
 
     jwt_algorithm: str = "HS256"
     access_token_expire_minutes: int = 15

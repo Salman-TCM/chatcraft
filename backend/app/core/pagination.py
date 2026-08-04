@@ -1,4 +1,5 @@
 """Shared pagination helpers."""
+
 from __future__ import annotations
 
 from typing import Annotated
@@ -8,9 +9,8 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql import Select
 
-
 # Reusable query-param types
-PageParam  = Annotated[int, Query(ge=1, description="Page number (1-based)")]
+PageParam = Annotated[int, Query(ge=1, description="Page number (1-based)")]
 LimitParam = Annotated[int, Query(ge=1, le=200, description="Items per page")]
 
 

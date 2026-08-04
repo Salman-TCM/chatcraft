@@ -6,12 +6,13 @@ POST /api/push/subscribe          — store push subscription for current user
 POST /api/push/send               — send push notification to current user (test)
 DELETE /api/push/subscribe        — remove push subscription
 """
+
 import json
 
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, HTTPException
 
 from app.core.config import settings
-from app.core.dependencies import CurrentUser, DBSession, RedisClient
+from app.core.dependencies import CurrentUser, RedisClient
 from app.schemas.push import PushSendRequest, PushSubscribeRequest
 
 router = APIRouter(prefix="/api/push", tags=["push"])
@@ -55,7 +56,8 @@ async def send_push(body: PushSendRequest, user: CurrentUser, redis: RedisClient
     payload = json.dumps({"title": body.title, "body": body.message, "url": body.url})
 
     try:
-        from pywebpush import webpush, WebPushException
+        from pywebpush import webpush
+
         vapid_private = getattr(settings, "vapid_private_key", None)
         vapid_email = getattr(settings, "vapid_email", "mailto:admin@chatcraft.ai")
         if not vapid_private:

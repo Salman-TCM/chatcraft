@@ -1,5 +1,3 @@
-import pytest
-
 from app.services.llm.sanitizer import MAX_USER_MESSAGE_CHARS, sanitize
 
 

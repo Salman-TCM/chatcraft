@@ -4,14 +4,13 @@ Stripe billing unit tests.
 Covers pure-Python helpers — status-to-role mapping, state mapping —
 without making real Stripe API calls.
 """
-import pytest
 
 from app.api.billing import _stripe_status_to_role, _stripe_status_to_state
 from app.models.subscription import SubscriptionState
 from app.models.user import UserRole
 
-
 # ── _stripe_status_to_role ────────────────────────────────────────────────────
+
 
 class TestStripeStatusToRole:
     def test_active_returns_premium(self):
@@ -44,6 +43,7 @@ class TestStripeStatusToRole:
 
 # ── _stripe_status_to_state ───────────────────────────────────────────────────
 
+
 class TestStripeStatusToState:
     def test_active_maps_correctly(self):
         assert _stripe_status_to_state("active") == SubscriptionState.active
@@ -72,7 +72,15 @@ class TestStripeStatusToState:
 
     def test_all_known_statuses_have_mappings(self):
         """Ensure no known Stripe status falls through to the default."""
-        known = ["active", "trialing", "past_due", "canceled", "unpaid", "incomplete", "incomplete_expired"]
+        known = [
+            "active",
+            "trialing",
+            "past_due",
+            "canceled",
+            "unpaid",
+            "incomplete",
+            "incomplete_expired",
+        ]
         for s in known:
             result = _stripe_status_to_state(s)
             assert result != SubscriptionState.active or s == "active", (

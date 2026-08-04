@@ -1,5 +1,5 @@
+from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
-from typing import AsyncGenerator
 
 from fastapi import FastAPI
 from fastapi.exceptions import RequestValidationError
@@ -9,53 +9,56 @@ from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 from slowapi.middleware import SlowAPIMiddleware
 
+from app.api.a2a import router as a2a_router
+from app.api.admin import router as admin_router
+from app.api.agents import public_router as agents_public_router
+from app.api.agents import router as agents_router
+from app.api.analytics import router as analytics_router
 from app.api.auth import router as auth_router
+from app.api.automations import router as automations_router
 from app.api.billing import router as billing_router
+from app.api.broadcast import router as broadcast_router
+from app.api.browser import router as browser_router
 from app.api.chat import router as chat_router
 from app.api.chatbots import router as chatbots_router
-from app.api.health import router as health_router
-from app.api.kb import router as kb_router
-from app.api.voice import router as voice_router
-from app.api.widget import router as widget_router
-from app.api.usage import router as usage_router
-from app.api.analytics import router as analytics_router
-from app.api.gdpr import router as gdpr_router
-from app.api.crm import router as crm_router
-from app.api.admin import router as admin_router
-from app.api.inbox import router as inbox_router
-from app.api.webhooks import router as webhooks_router
-from app.api.integrations import router as integrations_router
-from app.api.flows import router as flows_router
-from app.api.automations import router as automations_router
-from app.api.forms import router as forms_router, public_router as forms_public_router
-from app.api.landing_pages import router as landing_pages_router
 from app.api.commerce import router as commerce_router
-from app.api.wallet import router as wallet_router, wallet_mgmt_router
-from app.api.broadcast import router as broadcast_router
-from app.api.voice_lab import router as voice_lab_router
-from app.api.browser import router as browser_router
-from app.api.mcp_servers import router as mcp_servers_router
-from app.api.a2a import router as a2a_router
-from app.api.realtime_proxy import router as realtime_router
-from app.api.tokens import router as tokens_router
-from app.api.manage import router as manage_router
-from app.api.white_label import router as white_label_router
-from app.api.push import router as push_router
-from app.api.model_keys import router as model_keys_router
-from app.api.search_keys import router as search_keys_router
-from app.api.agents import router as agents_router, public_router as agents_public_router
-from app.api.voice_calls import router as voice_calls_router
-from app.api.settings_comms import router as settings_comms_router
+from app.api.crm import router as crm_router
+from app.api.flows import router as flows_router
+from app.api.forms import public_router as forms_public_router
+from app.api.forms import router as forms_router
+from app.api.gdpr import router as gdpr_router
 from app.api.google_sheets import router as google_sheets_router
+from app.api.health import router as health_router
+from app.api.inbox import router as inbox_router
+from app.api.integrations import router as integrations_router
+from app.api.kb import router as kb_router
+from app.api.landing_pages import router as landing_pages_router
+from app.api.manage import router as manage_router
+from app.api.mcp_servers import router as mcp_servers_router
+from app.api.model_keys import router as model_keys_router
 from app.api.models import router as models_router
-from app.core.error_handlers import validation_exception_handler
-from app.core.security_headers import SecurityHeadersMiddleware
-from app.core.ip_abuse import IPAbuseMiddleware
+from app.api.push import router as push_router
+from app.api.realtime_proxy import router as realtime_router
+from app.api.search_keys import router as search_keys_router
+from app.api.settings_comms import router as settings_comms_router
+from app.api.tokens import router as tokens_router
+from app.api.usage import router as usage_router
+from app.api.voice import router as voice_router
+from app.api.voice_calls import router as voice_calls_router
+from app.api.voice_lab import router as voice_lab_router
+from app.api.wallet import router as wallet_router
+from app.api.wallet import wallet_mgmt_router
+from app.api.webhooks import router as webhooks_router
+from app.api.white_label import router as white_label_router
+from app.api.widget import router as widget_router
 from app.core.config import settings
+from app.core.error_handlers import validation_exception_handler
+from app.core.ip_abuse import IPAbuseMiddleware
 from app.core.logging import setup_logging
 from app.core.rate_limit import limiter
 from app.core.request_id import RequestIDMiddleware
 from app.core.request_logging import RequestLoggingMiddleware
+from app.core.security_headers import SecurityHeadersMiddleware
 from app.core.sentry import init_sentry
 
 setup_logging()
@@ -65,6 +68,7 @@ init_sentry()
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     from app.db.redis import get_async_redis
+
     app.state.redis = get_async_redis()
     yield
     await app.state.redis.aclose()
@@ -152,6 +156,4 @@ app.include_router(models_router)
 @app.get("/", tags=["health"])
 async def root() -> JSONResponse:
     """Root endpoint."""
-    return JSONResponse(
-        {"success": True, "data": {"name": "ChatCraft AI API", "version": "0.1.0"}}
-    )
+    return JSONResponse({"success": True, "data": {"name": "ChatCraft AI API", "version": "0.1.0"}})

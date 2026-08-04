@@ -4,8 +4,8 @@ Keyword Matching Engine.
 Called by the channel processor before the LLM on every incoming message.
 Returns the first matching active Keyword rule (highest priority first).
 """
+
 import uuid
-from typing import Optional
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -18,7 +18,7 @@ async def match(
     user_id: uuid.UUID,
     chatbot_id: uuid.UUID,
     db: AsyncSession,
-) -> Optional[Keyword]:
+) -> Keyword | None:
     """Return the first active keyword rule that matches `text`, or None."""
     result = await db.execute(
         select(Keyword)
@@ -34,7 +34,7 @@ async def match(
 
     normalized = text.strip().lower()
     for rule in rules:
-        for kw in (rule.keywords or []):
+        for kw in rule.keywords or []:
             kw_lower = kw.strip().lower()
             match rule.match_type:
                 case "exact":

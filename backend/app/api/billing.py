@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from fastapi import APIRouter, HTTPException, Request, status
 from loguru import logger
@@ -9,7 +9,7 @@ from app.core.dependencies import CurrentUser, DBSession
 from app.core.stripe import stripe
 from app.models.payment import Payment, PaymentStatus
 from app.models.subscription import Subscription, SubscriptionPlan, SubscriptionState
-from app.models.user import User, UserRole, SubscriptionStatus
+from app.models.user import SubscriptionStatus, User, UserRole
 from app.schemas.billing import (
     CheckoutRequest,
     CheckoutResponse,
@@ -25,6 +25,7 @@ router = APIRouter(prefix="/api/billing", tags=["billing"])
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 async def _get_or_create_stripe_customer(user, db: DBSession) -> str:
     """Return the user's Stripe customer ID, creating one if needed."""
@@ -69,6 +70,7 @@ async def _find_user_by_customer(customer_id: str, db: DBSession) -> User | None
 # Checkout
 # ---------------------------------------------------------------------------
 
+
 @router.post("/checkout", response_model=CheckoutResponse)
 async def create_checkout_session(
     body: CheckoutRequest,
@@ -79,11 +81,18 @@ async def create_checkout_session(
     if not settings.stripe_secret_key:
         raise HTTPException(
             status_code=status.HTTP_501_NOT_IMPLEMENTED,
-            detail={"success": False, "error": "Stripe not configured", "code": "STRIPE_NOT_CONFIGURED"},
+            detail={
+                "success": False,
+                "error": "Stripe not configured",
+                "code": "STRIPE_NOT_CONFIGURED",
+            },
         )
 
     customer_id = await _get_or_create_stripe_customer(current_user, db)
-    success_url = body.success_url or f"{settings.frontend_url}/billing/success?session_id={{CHECKOUT_SESSION_ID}}"
+    success_url = (
+        body.success_url
+        or f"{settings.frontend_url}/billing/success?session_id={{CHECKOUT_SESSION_ID}}"
+    )
     cancel_url = body.cancel_url or f"{settings.frontend_url}/pricing"
 
     try:
@@ -111,6 +120,7 @@ async def create_checkout_session(
 # Customer portal
 # ---------------------------------------------------------------------------
 
+
 @router.get("/portal", response_model=PortalResponse)
 async def customer_portal(
     current_user: CurrentUser,
@@ -120,7 +130,11 @@ async def customer_portal(
     if not settings.stripe_secret_key:
         raise HTTPException(
             status_code=status.HTTP_501_NOT_IMPLEMENTED,
-            detail={"success": False, "error": "Stripe not configured", "code": "STRIPE_NOT_CONFIGURED"},
+            detail={
+                "success": False,
+                "error": "Stripe not configured",
+                "code": "STRIPE_NOT_CONFIGURED",
+            },
         )
 
     customer_id = await _get_or_create_stripe_customer(current_user, db)
@@ -143,6 +157,7 @@ async def customer_portal(
 # Stripe Connect — creator payouts
 # ---------------------------------------------------------------------------
 
+
 @router.post("/connect", status_code=status.HTTP_200_OK)
 async def connect_onboard(
     current_user: CurrentUser,
@@ -153,7 +168,11 @@ async def connect_onboard(
     if not settings.stripe_secret_key:
         raise HTTPException(
             status_code=status.HTTP_501_NOT_IMPLEMENTED,
-            detail={"success": False, "error": "Stripe not configured", "code": "STRIPE_NOT_CONFIGURED"},
+            detail={
+                "success": False,
+                "error": "Stripe not configured",
+                "code": "STRIPE_NOT_CONFIGURED",
+            },
         )
 
     # Create Express account on first call
@@ -188,7 +207,11 @@ async def connect_status(current_user: CurrentUser) -> dict:
     if not settings.stripe_secret_key:
         raise HTTPException(
             status_code=status.HTTP_501_NOT_IMPLEMENTED,
-            detail={"success": False, "error": "Stripe not configured", "code": "STRIPE_NOT_CONFIGURED"},
+            detail={
+                "success": False,
+                "error": "Stripe not configured",
+                "code": "STRIPE_NOT_CONFIGURED",
+            },
         )
 
     if not current_user.stripe_connect_account_id:
@@ -214,6 +237,7 @@ async def connect_status(current_user: CurrentUser) -> dict:
 # One-time payment intent
 # ---------------------------------------------------------------------------
 
+
 @router.post("/payment-intent", response_model=PaymentIntentResponse)
 async def create_payment_intent(
     body: PaymentIntentRequest,
@@ -225,7 +249,11 @@ async def create_payment_intent(
     if not settings.stripe_secret_key:
         raise HTTPException(
             status_code=status.HTTP_501_NOT_IMPLEMENTED,
-            detail={"success": False, "error": "Stripe not configured", "code": "STRIPE_NOT_CONFIGURED"},
+            detail={
+                "success": False,
+                "error": "Stripe not configured",
+                "code": "STRIPE_NOT_CONFIGURED",
+            },
         )
 
     customer_id = await _get_or_create_stripe_customer(current_user, db)
@@ -269,6 +297,7 @@ async def create_payment_intent(
 # Webhook
 # ---------------------------------------------------------------------------
 
+
 @router.post("/webhook", status_code=status.HTTP_200_OK)
 async def stripe_webhook(request: Request, db: DBSession) -> dict:
     """Receive and process Stripe webhook events."""
@@ -276,9 +305,7 @@ async def stripe_webhook(request: Request, db: DBSession) -> dict:
     sig_header = request.headers.get("stripe-signature", "")
 
     try:
-        event = stripe.Webhook.construct_event(
-            payload, sig_header, settings.stripe_webhook_secret
-        )
+        event = stripe.Webhook.construct_event(payload, sig_header, settings.stripe_webhook_secret)
     except stripe.SignatureVerificationError:
         raise HTTPException(status_code=400, detail="Invalid webhook signature")
     except Exception:
@@ -312,6 +339,7 @@ async def stripe_webhook(request: Request, db: DBSession) -> dict:
 # Webhook event handlers
 # ---------------------------------------------------------------------------
 
+
 async def _upsert_subscription(stripe_sub: dict, user: User, db: DBSession) -> None:
     """Create or update the local Subscription record from a Stripe subscription object."""
     stripe_sub_id: str = stripe_sub["id"]
@@ -336,15 +364,17 @@ async def _upsert_subscription(stripe_sub: dict, user: User, db: DBSession) -> N
     sub.status = _stripe_status_to_state(stripe_status)
     sub.plan = SubscriptionPlan.pro  # refined per price_id in future
     sub.current_period_start = (
-        datetime.fromtimestamp(period_start, tz=timezone.utc) if period_start else None
+        datetime.fromtimestamp(period_start, tz=UTC) if period_start else None
     )
-    sub.current_period_end = (
-        datetime.fromtimestamp(period_end, tz=timezone.utc) if period_end else None
-    )
+    sub.current_period_end = datetime.fromtimestamp(period_end, tz=UTC) if period_end else None
     sub.cancel_at_period_end = stripe_sub.get("cancel_at_period_end", False)
 
     # Mirror status on the user row for fast lookups
-    user.subscription_status = SubscriptionStatus(stripe_status) if stripe_status in SubscriptionStatus.__members__ else None
+    user.subscription_status = (
+        SubscriptionStatus(stripe_status)
+        if stripe_status in SubscriptionStatus.__members__
+        else None
+    )
     user.role = _stripe_status_to_role(stripe_status)
 
     await db.commit()
@@ -383,7 +413,7 @@ async def _handle_subscription_deleted(data: dict, db: DBSession) -> None:
     )
     if sub:
         sub.status = SubscriptionState.canceled
-        sub.canceled_at = datetime.now(timezone.utc)
+        sub.canceled_at = datetime.now(UTC)
 
     user.role = UserRole.free
     user.subscription_status = SubscriptionStatus.canceled
@@ -429,7 +459,7 @@ async def _handle_invoice_failed(data: dict, db: DBSession) -> None:
         )
         if sub:
             sub.status = SubscriptionState.past_due
-            sub.payment_failed_at = sub.payment_failed_at or datetime.now(timezone.utc)
+            sub.payment_failed_at = sub.payment_failed_at or datetime.now(UTC)
             user.subscription_status = SubscriptionStatus.past_due
             await db.commit()
 

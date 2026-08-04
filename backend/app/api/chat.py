@@ -10,11 +10,12 @@ Message cap enforcement:
   - Guests are capped at the free-tier limit.
   - Cap breach returns 429 with code MESSAGE_CAP_REACHED.
 """
+
 import json
 import uuid
 from calendar import monthrange
-from datetime import datetime, timezone
-from typing import AsyncIterator
+from collections.abc import AsyncIterator
+from datetime import UTC, datetime
 
 import redis.asyncio as aioredis
 from fastapi import APIRouter, BackgroundTasks, Depends, Header, HTTPException, Request, status
@@ -29,10 +30,9 @@ from app.core.config import settings
 from app.core.dependencies import DBSession, RedisClient
 from app.core.plan_limits import best_allowed_model
 from app.core.security import decode_token
-from app.db.session import get_db
 from app.models.chatbot_config import ChatbotConfig
 from app.models.conversation import Conversation
-from app.models.message import Message, MessageFeedback, MessageRole
+from app.models.message import Message, MessageRole
 from app.models.user import User, UserRole
 from app.schemas.chat import (
     ChatRequest,
@@ -40,8 +40,8 @@ from app.schemas.chat import (
     FeedbackRequest,
     MessageResponse,
 )
-from app.services.kb.rag import RAGService
 from app.services import usage as usage_svc
+from app.services.kb.rag import RAGService
 from app.services.llm import (
     ChatMessage,
     LLMRouter,
@@ -67,6 +67,7 @@ _ROLE_CAPS: dict[UserRole, int] = {
 
 
 # ── Streaming chat ────────────────────────────────────────────────────────────
+
 
 @router.post("/{chatbot_id}")
 async def stream_chat(
@@ -207,6 +208,7 @@ async def stream_chat(
             image_url = await _generate_image(image_prompt, api_keys)
             if image_url:
                 img_response = f"<<<RICH>>>{json.dumps({'type': 'image', 'url': image_url, 'alt': image_prompt})}<<<END>>>"
+
                 async def _image_event_generator() -> AsyncIterator[str]:
                     assistant_msg = Message(
                         conversation_id=conv.id,
@@ -221,7 +223,16 @@ async def stream_chat(
                         await session.commit()
                         await session.refresh(assistant_msg)
                     yield _sse(type="delta", content=img_response)
-                    yield _sse(type="done", model=model_id, input_tokens=0, output_tokens=0, cost_usd="0", conversation_id=str(conv.id), message_id=str(assistant_msg.id))
+                    yield _sse(
+                        type="done",
+                        model=model_id,
+                        input_tokens=0,
+                        output_tokens=0,
+                        cost_usd="0",
+                        conversation_id=str(conv.id),
+                        message_id=str(assistant_msg.id),
+                    )
+
                 return StreamingResponse(_image_event_generator(), media_type="text/event-stream")
 
     if sanitized.startswith("/video ") or sanitized.lower().startswith("/video\n"):
@@ -230,6 +241,7 @@ async def stream_chat(
             video_url = await _generate_video(video_prompt, api_keys)
             if video_url:
                 vid_response = f"<<<RICH>>>{json.dumps({'type': 'video', 'url': video_url, 'alt': video_prompt})}<<<END>>>"
+
                 async def _video_event_generator() -> AsyncIterator[str]:
                     assistant_msg = Message(
                         conversation_id=conv.id,
@@ -244,13 +256,32 @@ async def stream_chat(
                         await session.commit()
                         await session.refresh(assistant_msg)
                     yield _sse(type="delta", content=vid_response)
-                    yield _sse(type="done", model="veo-2", input_tokens=0, output_tokens=0, cost_usd="0", conversation_id=str(conv.id), message_id=str(assistant_msg.id))
+                    yield _sse(
+                        type="done",
+                        model="veo-2",
+                        input_tokens=0,
+                        output_tokens=0,
+                        cost_usd="0",
+                        conversation_id=str(conv.id),
+                        message_id=str(assistant_msg.id),
+                    )
+
                 return StreamingResponse(_video_event_generator(), media_type="text/event-stream")
             else:
                 error_text = "Video generation is unavailable. Please configure a Google AI API key (Gemini / Veo) in your agent settings."
+
                 async def _video_error_generator() -> AsyncIterator[str]:
                     yield _sse(type="delta", content=error_text)
-                    yield _sse(type="done", model=model_id, input_tokens=0, output_tokens=0, cost_usd="0", conversation_id=str(conv.id), message_id="")
+                    yield _sse(
+                        type="done",
+                        model=model_id,
+                        input_tokens=0,
+                        output_tokens=0,
+                        cost_usd="0",
+                        conversation_id=str(conv.id),
+                        message_id="",
+                    )
+
                 return StreamingResponse(_video_error_generator(), media_type="text/event-stream")
 
     # ── RAG context retrieval ─────────────────────────────────────────────────
@@ -313,15 +344,18 @@ async def stream_chat(
                     )
 
                     import asyncio as _asyncio
-                    _asyncio.create_task(usage_svc.log_llm(
-                        user_id=user.id if user else None,
-                        chatbot_id=chatbot_id,
-                        conversation_id=conv_id,
-                        model=chunk.model or model_id,
-                        input_tokens=chunk.input_tokens,
-                        output_tokens=chunk.output_tokens,
-                        cost_usd=chunk.cost_usd,
-                    ))
+
+                    _asyncio.create_task(
+                        usage_svc.log_llm(
+                            user_id=user.id if user else None,
+                            chatbot_id=chatbot_id,
+                            conversation_id=conv_id,
+                            model=chunk.model or model_id,
+                            input_tokens=chunk.input_tokens,
+                            output_tokens=chunk.output_tokens,
+                            cost_usd=chunk.cost_usd,
+                        )
+                    )
 
                     # Auto-generate title after first turn (background)
                     if is_first_message:
@@ -352,6 +386,7 @@ async def stream_chat(
 
 # ── Conversation history ──────────────────────────────────────────────────────
 
+
 @router.get("/{chatbot_id}/history", response_model=dict)
 async def get_history(
     chatbot_id: uuid.UUID,
@@ -362,13 +397,20 @@ async def get_history(
 ) -> dict:
     user = await _resolve_user(authorization, db)
     if not user:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED,
-                            detail={"success": False, "error": "Authentication required",
-                                    "code": "NOT_AUTHENTICATED"})
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail={
+                "success": False,
+                "error": "Authentication required",
+                "code": "NOT_AUTHENTICATED",
+            },
+        )
 
     offset = (page - 1) * per_page
     total_result = await db.execute(
-        select(func.count()).select_from(Conversation).where(
+        select(func.count())
+        .select_from(Conversation)
+        .where(
             Conversation.chatbot_id == chatbot_id,
             Conversation.user_id == user.id,
         )
@@ -396,6 +438,7 @@ async def get_history(
 
 # ── Delete conversation ───────────────────────────────────────────────────────
 
+
 @router.delete("/conversations/{conversation_id}", response_model=dict)
 async def delete_conversation(
     conversation_id: uuid.UUID,
@@ -404,15 +447,21 @@ async def delete_conversation(
 ) -> dict:
     user = await _resolve_user(authorization, db)
     if not user:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED,
-                            detail={"success": False, "error": "Authentication required",
-                                    "code": "NOT_AUTHENTICATED"})
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail={
+                "success": False,
+                "error": "Authentication required",
+                "code": "NOT_AUTHENTICATED",
+            },
+        )
 
     conv = await db.get(Conversation, conversation_id)
     if not conv or conv.user_id != user.id:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND,
-                            detail={"success": False, "error": "Conversation not found",
-                                    "code": "NOT_FOUND"})
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"success": False, "error": "Conversation not found", "code": "NOT_FOUND"},
+        )
 
     await db.delete(conv)
     await db.commit()
@@ -420,6 +469,7 @@ async def delete_conversation(
 
 
 # ── Message feedback ──────────────────────────────────────────────────────────
+
 
 @router.post("/messages/{message_id}/feedback", response_model=dict)
 async def set_feedback(
@@ -430,21 +480,29 @@ async def set_feedback(
 ) -> dict:
     user = await _resolve_user(authorization, db)
     if not user:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED,
-                            detail={"success": False, "error": "Authentication required",
-                                    "code": "NOT_AUTHENTICATED"})
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail={
+                "success": False,
+                "error": "Authentication required",
+                "code": "NOT_AUTHENTICATED",
+            },
+        )
 
     msg = await db.get(Message, message_id)
     if not msg:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND,
-                            detail={"success": False, "error": "Message not found",
-                                    "code": "NOT_FOUND"})
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"success": False, "error": "Message not found", "code": "NOT_FOUND"},
+        )
 
     # Verify ownership via conversation
     conv = await db.get(Conversation, msg.conversation_id)
     if not conv or conv.user_id != user.id:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN,
-                            detail={"success": False, "error": "Forbidden", "code": "FORBIDDEN"})
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={"success": False, "error": "Forbidden", "code": "FORBIDDEN"},
+        )
 
     msg.feedback = body.feedback
     await db.commit()
@@ -452,6 +510,7 @@ async def set_feedback(
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
+
 
 def _sse(**kwargs) -> str:
     return f"data: {json.dumps(kwargs)}\n\n"
@@ -472,10 +531,8 @@ async def _resolve_user(
         return None
 
 
-async def _count_user_messages_this_month(
-    db: AsyncSession, user_id: uuid.UUID
-) -> int:
-    now = datetime.now(timezone.utc)
+async def _count_user_messages_this_month(db: AsyncSession, user_id: uuid.UUID) -> int:
+    now = datetime.now(UTC)
     start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
     result = await db.execute(
         select(func.count())
@@ -491,14 +548,14 @@ async def _count_user_messages_this_month(
 
 
 async def _guest_message_count(redis: aioredis.Redis, guest_id: str) -> int:
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     key = f"guest_cap:{guest_id}:{now.year}-{now.month:02d}"
     val = await redis.get(key)
     return int(val) if val else 0
 
 
 async def _increment_guest_count(redis: aioredis.Redis, guest_id: str) -> None:
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     key = f"guest_cap:{guest_id}:{now.year}-{now.month:02d}"
     _, days_in_month = monthrange(now.year, now.month)
     # TTL covers the rest of the month plus a one-day buffer
@@ -511,7 +568,9 @@ async def _increment_guest_count(redis: aioredis.Redis, guest_id: str) -> None:
 
 async def _is_first_message(db: AsyncSession, conversation_id: uuid.UUID) -> bool:
     result = await db.execute(
-        select(func.count()).select_from(Message).where(
+        select(func.count())
+        .select_from(Message)
+        .where(
             Message.conversation_id == conversation_id,
             Message.role == MessageRole.user,
         )
@@ -540,6 +599,7 @@ async def _load_history_for_context(
 def _new_session():
     """Return a new AsyncSession context manager for background persistence."""
     from app.db.session import AsyncSessionLocal
+
     return AsyncSessionLocal()
 
 
@@ -561,7 +621,10 @@ async def _generate_title(
                     "for a conversation that started with the following exchange."
                 ),
             ),
-            ChatMessage(role="user", content=f"User: {user_message[:500]}\nAssistant: {assistant_reply[:500]}"),
+            ChatMessage(
+                role="user",
+                content=f"User: {user_message[:500]}\nAssistant: {assistant_reply[:500]}",
+            ),
         ]
         router = LLMRouter(model=model)
         response = await router.complete(prompt, max_tokens=20, temperature=0.3)
@@ -587,15 +650,21 @@ async def _generate_image(prompt: str, api_keys: dict) -> str | None:
     if xai_key:
         try:
             import httpx
+
             async with httpx.AsyncClient(timeout=60) as client:
                 r = await client.post(
                     "https://api.x.ai/v1/images/generations",
-                    headers={"Authorization": f"Bearer {xai_key}", "Content-Type": "application/json"},
+                    headers={
+                        "Authorization": f"Bearer {xai_key}",
+                        "Content-Type": "application/json",
+                    },
                     json={"model": "aurora", "prompt": prompt, "n": 1},
                 )
                 r.raise_for_status()
                 data = r.json()
-                url = data.get("data", [{}])[0].get("url") or data.get("data", [{}])[0].get("b64_json")
+                url = data.get("data", [{}])[0].get("url") or data.get("data", [{}])[0].get(
+                    "b64_json"
+                )
                 if url:
                     if url.startswith("data:") or not url.startswith("http"):
                         return None  # Skip base64 for now
@@ -608,10 +677,14 @@ async def _generate_image(prompt: str, api_keys: dict) -> str | None:
     if openai_key:
         try:
             import httpx
+
             async with httpx.AsyncClient(timeout=60) as client:
                 r = await client.post(
                     "https://api.openai.com/v1/images/generations",
-                    headers={"Authorization": f"Bearer {openai_key}", "Content-Type": "application/json"},
+                    headers={
+                        "Authorization": f"Bearer {openai_key}",
+                        "Content-Type": "application/json",
+                    },
                     json={"model": "dall-e-3", "prompt": prompt, "n": 1, "size": "1024x1024"},
                 )
                 r.raise_for_status()
@@ -631,12 +704,18 @@ async def _generate_video(prompt: str, api_keys: dict) -> str | None:
     2. Poll until done (max 120 s in 5-s intervals)
     3. Extract the video URI from the response
     """
-    google_key = api_keys.get("google") or api_keys.get("gemini") or getattr(settings, "google_ai_api_key", None)
+    google_key = (
+        api_keys.get("google")
+        or api_keys.get("gemini")
+        or getattr(settings, "google_ai_api_key", None)
+    )
     if not google_key:
         return None
     try:
         import asyncio
+
         import httpx
+
         _BASE = "https://generativelanguage.googleapis.com/v1beta"
         headers = {"x-goog-api-key": google_key, "Content-Type": "application/json"}
         payload = {

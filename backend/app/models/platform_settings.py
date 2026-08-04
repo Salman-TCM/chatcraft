@@ -9,6 +9,7 @@ from app.models.base import Base
 
 class PlatformSetting(Base):
     """Global platform configuration — key/value store for superadmin settings."""
+
     __tablename__ = "platform_settings"
 
     key: Mapped[str] = mapped_column(String(128), primary_key=True)

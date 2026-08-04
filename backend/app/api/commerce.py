@@ -18,11 +18,12 @@ Routes:
   POST   /api/commerce/checkout/create-payment-intent
   POST   /api/commerce/checkout/confirm
 """
+
 import re
 import uuid
 from typing import Annotated
 
-from fastapi import APIRouter, HTTPException, Query, Request, status
+from fastapi import APIRouter, HTTPException, Query, status
 from sqlalchemy import func, select
 
 from app.core.dependencies import CurrentUser, DBSession
@@ -40,6 +41,7 @@ router = APIRouter(tags=["commerce"])
 
 
 # ── helpers ────────────────────────────────────────────────────────────────────
+
 
 def _slugify(text: str) -> str:
     s = text.lower().strip()
@@ -117,21 +119,28 @@ async def _get_product(product_id: uuid.UUID, store_id: uuid.UUID, db) -> Commer
 
 # ── Store CRUD ─────────────────────────────────────────────────────────────────
 
+
 @router.get("/api/v1/stores", response_model=dict)
 async def list_stores(
-    user: CurrentUser, db: DBSession,
+    user: CurrentUser,
+    db: DBSession,
     page: Annotated[int, Query(ge=1)] = 1,
     limit: Annotated[int, Query(ge=1, le=100)] = 30,
 ) -> dict:
     offset = (page - 1) * limit
     result = await db.execute(
-        select(CommerceStore).where(CommerceStore.user_id == user.id)
-        .order_by(CommerceStore.created_at.desc()).offset(offset).limit(limit)
+        select(CommerceStore)
+        .where(CommerceStore.user_id == user.id)
+        .order_by(CommerceStore.created_at.desc())
+        .offset(offset)
+        .limit(limit)
     )
     stores = result.scalars().all()
-    total = (await db.execute(
-        select(func.count()).select_from(CommerceStore).where(CommerceStore.user_id == user.id)
-    )).scalar_one()
+    total = (
+        await db.execute(
+            select(func.count()).select_from(CommerceStore).where(CommerceStore.user_id == user.id)
+        )
+    ).scalar_one()
     return {"success": True, "data": [_store_dict(s) for s in stores], "total": total}
 
 
@@ -175,7 +184,9 @@ async def get_store(store_id: uuid.UUID, user: CurrentUser, db: DBSession) -> di
 
 
 @router.patch("/api/v1/stores/{store_id}", response_model=dict)
-async def update_store(store_id: uuid.UUID, body: StoreUpdate, user: CurrentUser, db: DBSession) -> dict:
+async def update_store(
+    store_id: uuid.UUID, body: StoreUpdate, user: CurrentUser, db: DBSession
+) -> dict:
     store = await _get_store(store_id, user.id, db)
     for field, value in body.model_dump(exclude_unset=True).items():
         setattr(store, field, value)
@@ -194,9 +205,12 @@ async def delete_store(store_id: uuid.UUID, user: CurrentUser, db: DBSession) ->
 
 # ── Products ───────────────────────────────────────────────────────────────────
 
+
 @router.get("/api/v1/stores/{store_id}/products", response_model=dict)
 async def list_products(
-    store_id: uuid.UUID, user: CurrentUser, db: DBSession,
+    store_id: uuid.UUID,
+    user: CurrentUser,
+    db: DBSession,
     category: str | None = None,
     page: Annotated[int, Query(ge=1)] = 1,
     limit: Annotated[int, Query(ge=1, le=200)] = 50,
@@ -209,14 +223,22 @@ async def list_products(
     offset = (page - 1) * limit
     result = await db.execute(q.offset(offset).limit(limit))
     products = result.scalars().all()
-    total = (await db.execute(
-        select(func.count()).select_from(CommerceProduct).where(CommerceProduct.store_id == store_id)
-    )).scalar_one()
+    total = (
+        await db.execute(
+            select(func.count())
+            .select_from(CommerceProduct)
+            .where(CommerceProduct.store_id == store_id)
+        )
+    ).scalar_one()
     return {"success": True, "data": [_product_dict(p) for p in products], "total": total}
 
 
-@router.post("/api/v1/stores/{store_id}/products", response_model=dict, status_code=status.HTTP_201_CREATED)
-async def create_product(store_id: uuid.UUID, body: ProductCreate, user: CurrentUser, db: DBSession) -> dict:
+@router.post(
+    "/api/v1/stores/{store_id}/products", response_model=dict, status_code=status.HTTP_201_CREATED
+)
+async def create_product(
+    store_id: uuid.UUID, body: ProductCreate, user: CurrentUser, db: DBSession
+) -> dict:
     await _get_store(store_id, user.id, db)
     product = CommerceProduct(
         store_id=store_id,
@@ -239,8 +261,11 @@ async def create_product(store_id: uuid.UUID, body: ProductCreate, user: Current
 
 @router.patch("/api/v1/stores/{store_id}/products/{product_id}", response_model=dict)
 async def update_product(
-    store_id: uuid.UUID, product_id: uuid.UUID,
-    body: ProductUpdate, user: CurrentUser, db: DBSession,
+    store_id: uuid.UUID,
+    product_id: uuid.UUID,
+    body: ProductUpdate,
+    user: CurrentUser,
+    db: DBSession,
 ) -> dict:
     await _get_store(store_id, user.id, db)
     product = await _get_product(product_id, store_id, db)
@@ -256,8 +281,10 @@ async def update_product(
 
 @router.delete("/api/v1/stores/{store_id}/products/{product_id}", response_model=dict)
 async def delete_product(
-    store_id: uuid.UUID, product_id: uuid.UUID,
-    user: CurrentUser, db: DBSession,
+    store_id: uuid.UUID,
+    product_id: uuid.UUID,
+    user: CurrentUser,
+    db: DBSession,
 ) -> dict:
     await _get_store(store_id, user.id, db)
     product = await _get_product(product_id, store_id, db)
@@ -274,13 +301,18 @@ async def sync_from_sheet(store_id: uuid.UUID, user: CurrentUser, db: DBSession)
 
     # Fetch published CSV export of the sheet
     import httpx
+
     csv_url = f"https://docs.google.com/spreadsheets/d/{store.google_sheet_id}/export?format=csv"
     async with httpx.AsyncClient(timeout=15) as client:
         resp = await client.get(csv_url)
     if resp.status_code != 200:
-        raise HTTPException(status_code=502, detail="Failed to fetch Google Sheet — ensure it is published publicly")
+        raise HTTPException(
+            status_code=502, detail="Failed to fetch Google Sheet — ensure it is published publicly"
+        )
 
-    import csv, io
+    import csv
+    import io
+
     reader = csv.DictReader(io.StringIO(resp.text))
     # Expected columns (case-insensitive): name, price, description, category, image_url, sku, in_stock
     col_map = {h.strip().lower(): h.strip() for h in (reader.fieldnames or [])}
@@ -290,7 +322,9 @@ async def sync_from_sheet(store_id: uuid.UUID, user: CurrentUser, db: DBSession)
     upserted = 0
     for row in reader:
         name = row.get(col_map.get("name", "name"), "").strip()
-        price_raw = row.get(col_map.get("price", "price"), "0").strip().replace("$", "").replace(",", "")
+        price_raw = (
+            row.get(col_map.get("price", "price"), "0").strip().replace("$", "").replace(",", "")
+        )
         if not name:
             continue
         try:
@@ -299,12 +333,14 @@ async def sync_from_sheet(store_id: uuid.UUID, user: CurrentUser, db: DBSession)
             continue
 
         # Upsert by name within store
-        existing = (await db.execute(
-            select(CommerceProduct).where(
-                CommerceProduct.store_id == store_id,
-                CommerceProduct.name == name,
+        existing = (
+            await db.execute(
+                select(CommerceProduct).where(
+                    CommerceProduct.store_id == store_id,
+                    CommerceProduct.name == name,
+                )
             )
-        )).scalar_one_or_none()
+        ).scalar_one_or_none()
 
         def _get(key: str) -> str | None:
             return row.get(col_map.get(key, ""), "").strip() or None
@@ -319,16 +355,18 @@ async def sync_from_sheet(store_id: uuid.UUID, user: CurrentUser, db: DBSession)
             existing.in_stock = in_stock_raw not in ("false", "0", "no")
         else:
             in_stock_raw = (_get("in_stock") or "true").lower()
-            db.add(CommerceProduct(
-                store_id=store_id,
-                name=name,
-                price=price,
-                description=_get("description"),
-                category=_get("category"),
-                image_url=_get("image_url"),
-                sku=_get("sku"),
-                in_stock=in_stock_raw not in ("false", "0", "no"),
-            ))
+            db.add(
+                CommerceProduct(
+                    store_id=store_id,
+                    name=name,
+                    price=price,
+                    description=_get("description"),
+                    category=_get("category"),
+                    image_url=_get("image_url"),
+                    sku=_get("sku"),
+                    in_stock=in_stock_raw not in ("false", "0", "no"),
+                )
+            )
         upserted += 1
 
     await db.commit()
@@ -337,27 +375,39 @@ async def sync_from_sheet(store_id: uuid.UUID, user: CurrentUser, db: DBSession)
 
 # ── Purchases ──────────────────────────────────────────────────────────────────
 
+
 @router.get("/api/v1/stores/{store_id}/purchases", response_model=dict)
 async def list_purchases(
-    store_id: uuid.UUID, user: CurrentUser, db: DBSession,
+    store_id: uuid.UUID,
+    user: CurrentUser,
+    db: DBSession,
     page: Annotated[int, Query(ge=1)] = 1,
     limit: Annotated[int, Query(ge=1, le=100)] = 30,
 ) -> dict:
     await _get_store(store_id, user.id, db)
     offset = (page - 1) * limit
     result = await db.execute(
-        select(CommercePayment).where(CommercePayment.store_id == store_id)
-        .order_by(CommercePayment.created_at.desc()).offset(offset).limit(limit)
+        select(CommercePayment)
+        .where(CommercePayment.store_id == store_id)
+        .order_by(CommercePayment.created_at.desc())
+        .offset(offset)
+        .limit(limit)
     )
     payments = result.scalars().all()
-    total = (await db.execute(
-        select(func.count()).select_from(CommercePayment).where(CommercePayment.store_id == store_id)
-    )).scalar_one()
+    total = (
+        await db.execute(
+            select(func.count())
+            .select_from(CommercePayment)
+            .where(CommercePayment.store_id == store_id)
+        )
+    ).scalar_one()
     return {"success": True, "data": [_payment_dict(p) for p in payments], "total": total}
 
 
 @router.get("/api/v1/stores/{store_id}/purchases/{purchase_id}", response_model=dict)
-async def get_purchase(store_id: uuid.UUID, purchase_id: uuid.UUID, user: CurrentUser, db: DBSession) -> dict:
+async def get_purchase(
+    store_id: uuid.UUID, purchase_id: uuid.UUID, user: CurrentUser, db: DBSession
+) -> dict:
     await _get_store(store_id, user.id, db)
     payment = await db.get(CommercePayment, purchase_id)
     if not payment or payment.store_id != store_id:
@@ -366,6 +416,7 @@ async def get_purchase(store_id: uuid.UUID, purchase_id: uuid.UUID, user: Curren
 
 
 # ── Public endpoints (no auth) ─────────────────────────────────────────────────
+
 
 @router.get("/api/public/stores/{slug}", response_model=dict)
 async def public_store(slug: str, db: DBSession) -> dict:
@@ -380,7 +431,8 @@ async def public_store(slug: str, db: DBSession) -> dict:
 
 @router.get("/api/public/stores/{slug}/products", response_model=dict)
 async def public_products(
-    slug: str, db: DBSession,
+    slug: str,
+    db: DBSession,
     category: str | None = None,
     limit: Annotated[int, Query(ge=1, le=200)] = 100,
 ) -> dict:
@@ -404,6 +456,7 @@ async def public_products(
 
 # ── Stripe Checkout ────────────────────────────────────────────────────────────
 
+
 @router.post("/api/commerce/checkout/create-payment-intent", response_model=dict)
 async def create_payment_intent(body: PaymentIntentCreate, db: DBSession) -> dict:
     slug = body.store_slug.strip()
@@ -424,17 +477,21 @@ async def create_payment_intent(body: PaymentIntentCreate, db: DBSession) -> dic
         if not product or product.store_id != store.id:
             raise HTTPException(status_code=422, detail=f"Invalid product: {item['product_id']}")
         qty = max(1, int(item.get("quantity", 1)))
-        line_items.append({
-            "product_id": str(product.id),
-            "name": product.name,
-            "price": float(product.price),
-            "quantity": qty,
-        })
+        line_items.append(
+            {
+                "product_id": str(product.id),
+                "name": product.name,
+                "price": float(product.price),
+                "quantity": qty,
+            }
+        )
         total_cents += round(float(product.price) * qty * 100)
 
     try:
         import stripe
+
         from app.core.config import settings
+
         stripe.api_key = settings.stripe_secret_key
         intent = stripe.PaymentIntent.create(
             amount=total_cents,
@@ -483,7 +540,9 @@ async def confirm_payment(body: PaymentConfirm, db: DBSession) -> dict:
     # Verify with Stripe
     try:
         import stripe
+
         from app.core.config import settings
+
         stripe.api_key = settings.stripe_secret_key
         intent = stripe.PaymentIntent.retrieve(payment_intent_id)
         payment.status = intent.status  # succeeded / requires_payment_method / etc.
@@ -498,11 +557,14 @@ async def confirm_payment(body: PaymentConfirm, db: DBSession) -> dict:
 
     if email:
         from app.models.crm import Contact
+
         c_result = await db.execute(
-            select(Contact).where(
+            select(Contact)
+            .where(
                 Contact.user_id == payment.user_id,
                 Contact.email == email,
-            ).limit(1)
+            )
+            .limit(1)
         )
         contact = c_result.scalar_one_or_none()
         if not contact:

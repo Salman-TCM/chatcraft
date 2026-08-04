@@ -2,6 +2,7 @@
 MCP (Model Context Protocol) server management.
 Supports listing, adding, removing server configs and proxying tool discovery/execution.
 """
+
 import uuid
 from typing import Any
 
@@ -14,10 +15,13 @@ from app.core.dependencies import CurrentUser, DBSession, require_feature
 from app.core.features import MCP_SERVERS
 from app.models.mcp import MCPServerConfig
 
-router = APIRouter(prefix="/api/v1/mcp-servers", tags=["mcp"], dependencies=[Depends(require_feature(MCP_SERVERS))])
+router = APIRouter(
+    prefix="/api/v1/mcp-servers", tags=["mcp"], dependencies=[Depends(require_feature(MCP_SERVERS))]
+)
 
 
 # ─── CRUD ─────────────────────────────────────────────────────────────────────
+
 
 class MCPServerIn(BaseModel):
     name: str
@@ -118,6 +122,7 @@ async def delete_mcp_server(server_id: str, current_user: CurrentUser, db: DBSes
 
 # ─── Tool discovery & execution ───────────────────────────────────────────────
 
+
 @router.get("/{server_id}/tools")
 async def list_tools(server_id: str, current_user: CurrentUser, db: DBSession):
     """Discover available tools from an MCP server (JSON-RPC 2.0 tools/list)."""
@@ -150,6 +155,7 @@ async def execute_tool(
 
 
 # ─── Helpers ──────────────────────────────────────────────────────────────────
+
 
 def _serialize(s: MCPServerConfig) -> dict:
     return {

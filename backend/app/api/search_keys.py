@@ -6,6 +6,7 @@ POST   /api/settings/search-keys           — save/update a key
 DELETE /api/settings/search-keys/{provider} — remove a key
 POST   /api/settings/search-keys/{provider}/test — verify key works
 """
+
 import httpx
 from fastapi import APIRouter, HTTPException, status
 from pydantic import BaseModel
@@ -107,7 +108,9 @@ async def upsert_search_key(body: UpsertSearchKeyRequest, user: CurrentUser, db:
             detail=f"Unknown search provider '{body.provider}'",
         )
     if not body.api_key.strip():
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="API key cannot be empty")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="API key cannot be empty"
+        )
 
     encrypted = encrypt_key(body.api_key.strip())
     result = await db.execute(

@@ -8,9 +8,6 @@ from sqlalchemy.orm import selectinload
 from app.core.dependencies import CurrentUser, DBSession
 from app.models.chatbot_config import ChatbotConfig
 from app.models.conversation import Conversation
-from app.models.message import Message
-from app.models.payment import Payment
-from app.models.subscription import Subscription
 from app.models.usage_log import UsageLog
 from app.models.user import User
 
@@ -40,9 +37,7 @@ def _serialize(obj: dict) -> dict:
         elif hasattr(v, "isoformat"):
             result[k] = v.isoformat()
         elif isinstance(v, list):
-            result[k] = [
-                _serialize(i.__dict__) if hasattr(i, "__dict__") else i for i in v
-            ]
+            result[k] = [_serialize(i.__dict__) if hasattr(i, "__dict__") else i for i in v]
         else:
             result[k] = v
     return result
@@ -50,11 +45,7 @@ def _serialize(obj: dict) -> dict:
 
 def _row_to_dict(obj) -> dict:
     """Convert a SQLAlchemy model instance to a serialised dict."""
-    raw = {
-        k: v
-        for k, v in obj.__dict__.items()
-        if not k.startswith("_")
-    }
+    raw = {k: v for k, v in obj.__dict__.items() if not k.startswith("_")}
     return _serialize(raw)
 
 
@@ -72,17 +63,15 @@ async def export_user_data(current_user: CurrentUser, db: DBSession):
         .options(
             selectinload(User.subscription),
             selectinload(User.payments),
-            selectinload(User.chatbot_configs).selectinload(
-                ChatbotConfig.conversations
-            ).selectinload(Conversation.messages),
+            selectinload(User.chatbot_configs)
+            .selectinload(ChatbotConfig.conversations)
+            .selectinload(Conversation.messages),
         )
     )
     user: User = result.scalar_one()
 
     # Usage logs
-    usage_result = await db.execute(
-        select(UsageLog).where(UsageLog.user_id == user.id)
-    )
+    usage_result = await db.execute(select(UsageLog).where(UsageLog.user_id == user.id))
     usage_logs = usage_result.scalars().all()
 
     # Build chatbots tree

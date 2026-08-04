@@ -12,14 +12,15 @@ Coverage:
 """
 
 import uuid
+
 import pytest
 import pytest_asyncio
 from sqlalchemy import select
 
-from app.models.user import User, UserRole
 from app.models.chatbot_config import ChatbotConfig
 from app.models.conversation import Conversation
 from app.models.inbox import InboxAssignment, TeamMember
+from app.models.user import User, UserRole
 
 REGISTER = "/api/auth/register"
 LOGIN = "/api/auth/login"
@@ -30,7 +31,10 @@ ADMIN_USERS = "/api/admin/users"
 
 # ── Auth helpers ───────────────────────────────────────────────────────────────
 
-async def _register_login(client, email: str, password: str = "TestPass99!", name: str = "User") -> str:
+
+async def _register_login(
+    client, email: str, password: str = "TestPass99!", name: str = "User"
+) -> str:
     await client.post(REGISTER, json={"email": email, "password": password, "name": name})
     r = await client.post(LOGIN, json={"email": email, "password": password})
     return r.json()["data"]["access_token"]
@@ -41,6 +45,7 @@ def _h(token: str) -> dict:
 
 
 # ── 1. Unauthenticated → 401 ───────────────────────────────────────────────────
+
 
 @pytest.mark.asyncio
 async def test_conversations_requires_auth(client):
@@ -62,6 +67,7 @@ async def test_team_requires_auth(client):
 
 # ── 2. Free user → admin endpoints → 403 ──────────────────────────────────────
 
+
 @pytest.mark.asyncio
 async def test_free_user_cannot_access_admin_users(client):
     token = await _register_login(client, "free_user_rbac@example.com")
@@ -77,6 +83,7 @@ async def test_free_user_cannot_access_admin_action_log(client):
 
 
 # ── 3. Admin user → admin endpoints → 200 ─────────────────────────────────────
+
 
 @pytest.mark.asyncio
 async def test_admin_user_can_access_admin_users(client, db_session):
@@ -110,6 +117,7 @@ async def test_admin_can_read_action_log(client, db_session):
 
 # ── Fixtures: owner + agent + conversation setup ───────────────────────────────
 
+
 @pytest_asyncio.fixture
 async def team_setup(client, db_session):
     """
@@ -134,13 +142,17 @@ async def team_setup(client, db_session):
     await db_session.flush()
 
     # Create two conversations
-    conv_assigned = Conversation(chatbot_id=bot.id, channel="web", status="active", title="Assigned Conv")
+    conv_assigned = Conversation(
+        chatbot_id=bot.id, channel="web", status="active", title="Assigned Conv"
+    )
     conv_other = Conversation(chatbot_id=bot.id, channel="web", status="active", title="Other Conv")
     db_session.add_all([conv_assigned, conv_other])
     await db_session.flush()
 
     # Assign one conversation to the agent
-    assignment = InboxAssignment(conversation_id=conv_assigned.id, assigned_to_user_id=agent_user.id)
+    assignment = InboxAssignment(
+        conversation_id=conv_assigned.id, assigned_to_user_id=agent_user.id
+    )
     db_session.add(assignment)
 
     # Add agent as team member (role=agent) of the owner
@@ -158,6 +170,7 @@ async def team_setup(client, db_session):
 
 
 # ── 4. Team agent → manager-only actions → 403 ────────────────────────────────
+
 
 @pytest.mark.asyncio
 async def test_agent_cannot_close_conversation(client, team_setup):
@@ -193,6 +206,7 @@ async def test_agent_cannot_roundrobin(client, team_setup):
 
 # ── 5. Team agent → unassigned conversation → 404 (data isolation) ─────────────
 
+
 @pytest.mark.asyncio
 async def test_agent_cannot_view_unassigned_conversation(client, team_setup):
     _, agent_token, _, conv_other_id = team_setup
@@ -201,6 +215,7 @@ async def test_agent_cannot_view_unassigned_conversation(client, team_setup):
 
 
 # ── 6. Team agent → assigned conversation → 200 ───────────────────────────────
+
 
 @pytest.mark.asyncio
 async def test_agent_can_view_assigned_conversation(client, team_setup):
@@ -211,6 +226,7 @@ async def test_agent_can_view_assigned_conversation(client, team_setup):
 
 
 # ── 7. Team agent → list → only their assigned conversations ──────────────────
+
 
 @pytest.mark.asyncio
 async def test_agent_list_shows_only_assigned(client, team_setup):
@@ -223,6 +239,7 @@ async def test_agent_list_shows_only_assigned(client, team_setup):
 
 
 # ── 8. Owner → can still close/reopen (sanity) ────────────────────────────────
+
 
 @pytest.mark.asyncio
 async def test_owner_can_close_conversation(client, team_setup):

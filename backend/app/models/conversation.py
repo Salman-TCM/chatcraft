@@ -33,9 +33,20 @@ class Conversation(TimestampMixin, Base):
 
     # Inbox fields (added in migration 000000000012)
     channel: Mapped[str] = mapped_column(
-        Enum("web", "facebook", "instagram", "whatsapp", "telegram", "discord",
-             "sms", "phone", "twitter", "tiktok", "email",
-             name="conversation_channel"),
+        Enum(
+            "web",
+            "facebook",
+            "instagram",
+            "whatsapp",
+            "telegram",
+            "discord",
+            "sms",
+            "phone",
+            "twitter",
+            "tiktok",
+            "email",
+            name="conversation_channel",
+        ),
         nullable=False,
         default="web",
         server_default="web",
@@ -70,19 +81,25 @@ class Conversation(TimestampMixin, Base):
         "User", back_populates="conversations"
     )
     messages: Mapped[list["Message"]] = relationship(  # type: ignore[name-defined]
-        "Message", back_populates="conversation", cascade="all, delete-orphan",
-        order_by="Message.created_at"
+        "Message",
+        back_populates="conversation",
+        cascade="all, delete-orphan",
+        order_by="Message.created_at",
     )
     contact: Mapped["Contact | None"] = relationship(  # type: ignore[name-defined]
         "Contact", foreign_keys=[contact_id], lazy="selectin"
     )
     notes: Mapped[list["InternalNote"]] = relationship(  # type: ignore[name-defined]
-        "InternalNote", foreign_keys="InternalNote.conversation_id",
-        cascade="all, delete-orphan", order_by="InternalNote.created_at"
+        "InternalNote",
+        foreign_keys="InternalNote.conversation_id",
+        cascade="all, delete-orphan",
+        order_by="InternalNote.created_at",
     )
     assignment: Mapped["InboxAssignment | None"] = relationship(  # type: ignore[name-defined]
-        "InboxAssignment", foreign_keys="InboxAssignment.conversation_id",
-        uselist=False, cascade="all, delete-orphan"
+        "InboxAssignment",
+        foreign_keys="InboxAssignment.conversation_id",
+        uselist=False,
+        cascade="all, delete-orphan",
     )
 
     def __repr__(self) -> str:

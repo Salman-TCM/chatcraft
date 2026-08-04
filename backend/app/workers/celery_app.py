@@ -10,6 +10,7 @@ def _cron(**kwargs) -> crontab:
     """Shorthand for creating a crontab schedule."""
     return crontab(**kwargs)
 
+
 # ---------------------------------------------------------------------------
 # Queue definitions
 # ---------------------------------------------------------------------------
@@ -19,30 +20,30 @@ priority_exchange = Exchange("priority", type="direct")
 chat_exchange = Exchange("chat", type="direct")
 
 QUEUES = (
-    Queue("default",    default_exchange,  routing_key="default"),
-    Queue("chat",       chat_exchange,     routing_key="chat"),       # high: flow/seq execution
-    Queue("embeddings", default_exchange,  routing_key="embeddings"), # low: document processing
-    Queue("emails",     default_exchange,  routing_key="emails"),
-    Queue("analytics",  default_exchange,  routing_key="analytics"),
-    Queue("priority",   priority_exchange, routing_key="priority"),   # crit: billing/trial ops
+    Queue("default", default_exchange, routing_key="default"),
+    Queue("chat", chat_exchange, routing_key="chat"),  # high: flow/seq execution
+    Queue("embeddings", default_exchange, routing_key="embeddings"),  # low: document processing
+    Queue("emails", default_exchange, routing_key="emails"),
+    Queue("analytics", default_exchange, routing_key="analytics"),
+    Queue("priority", priority_exchange, routing_key="priority"),  # crit: billing/trial ops
 )
 
 TASK_ROUTES = {
     # ── High priority: chat-adjacent real-time tasks ──────────────────────────
-    "workers.execute_flow":           {"queue": "chat",       "routing_key": "chat"},
-    "workers.run_sequence_step":      {"queue": "chat",       "routing_key": "chat"},
-    "workers.send_broadcast_message": {"queue": "chat",       "routing_key": "chat"},
+    "workers.execute_flow": {"queue": "chat", "routing_key": "chat"},
+    "workers.run_sequence_step": {"queue": "chat", "routing_key": "chat"},
+    "workers.send_broadcast_message": {"queue": "chat", "routing_key": "chat"},
     # ── Low priority: background processing ───────────────────────────────────
-    "workers.process_document":       {"queue": "embeddings", "routing_key": "embeddings"},
+    "workers.process_document": {"queue": "embeddings", "routing_key": "embeddings"},
     # ── Email ─────────────────────────────────────────────────────────────────
-    "workers.send_email":             {"queue": "emails",     "routing_key": "emails"},
+    "workers.send_email": {"queue": "emails", "routing_key": "emails"},
     # ── Analytics / billing ───────────────────────────────────────────────────
-    "workers.aggregate_daily_usage":         {"queue": "analytics", "routing_key": "analytics"},
-    "workers.sync_stripe_metered_billing":   {"queue": "analytics", "routing_key": "analytics"},
-    "workers.send_usage_alerts":             {"queue": "analytics", "routing_key": "analytics"},
-    "workers.expire_trials":                 {"queue": "priority",  "routing_key": "priority"},
-    "workers.expire_payment_grace_periods":  {"queue": "priority",  "routing_key": "priority"},
-    "workers.sync_docs_system_prompts":      {"queue": "default",   "routing_key": "default"},
+    "workers.aggregate_daily_usage": {"queue": "analytics", "routing_key": "analytics"},
+    "workers.sync_stripe_metered_billing": {"queue": "analytics", "routing_key": "analytics"},
+    "workers.send_usage_alerts": {"queue": "analytics", "routing_key": "analytics"},
+    "workers.expire_trials": {"queue": "priority", "routing_key": "priority"},
+    "workers.expire_payment_grace_periods": {"queue": "priority", "routing_key": "priority"},
+    "workers.sync_docs_system_prompts": {"queue": "default", "routing_key": "default"},
 }
 
 # ---------------------------------------------------------------------------
@@ -77,14 +78,14 @@ celery_app.conf.update(
     task_default_routing_key="default",
     # Reliability
     task_track_started=True,
-    task_acks_late=True,           # re-queue if worker dies mid-task
+    task_acks_late=True,  # re-queue if worker dies mid-task
     task_reject_on_worker_lost=True,
     worker_prefetch_multiplier=1,  # one task at a time per worker slot
     # Result retention (24 hours)
     result_expires=86400,
     # Retry defaults applied to all tasks unless overridden per-task
     task_max_retries=3,
-    task_default_retry_delay=60,   # seconds
+    task_default_retry_delay=60,  # seconds
     # Beat schedule — cron jobs that run automatically
     beat_schedule={
         # Aggregate yesterday's usage into analytics_daily (Phase 6)
@@ -102,25 +103,25 @@ celery_app.conf.update(
         # Email users approaching/at their usage cap (Phase 6)
         "send-usage-alerts": {
             "task": "workers.send_usage_alerts",
-            "schedule": _cron(minute=0),           # every hour on the hour
+            "schedule": _cron(minute=0),  # every hour on the hour
             "options": {"queue": "analytics"},
         },
         # Downgrade expired trials (Phase 2)
         "expire-trials": {
             "task": "workers.expire_trials",
-            "schedule": 1800,                      # every 30 minutes
+            "schedule": 1800,  # every 30 minutes
             "options": {"queue": "priority"},
         },
         # Downgrade users past 3-day payment grace period (Phase 2)
         "expire-payment-grace-periods": {
             "task": "workers.expire_payment_grace_periods",
-            "schedule": _cron(minute=0),           # every hour on the hour
+            "schedule": _cron(minute=0),  # every hour on the hour
             "options": {"queue": "priority"},
         },
         # Sync Google Docs → system prompt for linked chatbots
         "sync-docs-system-prompts": {
             "task": "workers.sync_docs_system_prompts",
-            "schedule": 600,                       # every 10 minutes
+            "schedule": 600,  # every 10 minutes
             "options": {"queue": "default"},
         },
     },
@@ -129,7 +130,7 @@ celery_app.conf.update(
     broker_connection_max_retries=10,
     # Redis-specific: visibility timeout must exceed the longest task runtime
     broker_transport_options={
-        "visibility_timeout": 3600,    # 1 hour
+        "visibility_timeout": 3600,  # 1 hour
         "socket_timeout": 30,
         "socket_connect_timeout": 30,
     },
@@ -144,11 +145,14 @@ celery_app.conf.update(
 # Signals
 # ---------------------------------------------------------------------------
 
+
 @worker_ready.connect
 def on_worker_ready(sender, **kwargs):
     """Initialise logging and log when a Celery worker comes online."""
     from loguru import logger
+
     from app.core.logging import setup_logging
+
     setup_logging()
     logger.info(f"Celery worker ready: {sender}")
 
@@ -158,12 +162,14 @@ def on_task_failure(sender, task_id, exception, traceback, einfo, **kwargs):
     """Forward task failures to Sentry and Slack."""
     if settings.sentry_dsn:
         import sentry_sdk
+
         with sentry_sdk.push_scope() as scope:
             scope.set_tag("celery_task", sender.name)
             scope.set_context("task", {"task_id": task_id})
             sentry_sdk.capture_exception(exception)
 
     from app.core.alerts import alert_on_exception
+
     alert_on_exception(
         exception,
         context={"Task": sender.name, "Task ID": task_id},
@@ -173,4 +179,5 @@ def on_task_failure(sender, task_id, exception, traceback, einfo, **kwargs):
 @task_retry.connect
 def on_task_retry(sender, reason, **kwargs):
     from loguru import logger
+
     logger.warning(f"Task {sender.name} retrying: {reason}")

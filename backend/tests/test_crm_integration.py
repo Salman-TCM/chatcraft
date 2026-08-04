@@ -2,6 +2,7 @@
 CRM endpoints integration tests.
 Tests contacts CRUD, tags, and custom fields.
 """
+
 import pytest
 
 REGISTER_URL = "/api/auth/register"
@@ -14,12 +15,15 @@ FIELDS_URL = "/api/crm/custom-fields"
 async def _auth_headers(client, email: str = "crm@example.com") -> dict:
     creds = {"email": email, "password": "CrmPass99!", "name": "CRM User"}
     await client.post(REGISTER_URL, json=creds)
-    login = await client.post(LOGIN_URL, json={"email": creds["email"], "password": creds["password"]})
+    login = await client.post(
+        LOGIN_URL, json={"email": creds["email"], "password": creds["password"]}
+    )
     token = login.json()["data"]["access_token"]
     return {"Authorization": f"Bearer {token}"}
 
 
 # ── Auth guard ────────────────────────────────────────────────────────────────
+
 
 @pytest.mark.asyncio
 async def test_list_contacts_requires_auth(client):
@@ -28,6 +32,7 @@ async def test_list_contacts_requires_auth(client):
 
 
 # ── Contacts CRUD ─────────────────────────────────────────────────────────────
+
 
 @pytest.mark.asyncio
 async def test_create_contact(client):
@@ -106,6 +111,7 @@ async def test_cannot_access_other_users_contact(client):
 
 # ── Tags ──────────────────────────────────────────────────────────────────────
 
+
 @pytest.mark.asyncio
 async def test_create_and_list_tags(client):
     headers = await _auth_headers(client, "crmtag@example.com")
@@ -128,6 +134,7 @@ async def test_cannot_create_duplicate_tag(client):
 
 
 # ── Custom fields ─────────────────────────────────────────────────────────────
+
 
 @pytest.mark.asyncio
 async def test_create_custom_field(client):

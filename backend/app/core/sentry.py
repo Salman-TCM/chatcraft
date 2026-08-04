@@ -14,6 +14,7 @@ def _before_send(event: dict, hint: dict) -> dict:
     exc_info = hint.get("exc_info")
     if exc_info and settings.slack_alert_webhook_url:
         from app.core.alerts import alert_on_exception
+
         exc = exc_info[1]
         request = event.get("request", {})
         alert_on_exception(

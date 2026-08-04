@@ -1,6 +1,7 @@
 """
 Voice Lab API — ElevenLabs voice cloning and conversational agent management.
 """
+
 import io
 from typing import Annotated
 
@@ -13,7 +14,11 @@ from app.core.config import settings
 from app.core.dependencies import CurrentUser, require_feature
 from app.core.features import VOICE_LAB
 
-router = APIRouter(prefix="/api/v1/voice-lab", tags=["voice-lab"], dependencies=[Depends(require_feature(VOICE_LAB))])
+router = APIRouter(
+    prefix="/api/v1/voice-lab",
+    tags=["voice-lab"],
+    dependencies=[Depends(require_feature(VOICE_LAB))],
+)
 
 _EL_BASE = "https://api.elevenlabs.io/v1"
 
@@ -25,6 +30,7 @@ def _el_headers() -> dict:
 
 
 # ─── Voice management ────────────────────────────────────────────────────────
+
 
 @router.get("/voices")
 async def list_voices(current_user: CurrentUser):
@@ -92,6 +98,7 @@ async def delete_voice(voice_id: str, current_user: CurrentUser):
 
 # ─── Voice preview ────────────────────────────────────────────────────────────
 
+
 class PreviewRequest(BaseModel):
     voice_id: str
     text: str
@@ -128,6 +135,7 @@ async def preview_voice(body: PreviewRequest, current_user: CurrentUser):
 
 
 # ─── Conversational Agents ────────────────────────────────────────────────────
+
 
 class AgentRequest(BaseModel):
     name: str
@@ -330,7 +338,9 @@ async def list_agent_conversations(agent_id: str, current_user: CurrentUser):
             "status": c.get("status"),
             "start_time": c.get("start_time_unix_secs"),
             "call_duration_secs": c.get("call_duration_secs"),
-            "message_count": c.get("metadata", {}).get("conversation_initiation_client_data", {}).get("message_count"),
+            "message_count": c.get("metadata", {})
+            .get("conversation_initiation_client_data", {})
+            .get("message_count"),
             "cost": c.get("metadata", {}).get("usage", {}).get("cost_tokens"),
         }
         for c in data.get("conversations", [])
@@ -339,7 +349,9 @@ async def list_agent_conversations(agent_id: str, current_user: CurrentUser):
 
 
 @router.get("/agents/{agent_id}/conversations/{conversation_id}")
-async def get_conversation_transcript(agent_id: str, conversation_id: str, current_user: CurrentUser):
+async def get_conversation_transcript(
+    agent_id: str, conversation_id: str, current_user: CurrentUser
+):
     """Get the full transcript and metadata for a single conversation."""
     async with httpx.AsyncClient() as client:
         resp = await client.get(
@@ -357,7 +369,11 @@ async def get_conversation_transcript(agent_id: str, conversation_id: str, curre
             "status": data.get("status"),
             "duration_secs": data.get("metadata", {}).get("call_duration_secs"),
             "transcript": [
-                {"role": t.get("role"), "message": t.get("message"), "time_in_call_secs": t.get("time_in_call_secs")}
+                {
+                    "role": t.get("role"),
+                    "message": t.get("message"),
+                    "time_in_call_secs": t.get("time_in_call_secs"),
+                }
                 for t in transcript
             ],
         },

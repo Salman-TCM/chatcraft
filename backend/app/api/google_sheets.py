@@ -7,8 +7,9 @@ Routes:
   GET  /api/integrations/google/sheets              — list accessible spreadsheets
   DELETE /api/integrations/google/sheets/disconnect — revoke token
 """
+
 import secrets
-from datetime import datetime, timezone, timedelta
+from datetime import UTC, datetime, timedelta
 
 import httpx
 from fastapi import APIRouter, HTTPException, Query
@@ -19,10 +20,12 @@ from app.core.dependencies import CurrentUser, DBSession
 
 router = APIRouter(prefix="/api/integrations/google/sheets", tags=["google-sheets"])
 
-_SCOPES = " ".join([
-    "https://www.googleapis.com/auth/spreadsheets",
-    "https://www.googleapis.com/auth/drive.metadata.readonly",
-])
+_SCOPES = " ".join(
+    [
+        "https://www.googleapis.com/auth/spreadsheets",
+        "https://www.googleapis.com/auth/drive.metadata.readonly",
+    ]
+)
 _TOKEN_URL = "https://oauth2.googleapis.com/token"
 _AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth"
 _DRIVE_FILES_URL = "https://www.googleapis.com/drive/v3/files"
@@ -66,31 +69,36 @@ async def oauth_callback(
         raise HTTPException(status_code=400, detail="Invalid state parameter")
 
     import uuid
+
     try:
         user_id = uuid.UUID(user_id_str)
     except ValueError:
         raise HTTPException(status_code=400, detail="Invalid state parameter")
 
     from app.models.user import User
+
     user = await db.get(User, user_id)
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
 
     # Exchange code for tokens
     async with httpx.AsyncClient() as client:
-        resp = await client.post(_TOKEN_URL, data={
-            "code": code,
-            "client_id": settings.google_oauth_client_id,
-            "client_secret": getattr(settings, "google_oauth_client_secret", ""),
-            "redirect_uri": _sheets_redirect_uri(),
-            "grant_type": "authorization_code",
-        })
+        resp = await client.post(
+            _TOKEN_URL,
+            data={
+                "code": code,
+                "client_id": settings.google_oauth_client_id,
+                "client_secret": getattr(settings, "google_oauth_client_secret", ""),
+                "redirect_uri": _sheets_redirect_uri(),
+                "grant_type": "authorization_code",
+            },
+        )
     if resp.status_code != 200:
         raise HTTPException(status_code=400, detail=f"Token exchange failed: {resp.text}")
 
     token_data = resp.json()
     expires_at = (
-        datetime.now(timezone.utc) + timedelta(seconds=int(token_data.get("expires_in", 3600)))
+        datetime.now(UTC) + timedelta(seconds=int(token_data.get("expires_in", 3600)))
     ).isoformat()
 
     tokens = user.google_oauth_tokens or {}
@@ -103,7 +111,9 @@ async def oauth_callback(
     await db.commit()
 
     frontend_url = getattr(settings, "frontend_url", "http://localhost:3000")
-    return RedirectResponse(url=f"{frontend_url}/dashboard/settings/integrations?google_sheets=connected")
+    return RedirectResponse(
+        url=f"{frontend_url}/dashboard/settings/integrations?google_sheets=connected"
+    )
 
 
 async def _get_valid_access_token(user) -> str:
@@ -116,20 +126,27 @@ async def _get_valid_access_token(user) -> str:
     if expires_at_str:
         expires_at = datetime.fromisoformat(expires_at_str)
         if expires_at.tzinfo is None:
-            expires_at = expires_at.replace(tzinfo=timezone.utc)
-        if datetime.now(timezone.utc) >= expires_at - timedelta(minutes=5):
+            expires_at = expires_at.replace(tzinfo=UTC)
+        if datetime.now(UTC) >= expires_at - timedelta(minutes=5):
             # Refresh token
             if not refresh_token:
-                raise HTTPException(status_code=401, detail="Google Sheets token expired. Please reconnect.")
+                raise HTTPException(
+                    status_code=401, detail="Google Sheets token expired. Please reconnect."
+                )
             async with httpx.AsyncClient() as client:
-                resp = await client.post(_TOKEN_URL, data={
-                    "client_id": settings.google_oauth_client_id,
-                    "client_secret": getattr(settings, "google_oauth_client_secret", ""),
-                    "refresh_token": refresh_token,
-                    "grant_type": "refresh_token",
-                })
+                resp = await client.post(
+                    _TOKEN_URL,
+                    data={
+                        "client_id": settings.google_oauth_client_id,
+                        "client_secret": getattr(settings, "google_oauth_client_secret", ""),
+                        "refresh_token": refresh_token,
+                        "grant_type": "refresh_token",
+                    },
+                )
             if resp.status_code != 200:
-                raise HTTPException(status_code=401, detail="Failed to refresh Google token. Please reconnect.")
+                raise HTTPException(
+                    status_code=401, detail="Failed to refresh Google token. Please reconnect."
+                )
             new_tokens = resp.json()
             access_token = new_tokens.get("access_token", access_token)
 

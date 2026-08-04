@@ -41,9 +41,7 @@ class Agent(TimestampMixin, Base):
     memory_enabled: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=False, server_default="false"
     )
-    max_steps: Mapped[int] = mapped_column(
-        Integer, nullable=False, default=10, server_default="10"
-    )
+    max_steps: Mapped[int] = mapped_column(Integer, nullable=False, default=10, server_default="10")
     is_published: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=False, server_default="false"
     )

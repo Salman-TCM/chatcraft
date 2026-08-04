@@ -49,6 +49,7 @@ KeywordResponseType = Literal["text", "flow"]
 
 # ── Automations ─────────────────────────────────────────────────────────────────
 
+
 class AutomationCreate(BaseModel):
     name: str = Field(min_length=1, max_length=255)
     description: str | None = None
@@ -70,6 +71,7 @@ class AutomationUpdate(BaseModel):
 
 
 # ── Sequences ────────────────────────────────────────────────────────────────────
+
 
 class SequenceCreate(BaseModel):
     chatbot_id: uuid.UUID | None = None
@@ -96,6 +98,7 @@ class SequenceEnrollRequest(BaseModel):
 
 
 # ── Keywords ─────────────────────────────────────────────────────────────────────
+
 
 class KeywordCreate(BaseModel):
     chatbot_id: uuid.UUID | None = None

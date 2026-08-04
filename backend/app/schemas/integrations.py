@@ -1,12 +1,13 @@
 """Pydantic request schemas for the Channel Integration API
 (backend/app/api/integrations.py).
 """
+
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, EmailStr, Field
 
-
 # ── Upsert integration ──────────────────────────────────────────────────────────
+
 
 class UpsertIntegrationRequest(BaseModel):
     """PUT /api/v1/chatbots/{chatbot_id}/integrations/{channel}.
@@ -23,6 +24,7 @@ class UpsertIntegrationRequest(BaseModel):
 
 # ── Telegram bot commands ───────────────────────────────────────────────────────
 
+
 class TelegramCommandItem(BaseModel):
     """One entry of the Telegram Bot API `setMyCommands` list
     (see backend/app/services/channels/telegram.py:set_commands)."""
@@ -38,6 +40,7 @@ class SetTelegramCommandsRequest(BaseModel):
 
 
 # ── WhatsApp templates ──────────────────────────────────────────────────────────
+
 
 class CreateWhatsAppTemplateRequest(BaseModel):
     """POST /api/v1/chatbots/{chatbot_id}/integrations/whatsapp/templates.
@@ -82,6 +85,7 @@ class SetMessengerMenuRequest(BaseModel):
 
 
 # ── Email integration test send ─────────────────────────────────────────────────
+
 
 class TestEmailIntegrationRequest(BaseModel):
     """POST /api/v1/chatbots/{chatbot_id}/integrations/email/test."""

@@ -9,21 +9,23 @@ Each agent has:
   - Agentic loop with configurable max_steps
   - Optional public share link
 """
+
 import asyncio
 import ipaddress
 import json
 import re as _re
 import secrets
 import uuid
-from datetime import datetime, timezone
-from typing import Any, AsyncIterator
+from collections.abc import AsyncIterator
+from datetime import UTC, datetime
+from typing import Any
 from urllib.parse import urlparse
 
 import anthropic
 import httpx
-from openai import AsyncOpenAI
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
+from openai import AsyncOpenAI
 from pydantic import BaseModel
 from sqlalchemy import func, select
 
@@ -37,14 +39,16 @@ from app.models.chatbot_config import ChatbotConfig
 from app.models.mcp import MCPServerConfig
 from app.models.usage_log import UsageLog
 from app.schemas.agent import AgentCreateRequest, AgentResponse, AgentUpdateRequest
-from app.services.kb.rag import RAGService
 from app.services.llm.key_store import get_key as _get_user_key
 
-router = APIRouter(prefix="/api/v1/agents", tags=["agents"], dependencies=[Depends(require_feature(AGENT_BUILDER))])
+router = APIRouter(
+    prefix="/api/v1/agents", tags=["agents"], dependencies=[Depends(require_feature(AGENT_BUILDER))]
+)
 public_router = APIRouter(prefix="/api/public/agents", tags=["agents-public"])
 
 
 # ─── CRUD ─────────────────────────────────────────────────────────────────────
+
 
 @router.get("")
 async def list_agents(user: CurrentUser, db: DBSession):
@@ -109,6 +113,7 @@ async def delete_agent(agent_id: uuid.UUID, user: CurrentUser, db: DBSession):
 
 # ─── Share management ──────────────────────────────────────────────────────────
 
+
 @router.post("/{agent_id}/share/enable")
 async def enable_share(agent_id: uuid.UUID, user: CurrentUser, db: DBSession):
     """Enable public sharing and generate a share token."""
@@ -143,6 +148,7 @@ async def regenerate_share_token(agent_id: uuid.UUID, user: CurrentUser, db: DBS
 
 # ─── Public endpoints (no auth) ────────────────────────────────────────────────
 
+
 @public_router.get("/{share_token}")
 async def get_public_agent(share_token: str, db: DBSession):
     """Return public-facing agent info for the share page."""
@@ -165,20 +171,33 @@ class PublicChatRequest(BaseModel):
 
 @public_router.post("/{share_token}/chat")
 @limiter.limit("5/minute")
-async def public_agent_chat(share_token: str, request: Request, body: PublicChatRequest, db: DBSession):
+async def public_agent_chat(
+    share_token: str, request: Request, body: PublicChatRequest, db: DBSession
+):
     """Stream a public agent response. No authentication required."""
     agent = await _get_shared_agent(share_token, db)
-    system_prompt = await _build_system_prompt(agent, db)  # no user_id — never inject token for public
+    system_prompt = await _build_system_prompt(
+        agent, db
+    )  # no user_id — never inject token for public
     tools, mcp_map = await _build_tools_with_mcp(agent, agent.user_id, db)
     _, api_key = await _resolve_api_key(agent.user_id, agent.model or "claude-sonnet-4-6", db)
     return StreamingResponse(
-        _run_agent(agent, system_prompt, tools, mcp_map, body.message, body.conversation_history, api_key=api_key),
+        _run_agent(
+            agent,
+            system_prompt,
+            tools,
+            mcp_map,
+            body.message,
+            body.conversation_history,
+            api_key=api_key,
+        ),
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
 
 
 # ─── Memory endpoints ─────────────────────────────────────────────────────────
+
 
 @router.get("/{agent_id}/memory")
 async def list_agent_memory(agent_id: uuid.UUID, user: CurrentUser, db: DBSession):
@@ -198,7 +217,9 @@ async def list_agent_memory(agent_id: uuid.UUID, user: CurrentUser, db: DBSessio
                 "id": str(s.id),
                 "message_count": len(s.messages),
                 "tool_calls": s.tool_calls,
-                "preview": next((m["content"][:120] for m in s.messages if m.get("role") == "user"), ""),
+                "preview": next(
+                    (m["content"][:120] for m in s.messages if m.get("role") == "user"), ""
+                ),
                 "created_at": s.created_at.isoformat(),
             }
             for s in sessions
@@ -244,6 +265,7 @@ async def delete_memory_session(
 
 # ─── Analytics endpoint ───────────────────────────────────────────────────────
 
+
 @router.get("/{agent_id}/analytics")
 async def get_agent_analytics(agent_id: uuid.UUID, user: CurrentUser, db: DBSession):
     """Return 30-day usage stats for this agent."""
@@ -251,7 +273,9 @@ async def get_agent_analytics(agent_id: uuid.UUID, user: CurrentUser, db: DBSess
 
     # Conversation count
     conv_count_result = await db.execute(
-        select(func.count()).select_from(AgentConversation).where(
+        select(func.count())
+        .select_from(AgentConversation)
+        .where(
             AgentConversation.agent_id == agent.id,
             AgentConversation.user_id == user.id,
         )
@@ -270,7 +294,9 @@ async def get_agent_analytics(agent_id: uuid.UUID, user: CurrentUser, db: DBSess
     row = usage_result.one()
 
     # Daily run counts for chart (last 14 days)
-    from sqlalchemy import cast, Date, text as sa_text
+    from sqlalchemy import Date, cast
+    from sqlalchemy import text as sa_text
+
     daily_result = await db.execute(
         select(
             cast(UsageLog.created_at, Date).label("day"),
@@ -299,6 +325,7 @@ async def get_agent_analytics(agent_id: uuid.UUID, user: CurrentUser, db: DBSess
 
 
 # ─── Chat / Run ───────────────────────────────────────────────────────────────
+
 
 class AgentChatRequest(BaseModel):
     message: str
@@ -330,7 +357,9 @@ async def agent_chat(
         assistant_text: list[str] = []
         tool_call_count = 0
 
-        async for chunk in _run_agent(agent, system_prompt, tools, mcp_map, body.message, history, api_key=api_key):
+        async for chunk in _run_agent(
+            agent, system_prompt, tools, mcp_map, body.message, history, api_key=api_key
+        ):
             yield chunk
             try:
                 evt = json.loads(chunk[6:]) if chunk.startswith("data: ") else {}
@@ -345,7 +374,9 @@ async def agent_chat(
         final_text = "".join(assistant_text)
         if final_text:
             collected_messages.append({"role": "assistant", "content": final_text})
-        asyncio.create_task(_post_run_tasks(agent, user.id, collected_messages, tool_call_count, db))
+        asyncio.create_task(
+            _post_run_tasks(agent, user.id, collected_messages, tool_call_count, db)
+        )
 
     return StreamingResponse(
         _stream_and_track(),
@@ -357,26 +388,27 @@ async def agent_chat(
 # ─── Agent execution loop ─────────────────────────────────────────────────────
 
 _PROVIDER_BASE_URLS: dict[str, str] = {
-    "openai":     "https://api.openai.com/v1",
-    "groq":       "https://api.groq.com/openai/v1",
-    "deepseek":   "https://api.deepseek.com/v1",
+    "openai": "https://api.openai.com/v1",
+    "groq": "https://api.groq.com/openai/v1",
+    "deepseek": "https://api.deepseek.com/v1",
     "perplexity": "https://api.perplexity.ai",
-    "xai":        "https://api.x.ai/v1",
+    "xai": "https://api.x.ai/v1",
 }
 
 _SETTINGS_KEY_ATTR: dict[str, str] = {
-    "anthropic":  "anthropic_api_key",
-    "google":     "google_ai_api_key",
-    "openai":     "openai_api_key",
-    "groq":       "groq_api_key",
-    "deepseek":   "deepseek_api_key",
+    "anthropic": "anthropic_api_key",
+    "google": "google_ai_api_key",
+    "openai": "openai_api_key",
+    "groq": "groq_api_key",
+    "deepseek": "deepseek_api_key",
     "perplexity": "perplexity_api_key",
-    "xai":        "xai_api_key",
+    "xai": "xai_api_key",
 }
 
 
 def _model_provider(model: str) -> str:
     from app.services.llm.router import get_model_provider
+
     return get_model_provider(model)
 
 
@@ -411,18 +443,29 @@ async def _run_agent(
     provider = _model_provider(model)
 
     if not api_key:
-        yield _sse({"type": "error", "content": f"No {provider.title()} API key configured. Add one in Settings → Model Keys."})
+        yield _sse(
+            {
+                "type": "error",
+                "content": f"No {provider.title()} API key configured. Add one in Settings → Model Keys.",
+            }
+        )
         return
 
     if provider == "google":
-        async for chunk in _run_agent_gemini(agent, system_prompt, tools, mcp_map, user_message, history, api_key):
+        async for chunk in _run_agent_gemini(
+            agent, system_prompt, tools, mcp_map, user_message, history, api_key
+        ):
             yield chunk
     elif provider == "anthropic":
-        async for chunk in _run_agent_anthropic(agent, system_prompt, tools, mcp_map, user_message, history, api_key):
+        async for chunk in _run_agent_anthropic(
+            agent, system_prompt, tools, mcp_map, user_message, history, api_key
+        ):
             yield chunk
     else:
         base_url = _PROVIDER_BASE_URLS.get(provider, "https://api.openai.com/v1")
-        async for chunk in _run_agent_openai_compat(agent, system_prompt, tools, mcp_map, user_message, history, api_key, base_url):
+        async for chunk in _run_agent_openai_compat(
+            agent, system_prompt, tools, mcp_map, user_message, history, api_key, base_url
+        ):
             yield chunk
 
 
@@ -470,7 +513,9 @@ async def _run_agent_anthropic(
                 yield _sse({"type": "tool_call", "tool": tu.name, "input": tu.input})
                 result_text = await _execute_tool(tu.name, tu.input, mcp_map, ctx)
                 yield _sse({"type": "tool_result", "tool": tu.name, "result": result_text[:500]})
-                tool_results.append({"type": "tool_result", "tool_use_id": tu.id, "content": result_text})
+                tool_results.append(
+                    {"type": "tool_result", "tool_use_id": tu.id, "content": result_text}
+                )
 
             messages.append({"role": "assistant", "content": response.content})
             messages.append({"role": "user", "content": tool_results})
@@ -490,14 +535,16 @@ def _tools_to_openai(tools: list[dict]) -> list[dict]:
     """Convert Anthropic-format tool definitions to OpenAI function-calling format."""
     result = []
     for t in tools:
-        result.append({
-            "type": "function",
-            "function": {
-                "name": t["name"],
-                "description": t.get("description", ""),
-                "parameters": t.get("input_schema", {"type": "object", "properties": {}}),
-            },
-        })
+        result.append(
+            {
+                "type": "function",
+                "function": {
+                    "name": t["name"],
+                    "description": t.get("description", ""),
+                    "parameters": t.get("input_schema", {"type": "object", "properties": {}}),
+                },
+            }
+        )
     return result
 
 
@@ -553,10 +600,12 @@ def _extract_text_tool_calls(text: str) -> list[dict]:
         try:
             data = json.loads(m.group(1))
             if "name" in data:
-                calls.append({
-                    "name": data["name"].strip(),
-                    "args": data.get("args", data.get("arguments", data.get("parameters", {}))),
-                })
+                calls.append(
+                    {
+                        "name": data["name"].strip(),
+                        "args": data.get("args", data.get("arguments", data.get("parameters", {}))),
+                    }
+                )
         except Exception:
             pass
     return calls
@@ -635,9 +684,16 @@ async def _run_agent_openai_compat(
                         inputs = tc["args"]
                         yield _sse({"type": "tool_call", "tool": name, "input": inputs})
                         result_text = await _execute_tool(name, inputs, mcp_map, ctx)
-                        yield _sse({"type": "tool_result", "tool": name, "result": result_text[:500]})
+                        yield _sse(
+                            {"type": "tool_result", "tool": name, "result": result_text[:500]}
+                        )
                         # Append as a user message so any model understands it
-                        messages.append({"role": "user", "content": f"[Tool result for '{name}']: {result_text}"})
+                        messages.append(
+                            {
+                                "role": "user",
+                                "content": f"[Tool result for '{name}']: {result_text}",
+                            }
+                        )
                 else:
                     if text:
                         yield _sse({"type": "text", "content": text})
@@ -649,14 +705,23 @@ async def _run_agent_openai_compat(
                 if not msg.tool_calls or choice.finish_reason == "stop":
                     break
 
-                messages.append({"role": "assistant", "content": text, "tool_calls": [
+                messages.append(
                     {
-                        "id": tc.id,
-                        "type": "function",
-                        "function": {"name": tc.function.name.strip(), "arguments": tc.function.arguments},
+                        "role": "assistant",
+                        "content": text,
+                        "tool_calls": [
+                            {
+                                "id": tc.id,
+                                "type": "function",
+                                "function": {
+                                    "name": tc.function.name.strip(),
+                                    "arguments": tc.function.arguments,
+                                },
+                            }
+                            for tc in msg.tool_calls
+                        ],
                     }
-                    for tc in msg.tool_calls
-                ]})
+                )
 
                 for tc in msg.tool_calls:
                     name = tc.function.name.strip()
@@ -683,6 +748,7 @@ async def _run_agent_openai_compat(
 def _tools_to_gemini(tools: list[dict]) -> list:
     """Convert Anthropic-format tool definitions to google.genai Tool objects."""
     from google.genai import types as _gtypes
+
     if not tools:
         return []
     declarations = []
@@ -695,15 +761,17 @@ def _tools_to_gemini(tools: list[dict]) -> list:
             )
             for k, v in schema.get("properties", {}).items()
         }
-        declarations.append(_gtypes.FunctionDeclaration(
-            name=t["name"],
-            description=t.get("description", ""),
-            parameters=_gtypes.Schema(
-                type="OBJECT",
-                properties=props,
-                required=schema.get("required", []),
-            ),
-        ))
+        declarations.append(
+            _gtypes.FunctionDeclaration(
+                name=t["name"],
+                description=t.get("description", ""),
+                parameters=_gtypes.Schema(
+                    type="OBJECT",
+                    properties=props,
+                    required=schema.get("required", []),
+                ),
+            )
+        )
     return [_gtypes.Tool(function_declarations=declarations)]
 
 
@@ -726,7 +794,9 @@ async def _run_agent_gemini(
     contents: list = []
     for m in history:
         role = "user" if m.get("role") == "user" else "model"
-        contents.append(_gtypes.Content(role=role, parts=[_gtypes.Part.from_text(m.get("content", "") or "")]))
+        contents.append(
+            _gtypes.Content(role=role, parts=[_gtypes.Part.from_text(m.get("content", "") or "")])
+        )
     contents.append(_gtypes.Content(role="user", parts=[_gtypes.Part.from_text(user_message)]))
 
     config = _gtypes.GenerateContentConfig(
@@ -754,7 +824,11 @@ async def _run_agent_gemini(
                 for part in response.candidates[0].content.parts:
                     if hasattr(part, "text") and part.text:
                         text_parts.append(part.text)
-                    if hasattr(part, "function_call") and part.function_call and part.function_call.name:
+                    if (
+                        hasattr(part, "function_call")
+                        and part.function_call
+                        and part.function_call.name
+                    ):
                         function_calls.append(part.function_call)
 
             if text_parts:
@@ -772,12 +846,14 @@ async def _run_agent_gemini(
                 yield _sse({"type": "tool_call", "tool": fc.name, "input": args})
                 result_text = await _execute_tool(fc.name, args, mcp_map, ctx)
                 yield _sse({"type": "tool_result", "tool": fc.name, "result": result_text[:500]})
-                fn_result_parts.append(_gtypes.Part(
-                    function_response=_gtypes.FunctionResponse(
-                        name=fc.name,
-                        response={"result": result_text},
+                fn_result_parts.append(
+                    _gtypes.Part(
+                        function_response=_gtypes.FunctionResponse(
+                            name=fc.name,
+                            response={"result": result_text},
+                        )
                     )
-                ))
+                )
 
             contents.append(_gtypes.Content(role="user", parts=fn_result_parts))
     except Exception as exc:
@@ -790,6 +866,7 @@ async def _run_agent_gemini(
 
 
 # ─── Tool building (built-in + MCP) ──────────────────────────────────────────
+
 
 async def _build_tools_with_mcp(
     agent: Agent, user_id: uuid.UUID, db: DBSession
@@ -815,11 +892,15 @@ async def _build_tools_with_mcp(
                 discovered = await _discover_mcp_tools(server)
                 for tool in discovered:
                     tool_name = f"mcp__{server.name.replace(' ', '_')}__{tool['name']}"
-                    tools.append({
-                        "name": tool_name,
-                        "description": f"[MCP: {server.name}] {tool.get('description', '')}",
-                        "input_schema": tool.get("inputSchema", {"type": "object", "properties": {}}),
-                    })
+                    tools.append(
+                        {
+                            "name": tool_name,
+                            "description": f"[MCP: {server.name}] {tool.get('description', '')}",
+                            "input_schema": tool.get(
+                                "inputSchema", {"type": "object", "properties": {}}
+                            ),
+                        }
+                    )
                     mcp_map[tool_name] = {"server": server, "original_name": tool["name"]}
             except Exception:
                 pass  # Skip unreachable MCP servers silently
@@ -833,180 +914,271 @@ def _build_builtin_tools(tools_config: dict) -> list[dict]:
     defs = []
 
     if tools_config.get("web_search"):
-        defs.append({
-            "name": "web_search",
-            "description": "Search the web for current information. Use for facts, news, prices, or anything that may have changed recently.",
-            "input_schema": {
-                "type": "object",
-                "properties": {"query": {"type": "string", "description": "Search query"}},
-                "required": ["query"],
-            },
-        })
+        defs.append(
+            {
+                "name": "web_search",
+                "description": "Search the web for current information. Use for facts, news, prices, or anything that may have changed recently.",
+                "input_schema": {
+                    "type": "object",
+                    "properties": {"query": {"type": "string", "description": "Search query"}},
+                    "required": ["query"],
+                },
+            }
+        )
 
     if tools_config.get("browser"):
-        defs.append({
-            "name": "browse_url",
-            "description": "Fetch and extract readable text content from a URL.",
-            "input_schema": {
-                "type": "object",
-                "properties": {"url": {"type": "string", "description": "URL to visit"}},
-                "required": ["url"],
-            },
-        })
+        defs.append(
+            {
+                "name": "browse_url",
+                "description": "Fetch and extract readable text content from a URL.",
+                "input_schema": {
+                    "type": "object",
+                    "properties": {"url": {"type": "string", "description": "URL to visit"}},
+                    "required": ["url"],
+                },
+            }
+        )
 
     if tools_config.get("code"):
-        defs.append({
-            "name": "run_code",
-            "description": "Execute a Python code snippet. Returns stdout. Use for calculations, data processing, or formatting.",
-            "input_schema": {
-                "type": "object",
-                "properties": {"code": {"type": "string", "description": "Python code to execute"}},
-                "required": ["code"],
-            },
-        })
+        defs.append(
+            {
+                "name": "run_code",
+                "description": "Execute a Python code snippet. Returns stdout. Use for calculations, data processing, or formatting.",
+                "input_schema": {
+                    "type": "object",
+                    "properties": {
+                        "code": {"type": "string", "description": "Python code to execute"}
+                    },
+                    "required": ["code"],
+                },
+            }
+        )
 
     if tools_config.get("http"):
-        defs.append({
-            "name": "http_request",
-            "description": "Make an HTTP GET or POST request to an external API or URL.",
-            "input_schema": {
-                "type": "object",
-                "properties": {
-                    "method": {"type": "string", "enum": ["GET", "POST"], "description": "HTTP method"},
-                    "url": {"type": "string", "description": "Full URL"},
-                    "headers": {"type": "object", "description": "Optional request headers"},
-                    "body": {"type": "object", "description": "Optional JSON body for POST"},
+        defs.append(
+            {
+                "name": "http_request",
+                "description": "Make an HTTP GET or POST request to an external API or URL.",
+                "input_schema": {
+                    "type": "object",
+                    "properties": {
+                        "method": {
+                            "type": "string",
+                            "enum": ["GET", "POST"],
+                            "description": "HTTP method",
+                        },
+                        "url": {"type": "string", "description": "Full URL"},
+                        "headers": {"type": "object", "description": "Optional request headers"},
+                        "body": {"type": "object", "description": "Optional JSON body for POST"},
+                    },
+                    "required": ["method", "url"],
                 },
-                "required": ["method", "url"],
-            },
-        })
+            }
+        )
 
     if tools_config.get("sheets"):
-        defs.append({
-            "name": "google_sheets",
-            "description": "Read or write data in a Google Sheet.",
-            "input_schema": {
-                "type": "object",
-                "properties": {
-                    "spreadsheet_id": {"type": "string", "description": "Google Sheet ID from its URL"},
-                    "operation": {"type": "string", "enum": ["read_range", "append_row", "update_range"]},
-                    "range": {"type": "string", "description": "A1 notation range (e.g. Sheet1!A1:D10)"},
-                    "values": {"type": "array", "description": "Rows to write for append_row or update_range"},
+        defs.append(
+            {
+                "name": "google_sheets",
+                "description": "Read or write data in a Google Sheet.",
+                "input_schema": {
+                    "type": "object",
+                    "properties": {
+                        "spreadsheet_id": {
+                            "type": "string",
+                            "description": "Google Sheet ID from its URL",
+                        },
+                        "operation": {
+                            "type": "string",
+                            "enum": ["read_range", "append_row", "update_range"],
+                        },
+                        "range": {
+                            "type": "string",
+                            "description": "A1 notation range (e.g. Sheet1!A1:D10)",
+                        },
+                        "values": {
+                            "type": "array",
+                            "description": "Rows to write for append_row or update_range",
+                        },
+                    },
+                    "required": ["spreadsheet_id", "operation", "range"],
                 },
-                "required": ["spreadsheet_id", "operation", "range"],
-            },
-        })
+            }
+        )
 
     if tools_config.get("email"):
-        defs.append({
-            "name": "send_email",
-            "description": "Send an email to a recipient. Use when the user asks to send, draft, or forward an email.",
-            "input_schema": {
-                "type": "object",
-                "properties": {
-                    "to": {"type": "string", "description": "Recipient email address"},
-                    "subject": {"type": "string", "description": "Email subject line"},
-                    "body": {"type": "string", "description": "Email body (plain text or simple HTML)"},
+        defs.append(
+            {
+                "name": "send_email",
+                "description": "Send an email to a recipient. Use when the user asks to send, draft, or forward an email.",
+                "input_schema": {
+                    "type": "object",
+                    "properties": {
+                        "to": {"type": "string", "description": "Recipient email address"},
+                        "subject": {"type": "string", "description": "Email subject line"},
+                        "body": {
+                            "type": "string",
+                            "description": "Email body (plain text or simple HTML)",
+                        },
+                    },
+                    "required": ["to", "subject", "body"],
                 },
-                "required": ["to", "subject", "body"],
-            },
-        })
+            }
+        )
 
     if tools_config.get("sms"):
-        defs.append({
-            "name": "send_sms",
-            "description": "Send an SMS text message to a phone number via Twilio.",
-            "input_schema": {
-                "type": "object",
-                "properties": {
-                    "to": {"type": "string", "description": "Recipient phone number in E.164 format (e.g. +14155552671)"},
-                    "message": {"type": "string", "description": "SMS message text (max 160 chars for single segment)"},
+        defs.append(
+            {
+                "name": "send_sms",
+                "description": "Send an SMS text message to a phone number via Twilio.",
+                "input_schema": {
+                    "type": "object",
+                    "properties": {
+                        "to": {
+                            "type": "string",
+                            "description": "Recipient phone number in E.164 format (e.g. +14155552671)",
+                        },
+                        "message": {
+                            "type": "string",
+                            "description": "SMS message text (max 160 chars for single segment)",
+                        },
+                    },
+                    "required": ["to", "message"],
                 },
-                "required": ["to", "message"],
-            },
-        })
+            }
+        )
 
     if tools_config.get("verification"):
-        defs.append({
-            "name": "send_email_verification",
-            "description": (
-                "Generate a 6-digit OTP and send it to an email address. "
-                "Use this to verify a user's email before taking a sensitive action. "
-                "The code expires in 10 minutes."
-            ),
-            "input_schema": {
-                "type": "object",
-                "properties": {
-                    "email": {"type": "string", "description": "Email address to send the verification code to"},
-                    "purpose": {"type": "string", "description": "Short description of what is being verified (e.g. 'account access', 'password reset')"},
+        defs.append(
+            {
+                "name": "send_email_verification",
+                "description": (
+                    "Generate a 6-digit OTP and send it to an email address. "
+                    "Use this to verify a user's email before taking a sensitive action. "
+                    "The code expires in 10 minutes."
+                ),
+                "input_schema": {
+                    "type": "object",
+                    "properties": {
+                        "email": {
+                            "type": "string",
+                            "description": "Email address to send the verification code to",
+                        },
+                        "purpose": {
+                            "type": "string",
+                            "description": "Short description of what is being verified (e.g. 'account access', 'password reset')",
+                        },
+                    },
+                    "required": ["email"],
                 },
-                "required": ["email"],
-            },
-        })
-        defs.append({
-            "name": "send_sms_verification",
-            "description": (
-                "Generate a 6-digit OTP and send it as an SMS to a phone number. "
-                "Use this to verify a user's phone before taking a sensitive action. "
-                "The code expires in 10 minutes."
-            ),
-            "input_schema": {
-                "type": "object",
-                "properties": {
-                    "phone": {"type": "string", "description": "Recipient phone number in E.164 format (e.g. +14155552671)"},
-                    "purpose": {"type": "string", "description": "Short description of what is being verified"},
+            }
+        )
+        defs.append(
+            {
+                "name": "send_sms_verification",
+                "description": (
+                    "Generate a 6-digit OTP and send it as an SMS to a phone number. "
+                    "Use this to verify a user's phone before taking a sensitive action. "
+                    "The code expires in 10 minutes."
+                ),
+                "input_schema": {
+                    "type": "object",
+                    "properties": {
+                        "phone": {
+                            "type": "string",
+                            "description": "Recipient phone number in E.164 format (e.g. +14155552671)",
+                        },
+                        "purpose": {
+                            "type": "string",
+                            "description": "Short description of what is being verified",
+                        },
+                    },
+                    "required": ["phone"],
                 },
-                "required": ["phone"],
-            },
-        })
-        defs.append({
-            "name": "verify_code",
-            "description": (
-                "Check whether the code entered by the user matches the one that was sent. "
-                "Call this after the user provides the code they received by email or SMS."
-            ),
-            "input_schema": {
-                "type": "object",
-                "properties": {
-                    "identifier": {"type": "string", "description": "The email address or phone number the code was sent to"},
-                    "code": {"type": "string", "description": "The 6-digit code entered by the user"},
+            }
+        )
+        defs.append(
+            {
+                "name": "verify_code",
+                "description": (
+                    "Check whether the code entered by the user matches the one that was sent. "
+                    "Call this after the user provides the code they received by email or SMS."
+                ),
+                "input_schema": {
+                    "type": "object",
+                    "properties": {
+                        "identifier": {
+                            "type": "string",
+                            "description": "The email address or phone number the code was sent to",
+                        },
+                        "code": {
+                            "type": "string",
+                            "description": "The 6-digit code entered by the user",
+                        },
+                    },
+                    "required": ["identifier", "code"],
                 },
-                "required": ["identifier", "code"],
-            },
-        })
+            }
+        )
 
     if tools_config.get("agent_builder"):
-        defs.append({
-            "name": "list_available_models",
-            "description": "List all LLM models available to the current user, grouped by provider. Use this to discover valid model IDs before calling create_agent.",
-            "input_schema": {"type": "object", "properties": {}, "required": []},
-        })
-        defs.append({
-            "name": "create_agent",
-            "description": "Create a new AI agent with the given configuration.",
-            "input_schema": {
-                "type": "object",
-                "properties": {
-                    "name": {"type": "string", "description": "Agent display name"},
-                    "description": {"type": "string", "description": "Short description of what the agent does"},
-                    "model": {"type": "string", "description": "Exact model ID (e.g. llama-3.3-70b-versatile)"},
-                    "instructions": {"type": "string", "description": "The system prompt / instructions for the agent"},
-                    "memory_enabled": {"type": "boolean", "description": "Whether the agent remembers past sessions"},
-                    "tool_web_search": {"type": "boolean", "description": "Enable web search tool"},
-                    "tool_http": {"type": "boolean", "description": "Enable HTTP request tool"},
-                    "tool_email": {"type": "boolean", "description": "Enable send email tool"},
-                    "tool_code": {"type": "boolean", "description": "Enable Python code execution tool"},
-                    "tool_sms": {"type": "boolean", "description": "Enable SMS tool"},
-                    "tool_browser": {"type": "boolean", "description": "Enable browser/URL tool"},
+        defs.append(
+            {
+                "name": "list_available_models",
+                "description": "List all LLM models available to the current user, grouped by provider. Use this to discover valid model IDs before calling create_agent.",
+                "input_schema": {"type": "object", "properties": {}, "required": []},
+            }
+        )
+        defs.append(
+            {
+                "name": "create_agent",
+                "description": "Create a new AI agent with the given configuration.",
+                "input_schema": {
+                    "type": "object",
+                    "properties": {
+                        "name": {"type": "string", "description": "Agent display name"},
+                        "description": {
+                            "type": "string",
+                            "description": "Short description of what the agent does",
+                        },
+                        "model": {
+                            "type": "string",
+                            "description": "Exact model ID (e.g. llama-3.3-70b-versatile)",
+                        },
+                        "instructions": {
+                            "type": "string",
+                            "description": "The system prompt / instructions for the agent",
+                        },
+                        "memory_enabled": {
+                            "type": "boolean",
+                            "description": "Whether the agent remembers past sessions",
+                        },
+                        "tool_web_search": {
+                            "type": "boolean",
+                            "description": "Enable web search tool",
+                        },
+                        "tool_http": {"type": "boolean", "description": "Enable HTTP request tool"},
+                        "tool_email": {"type": "boolean", "description": "Enable send email tool"},
+                        "tool_code": {
+                            "type": "boolean",
+                            "description": "Enable Python code execution tool",
+                        },
+                        "tool_sms": {"type": "boolean", "description": "Enable SMS tool"},
+                        "tool_browser": {
+                            "type": "boolean",
+                            "description": "Enable browser/URL tool",
+                        },
+                    },
+                    "required": ["name", "model", "instructions"],
                 },
-                "required": ["name", "model", "instructions"],
-            },
-        })
+            }
+        )
 
     return defs
 
 
 # ─── Tool execution ───────────────────────────────────────────────────────────
+
 
 async def _execute_tool(name: str, inputs: dict, mcp_map: dict, ctx: dict | None = None) -> str:
     try:
@@ -1045,6 +1217,7 @@ async def _execute_tool(name: str, inputs: dict, mcp_map: dict, ctx: dict | None
 
 # ─── MCP tool execution ───────────────────────────────────────────────────────
 
+
 async def _discover_mcp_tools(server: MCPServerConfig) -> list[dict]:
     result = await _mcp_rpc(server, "tools/list", {})
     return result.get("tools", [])
@@ -1054,7 +1227,9 @@ async def _tool_mcp(server: MCPServerConfig, tool_name: str, arguments: dict) ->
     result = await _mcp_rpc(server, "tools/call", {"name": tool_name, "arguments": arguments})
     content = result.get("content", [])
     if isinstance(content, list):
-        parts = [c.get("text", "") for c in content if isinstance(c, dict) and c.get("type") == "text"]
+        parts = [
+            c.get("text", "") for c in content if isinstance(c, dict) and c.get("type") == "text"
+        ]
         return "\n".join(parts)[:4000] or json.dumps(result)[:4000]
     return str(result)[:4000]
 
@@ -1081,6 +1256,7 @@ async def _mcp_rpc(server: MCPServerConfig, method: str, params: dict) -> dict:
 
 # ─── Built-in tool implementations ───────────────────────────────────────────
 
+
 async def _tool_web_search(query: str, ctx: dict | None = None) -> str:
     user_id_str = (ctx or {}).get("user_id")
 
@@ -1089,6 +1265,7 @@ async def _tool_web_search(query: str, ctx: dict | None = None) -> str:
             return None
         try:
             from app.db.session import AsyncSessionLocal
+
             async with AsyncSessionLocal() as _db:
                 return await _get_user_key(uuid.UUID(user_id_str), provider, _db)
         except Exception:
@@ -1096,7 +1273,10 @@ async def _tool_web_search(query: str, ctx: dict | None = None) -> str:
 
     async def _try_tavily(key: str) -> str | None:
         async with httpx.AsyncClient(timeout=15) as c:
-            r = await c.post("https://api.tavily.com/search", json={"api_key": key, "query": query, "max_results": 5})
+            r = await c.post(
+                "https://api.tavily.com/search",
+                json={"api_key": key, "query": query, "max_results": 5},
+            )
         if r.status_code == 200:
             results = r.json().get("results", [])
             lines = [f"{x['title']}: {x['content']} ({x['url']})" for x in results]
@@ -1144,7 +1324,9 @@ async def _tool_web_search(query: str, ctx: dict | None = None) -> str:
 
     async def _try_serpapi(key: str) -> str | None:
         async with httpx.AsyncClient(timeout=15) as c:
-            r = await c.get("https://serpapi.com/search.json", params={"q": query, "num": 5, "api_key": key})
+            r = await c.get(
+                "https://serpapi.com/search.json", params={"q": query, "num": 5, "api_key": key}
+            )
         if r.status_code == 200:
             results = r.json().get("organic_results", [])
             lines = [f"{x['title']}: {x.get('snippet', '')} ({x['link']})" for x in results[:5]]
@@ -1160,7 +1342,10 @@ async def _tool_web_search(query: str, ctx: dict | None = None) -> str:
             )
         if r.status_code == 200:
             hits = r.json().get("hits", [])
-            lines = [f"{x['title']}: {' '.join(x.get('snippets', [])[:2])} ({x['url']})" for x in hits[:5]]
+            lines = [
+                f"{x['title']}: {' '.join(x.get('snippets', [])[:2])} ({x['url']})"
+                for x in hits[:5]
+            ]
             return "\n".join(lines) if lines else None
         return None
 
@@ -1179,13 +1364,13 @@ async def _tool_web_search(query: str, ctx: dict | None = None) -> str:
 
     # Try each provider — user key first, then platform .env key
     _providers = [
-        ("tavily",       _try_tavily,  settings.tavily_api_key),
-        ("serper",       _try_serper,  ""),
-        ("bing",         _try_bing,    ""),
-        ("brave_search", _try_brave,   settings.brave_search_api_key),
-        ("serpapi",      _try_serpapi, ""),
-        ("you",          _try_you,     ""),
-        ("exa",          _try_exa,     ""),
+        ("tavily", _try_tavily, settings.tavily_api_key),
+        ("serper", _try_serper, ""),
+        ("bing", _try_bing, ""),
+        ("brave_search", _try_brave, settings.brave_search_api_key),
+        ("serpapi", _try_serpapi, ""),
+        ("you", _try_you, ""),
+        ("exa", _try_exa, ""),
     ]
     for provider, fn, platform_key in _providers:
         key = await _user_search_key(provider) or platform_key or None
@@ -1201,11 +1386,13 @@ async def _tool_web_search(query: str, ctx: dict | None = None) -> str:
     # Free fallback: DuckDuckGo — no key required
     try:
         from duckduckgo_search import DDGS
+
         loop = asyncio.get_running_loop()
         news = await loop.run_in_executor(None, lambda: list(DDGS().news(query, max_results=5)))
         if news:
             lines = [
-                f"{r['title']}: {r['body']} ({r['url']})" + (f" [{r.get('date', '')}]" if r.get("date") else "")
+                f"{r['title']}: {r['body']} ({r['url']})"
+                + (f" [{r.get('date', '')}]" if r.get("date") else "")
                 for r in news
             ]
             return "\n".join(lines)
@@ -1273,17 +1460,36 @@ async def _tool_http(inputs: dict) -> str:
 
 
 def _tool_run_code(code: str) -> str:
+    import concurrent.futures
     import contextlib
     import io
-    import concurrent.futures
 
     allowed_builtins = {
-        "print": print, "len": len, "range": range, "enumerate": enumerate,
-        "zip": zip, "map": map, "filter": filter, "sorted": sorted,
-        "list": list, "dict": dict, "set": set, "tuple": tuple, "str": str,
-        "int": int, "float": float, "bool": bool, "abs": abs, "round": round,
-        "min": min, "max": max, "sum": sum, "type": type, "isinstance": isinstance,
-        "repr": repr, "__import__": __import__,
+        "print": print,
+        "len": len,
+        "range": range,
+        "enumerate": enumerate,
+        "zip": zip,
+        "map": map,
+        "filter": filter,
+        "sorted": sorted,
+        "list": list,
+        "dict": dict,
+        "set": set,
+        "tuple": tuple,
+        "str": str,
+        "int": int,
+        "float": float,
+        "bool": bool,
+        "abs": abs,
+        "round": round,
+        "min": min,
+        "max": max,
+        "sum": sum,
+        "type": type,
+        "isinstance": isinstance,
+        "repr": repr,
+        "__import__": __import__,
     }
 
     def _run() -> str:
@@ -1305,10 +1511,12 @@ def _tool_run_code(code: str) -> str:
 
 async def _tool_browse(url: str) -> str:
     from bs4 import BeautifulSoup
+
     if not _is_ssrf_safe(url):
         return "Error: URL is not allowed (private/internal addresses are blocked)."
-    async with httpx.AsyncClient(follow_redirects=False, timeout=20,
-                                  headers={"User-Agent": "ChatCraft-Agent/1.0"}) as client:
+    async with httpx.AsyncClient(
+        follow_redirects=False, timeout=20, headers={"User-Agent": "ChatCraft-Agent/1.0"}
+    ) as client:
         resp = await client.get(url)
     soup = BeautifulSoup(resp.content, "lxml")
     for tag in soup(["script", "style", "nav", "footer", "header"]):
@@ -1320,6 +1528,7 @@ async def _tool_browse(url: str) -> str:
 async def _tool_sheets(inputs: dict) -> str:
     import gspread
     from google.oauth2.service_account import Credentials
+
     sa_json = getattr(settings, "google_service_account_json", None)
     if not sa_json:
         return "Google service account not configured."
@@ -1367,9 +1576,11 @@ async def _tool_send_email(inputs: dict, ctx: dict | None = None) -> str:
     user_id_str = (ctx or {}).get("user_id")
     if user_id_str:
         try:
+            from sqlalchemy import select as _select
+
             from app.db.session import AsyncSessionLocal
             from app.models.user_communication_setting import UserCommunicationSetting
-            from sqlalchemy import select as _select
+
             async with AsyncSessionLocal() as _db:
                 row = await _db.scalar(
                     _select(UserCommunicationSetting).where(
@@ -1395,7 +1606,11 @@ async def _tool_send_email(inputs: dict, ctx: dict | None = None) -> str:
             msg["From"] = from_addr
             msg["To"] = to
             msg.attach(MIMEText(body, "plain"))
-            msg.attach(MIMEText(f"<html><body><p>{body.replace(chr(10), '<br>')}</p></body></html>", "html"))
+            msg.attach(
+                MIMEText(
+                    f"<html><body><p>{body.replace(chr(10), '<br>')}</p></body></html>", "html"
+                )
+            )
 
             with smtplib.SMTP(host, port) as srv:
                 srv.ehlo()
@@ -1432,6 +1647,7 @@ async def _tool_send_email(inputs: dict, ctx: dict | None = None) -> str:
 
 async def _tool_send_email_verification(inputs: dict, ctx: dict) -> str:
     import random
+
     email = inputs.get("email", "").strip()
     purpose = inputs.get("purpose", "verification")
     if not email:
@@ -1442,6 +1658,7 @@ async def _tool_send_email_verification(inputs: dict, ctx: dict) -> str:
 
     try:
         from app.db.redis import get_async_redis
+
         r = get_async_redis()
         await r.setex(redis_key, 600, code)  # 10-minute TTL
     except Exception as e:
@@ -1460,6 +1677,7 @@ async def _tool_send_email_verification(inputs: dict, ctx: dict) -> str:
 
 async def _tool_send_sms_verification(inputs: dict, ctx: dict) -> str:
     import random
+
     phone = inputs.get("phone", "").strip()
     purpose = inputs.get("purpose", "verification")
     if not phone:
@@ -1470,6 +1688,7 @@ async def _tool_send_sms_verification(inputs: dict, ctx: dict) -> str:
 
     try:
         from app.db.redis import get_async_redis
+
         r = get_async_redis()
         await r.setex(redis_key, 600, code)  # 10-minute TTL
     except Exception as e:
@@ -1492,6 +1711,7 @@ async def _tool_verify_code(inputs: dict, ctx: dict) -> str:
 
     try:
         from app.db.redis import get_async_redis
+
         r = get_async_redis()
         stored = await r.get(redis_key)
     except Exception as e:
@@ -1512,10 +1732,13 @@ async def _tool_send_sms(inputs: dict) -> str:
     message = inputs.get("message", "")
     if not to or not message:
         return "Error: 'to' phone number and 'message' are required."
-    if not getattr(settings, "twilio_account_sid", None) or not getattr(settings, "twilio_auth_token", None):
+    if not getattr(settings, "twilio_account_sid", None) or not getattr(
+        settings, "twilio_auth_token", None
+    ):
         return "SMS not configured — set Twilio credentials in settings."
     try:
         from twilio.rest import Client
+
         client = Client(settings.twilio_account_sid, settings.twilio_auth_token)
         from_number = getattr(settings, "twilio_phone_number", None)
         if not from_number:
@@ -1548,10 +1771,38 @@ async def _tool_list_available_models(ctx: dict) -> str:
         "xai": "xai_api_key",
     }
     _PROVIDER_MODELS = {
-        "anthropic": ["claude-sonnet-5", "claude-opus-4-8", "claude-fable-5", "claude-sonnet-4-6", "claude-opus-4-7", "claude-haiku-4-5-20251001"],
-        "openai": ["gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna", "gpt-4o", "gpt-4o-mini", "gpt-5", "gpt-5-mini"],
-        "google": ["gemini-3.1-pro", "gemini-3.6-flash", "gemini-2.5-pro", "gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-pro"],
-        "groq": ["openai/gpt-oss-120b", "openai/gpt-oss-20b", "qwen/qwen3.6-27b", "llama-3.3-70b-versatile", "llama-3.1-8b-instant"],
+        "anthropic": [
+            "claude-sonnet-5",
+            "claude-opus-4-8",
+            "claude-fable-5",
+            "claude-sonnet-4-6",
+            "claude-opus-4-7",
+            "claude-haiku-4-5-20251001",
+        ],
+        "openai": [
+            "gpt-5.6-sol",
+            "gpt-5.6-terra",
+            "gpt-5.6-luna",
+            "gpt-4o",
+            "gpt-4o-mini",
+            "gpt-5",
+            "gpt-5-mini",
+        ],
+        "google": [
+            "gemini-3.1-pro",
+            "gemini-3.6-flash",
+            "gemini-2.5-pro",
+            "gemini-2.5-flash",
+            "gemini-2.0-flash",
+            "gemini-1.5-pro",
+        ],
+        "groq": [
+            "openai/gpt-oss-120b",
+            "openai/gpt-oss-20b",
+            "qwen/qwen3.6-27b",
+            "llama-3.3-70b-versatile",
+            "llama-3.1-8b-instant",
+        ],
         "deepseek": ["deepseek-v4-pro", "deepseek-v4-flash"],
         "perplexity": ["sonar-pro", "sonar", "sonar-reasoning-pro", "sonar-deep-research"],
         "xai": ["grok-4.5", "grok-4.3", "grok-3", "grok-3-fast", "grok-3-mini"],
@@ -1625,6 +1876,7 @@ async def _tool_create_agent(inputs: dict, ctx: dict) -> str:
 
 # ─── System prompt builder ────────────────────────────────────────────────────
 
+
 async def _build_system_prompt(
     agent: Agent,
     db: DBSession,
@@ -1633,9 +1885,7 @@ async def _build_system_prompt(
     parts: list[str] = []
 
     if agent.chatbot_id:
-        result = await db.execute(
-            select(ChatbotConfig).where(ChatbotConfig.id == agent.chatbot_id)
-        )
+        result = await db.execute(select(ChatbotConfig).where(ChatbotConfig.id == agent.chatbot_id))
         chatbot = result.scalar_one_or_none()
         if chatbot and chatbot.system_prompt:
             parts.append(chatbot.system_prompt)
@@ -1644,23 +1894,28 @@ async def _build_system_prompt(
         parts.append(agent.instructions)
 
     if not parts:
-        parts.append("You are a helpful AI agent. Use the available tools to complete tasks thoroughly and accurately.")
+        parts.append(
+            "You are a helpful AI agent. Use the available tools to complete tasks thoroughly and accurately."
+        )
 
     # Agent Builder mode: prepend strict tool-use instructions so the model
     # doesn't hallucinate steps or generate code instead of calling tools.
     agent_tools = agent.tools or {}
     if agent_tools.get("agent_builder"):
-        parts.insert(0, (
-            "You are an AI Agent Builder assistant. Your only job is to help users create new AI agents "
-            "by calling the available tools — never by writing or generating code.\n\n"
-            "STRICT RULES:\n"
-            "1. Do NOT write Python, JavaScript, or any other code in your responses.\n"
-            "2. Do NOT invent or fabricate steps such as 'retrieved user', 'authenticated', or any API calls.\n"
-            "3. To create an agent: first call list_available_models to see valid model IDs, "
-            "then call create_agent with the appropriate parameters.\n"
-            "4. After create_agent succeeds, tell the user the agent was created and ask them to refresh the Agents page.\n"
-            "5. If you are unsure of any parameter, ask the user before calling the tool."
-        ))
+        parts.insert(
+            0,
+            (
+                "You are an AI Agent Builder assistant. Your only job is to help users create new AI agents "
+                "by calling the available tools — never by writing or generating code.\n\n"
+                "STRICT RULES:\n"
+                "1. Do NOT write Python, JavaScript, or any other code in your responses.\n"
+                "2. Do NOT invent or fabricate steps such as 'retrieved user', 'authenticated', or any API calls.\n"
+                "3. To create an agent: first call list_available_models to see valid model IDs, "
+                "then call create_agent with the appropriate parameters.\n"
+                "4. After create_agent succeeds, tell the user the agent was created and ask them to refresh the Agents page.\n"
+                "5. If you are unsure of any parameter, ask the user before calling the tool."
+            ),
+        )
 
     prompt = "\n\n".join(parts)
 
@@ -1671,6 +1926,7 @@ async def _build_system_prompt(
     if user_id and ("{{USER_API_TOKEN}}" in prompt or "{{BASE_URL}}" in prompt):
         from app.core.security import create_access_token
         from app.models.user import User as _User
+
         user = await db.get(_User, user_id)
         role = user.role.value if user else "free"
         agent_token = create_access_token(user_id, role, expires_minutes=60)
@@ -1682,6 +1938,7 @@ async def _build_system_prompt(
 
 
 # ─── Memory helpers ───────────────────────────────────────────────────────────
+
 
 async def _load_agent_memory(agent_id: uuid.UUID, user_id: uuid.UUID, db) -> list[dict]:
     """Load the last 5 conversation sessions and flatten them into a history list."""
@@ -1751,7 +2008,7 @@ async def _post_run_tasks(
                 "agent_name": agent.name,
                 "messages": messages,
                 "tool_calls": tool_call_count,
-                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "timestamp": datetime.now(UTC).isoformat(),
             }
             async with httpx.AsyncClient(timeout=5) as client:
                 await client.post(agent.webhook_url, json=payload)
@@ -1761,14 +2018,13 @@ async def _post_run_tasks(
 
 # ─── Helpers ──────────────────────────────────────────────────────────────────
 
+
 def _sse(data: dict) -> str:
     return f"data: {json.dumps(data)}\n\n"
 
 
 async def _get_owned_agent(agent_id: uuid.UUID, user_id: uuid.UUID, db: DBSession) -> Agent:
-    result = await db.execute(
-        select(Agent).where(Agent.id == agent_id, Agent.user_id == user_id)
-    )
+    result = await db.execute(select(Agent).where(Agent.id == agent_id, Agent.user_id == user_id))
     agent = result.scalar_one_or_none()
     if not agent:
         raise HTTPException(status_code=404, detail="Agent not found")
@@ -1785,9 +2041,13 @@ async def _get_shared_agent(share_token: str, db: DBSession) -> Agent:
     return agent
 
 
-async def _get_owned_chatbot(chatbot_id: uuid.UUID, user_id: uuid.UUID, db: DBSession) -> ChatbotConfig:
+async def _get_owned_chatbot(
+    chatbot_id: uuid.UUID, user_id: uuid.UUID, db: DBSession
+) -> ChatbotConfig:
     result = await db.execute(
-        select(ChatbotConfig).where(ChatbotConfig.id == chatbot_id, ChatbotConfig.user_id == user_id)
+        select(ChatbotConfig).where(
+            ChatbotConfig.id == chatbot_id, ChatbotConfig.user_id == user_id
+        )
     )
     chatbot = result.scalar_one_or_none()
     if not chatbot:

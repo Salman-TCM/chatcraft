@@ -6,22 +6,22 @@ Routes: /api/v1/conversations (list, search, detail, close, reopen, takeover)
         /api/v1/conversations/{id}/assign
         /api/v1/team (team member management)
 """
+
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile, status
-from sqlalchemy import func, or_, select, text
-from sqlalchemy.orm import selectinload
-
 from pydantic import BaseModel
+from sqlalchemy import func, or_, select
+from sqlalchemy.orm import selectinload
 
 from app.core.dependencies import CurrentUser, DBSession, require_feature
 from app.core.features import INBOX
 from app.models.channel_integration import ChannelIntegration
 from app.models.chatbot_config import ChatbotConfig
-from app.models.crm import Contact, Tag
 from app.models.conversation import Conversation
+from app.models.crm import Contact, Tag
 from app.models.inbox import InboxAssignment, InternalNote, TeamMember
 from app.models.message import Message, MessageRole
 from app.models.user import User
@@ -58,9 +58,17 @@ _MANAGER_ONLY_ACTIONS = {"close", "reopen", "assign", "roundrobin"}
 # ── Helpers ────────────────────────────────────────────────────────────────────
 
 CHANNEL_ICONS: dict[str, str] = {
-    "web": "🌐", "facebook": "📘", "instagram": "📷", "whatsapp": "💬",
-    "telegram": "✈️", "discord": "🎮", "sms": "📱", "phone": "📞",
-    "twitter": "🐦", "tiktok": "🎵", "email": "📧",
+    "web": "🌐",
+    "facebook": "📘",
+    "instagram": "📷",
+    "whatsapp": "💬",
+    "telegram": "✈️",
+    "discord": "🎮",
+    "sms": "📱",
+    "phone": "📞",
+    "twitter": "🐦",
+    "tiktok": "🎵",
+    "email": "📧",
 }
 
 
@@ -120,7 +128,9 @@ async def _get_owned_conv(conv_id: uuid.UUID, user_id: uuid.UUID, db) -> Convers
     # Agents can only access conversations explicitly assigned to them
     if team_role == "agent":
         if not conv.assignment or str(conv.assignment.assigned_to_user_id) != str(user_id):
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Conversation not found")
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND, detail="Conversation not found"
+            )
 
     return conv
 
@@ -140,12 +150,16 @@ def _conv_summary(c: Conversation) -> dict:
         "last_message": {
             "role": last_msg.role.value,
             "content": last_msg.content[:200],
-        } if last_msg else None,
+        }
+        if last_msg
+        else None,
         "assigned_to": {
             "id": str(c.assignment.assignee.id),
             "email": c.assignment.assignee.email,
             "name": c.assignment.assignee.name,
-        } if c.assignment and c.assignment.assignee else None,
+        }
+        if c.assignment and c.assignment.assignee
+        else None,
     }
 
 
@@ -173,6 +187,7 @@ def _msg_dict(m: Message) -> dict:
 # ══════════════════════════════════════════════════════════════════════════════
 # CONVERSATIONS
 # ══════════════════════════════════════════════════════════════════════════════
+
 
 @router.get("/conversations", response_model=dict)
 async def list_conversations(
@@ -211,9 +226,9 @@ async def list_conversations(
         stmt = stmt.where(Conversation.chatbot_id == chatbot_id)
     # Agents only see conversations assigned to them
     if team_role == "agent":
-        stmt = stmt.join(
-            InboxAssignment, Conversation.id == InboxAssignment.conversation_id
-        ).where(InboxAssignment.assigned_to_user_id == user.id)
+        stmt = stmt.join(InboxAssignment, Conversation.id == InboxAssignment.conversation_id).where(
+            InboxAssignment.assigned_to_user_id == user.id
+        )
 
     result = await db.execute(stmt)
     convs = result.scalars().all()
@@ -296,7 +311,9 @@ async def get_conversation(conv_id: uuid.UUID, user: CurrentUser, db: DBSession)
         {
             "id": str(n.id),
             "content": n.content,
-            "author": {"id": str(n.author.id), "name": n.author.name, "email": n.author.email} if n.author else None,
+            "author": {"id": str(n.author.id), "name": n.author.name, "email": n.author.email}
+            if n.author
+            else None,
             "created_at": n.created_at.isoformat(),
         }
         for n in conv.notes
@@ -316,7 +333,10 @@ async def close_conversation(conv_id: uuid.UUID, user: CurrentUser, db: DBSessio
 
 @router.post("/conversations/{conv_id}/reopen", response_model=dict)
 async def reopen_conversation(
-    conv_id: uuid.UUID, user: CurrentUser, db: DBSession, body: ReopenConversationRequest = ReopenConversationRequest()
+    conv_id: uuid.UUID,
+    user: CurrentUser,
+    db: DBSession,
+    body: ReopenConversationRequest = ReopenConversationRequest(),
 ) -> dict:
     _, team_role = await _resolve_caller(user.id, db)
     _require_manager(team_role, "reopen")
@@ -340,13 +360,16 @@ async def human_takeover(conv_id: uuid.UUID, user: CurrentUser, db: DBSession) -
 # MESSAGES
 # ══════════════════════════════════════════════════════════════════════════════
 
+
 @router.get("/conversations/{conv_id}/messages", response_model=dict)
 async def get_messages(conv_id: uuid.UUID, user: CurrentUser, db: DBSession) -> dict:
     conv = await _get_owned_conv(conv_id, user.id, db)
     return {"success": True, "data": [_msg_dict(m) for m in conv.messages]}
 
 
-@router.post("/conversations/{conv_id}/messages", response_model=dict, status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/conversations/{conv_id}/messages", response_model=dict, status_code=status.HTTP_201_CREATED
+)
 async def send_message(
     conv_id: uuid.UUID,
     body: SendMessageRequest,
@@ -363,7 +386,7 @@ async def send_message(
         content=content,
     )
     db.add(msg)
-    conv.last_message_at = datetime.now(timezone.utc)
+    conv.last_message_at = datetime.now(UTC)
     await db.commit()
     await db.refresh(msg)
 
@@ -390,11 +413,17 @@ async def send_email_with_attachments(
     from app.services.channels.email_sender import MAX_ATTACHMENTS, MAX_TOTAL_BYTES
 
     if len(files) > MAX_ATTACHMENTS:
-        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=f"Maximum {MAX_ATTACHMENTS} attachments allowed")
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"Maximum {MAX_ATTACHMENTS} attachments allowed",
+        )
 
     conv = await _get_owned_conv(conv_id, user.id, db)
     if conv.channel != "email":
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Attachments only supported for email conversations")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Attachments only supported for email conversations",
+        )
 
     # Read and validate attachments
     attachments: list[tuple[str, bytes, str]] = []
@@ -403,7 +432,10 @@ async def send_email_with_attachments(
         data = await f.read()
         total_size += len(data)
         if total_size > MAX_TOTAL_BYTES:
-            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Total attachment size exceeds 25 MB")
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="Total attachment size exceeds 25 MB",
+            )
         mime_type = f.content_type or "application/octet-stream"
         attachments.append((f.filename or "attachment", data, mime_type))
 
@@ -413,7 +445,7 @@ async def send_email_with_attachments(
         content=content,
     )
     db.add(msg)
-    conv.last_message_at = datetime.now(timezone.utc)
+    conv.last_message_at = datetime.now(UTC)
     await db.commit()
     await db.refresh(msg)
 
@@ -426,6 +458,7 @@ async def send_email_with_attachments(
 # ══════════════════════════════════════════════════════════════════════════════
 # INTERNAL NOTES
 # ══════════════════════════════════════════════════════════════════════════════
+
 
 @router.get("/conversations/{conv_id}/notes", response_model=dict)
 async def get_notes(conv_id: uuid.UUID, user: CurrentUser, db: DBSession) -> dict:
@@ -444,7 +477,9 @@ async def get_notes(conv_id: uuid.UUID, user: CurrentUser, db: DBSession) -> dic
     }
 
 
-@router.post("/conversations/{conv_id}/notes", response_model=dict, status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/conversations/{conv_id}/notes", response_model=dict, status_code=status.HTTP_201_CREATED
+)
 async def add_note(
     conv_id: uuid.UUID, body: AddNoteRequest, user: CurrentUser, db: DBSession
 ) -> dict:
@@ -469,6 +504,7 @@ async def add_note(
 # ASSIGNMENT
 # ══════════════════════════════════════════════════════════════════════════════
 
+
 @router.post("/conversations/{conv_id}/assign", response_model=dict)
 async def assign_conversation(
     conv_id: uuid.UUID, body: AssignConversationRequest, user: CurrentUser, db: DBSession
@@ -490,12 +526,16 @@ async def assign_conversation(
         db.add(assignment)
 
     await db.commit()
-    return {"success": True, "data": {"conversation_id": str(conv_id), "assigned_to_user_id": str(assignee_id)}}
+    return {
+        "success": True,
+        "data": {"conversation_id": str(conv_id), "assigned_to_user_id": str(assignee_id)},
+    }
 
 
 # ══════════════════════════════════════════════════════════════════════════════
 # TEAM MEMBERS
 # ══════════════════════════════════════════════════════════════════════════════
+
 
 @router.get("/team", response_model=dict)
 async def list_team(user: CurrentUser, db: DBSession) -> dict:
@@ -522,7 +562,9 @@ async def list_team(user: CurrentUser, db: DBSession) -> dict:
 
 
 @router.post("/team", response_model=dict, status_code=status.HTTP_201_CREATED)
-async def invite_team_member(body: InviteTeamMemberRequest, user: CurrentUser, db: DBSession) -> dict:
+async def invite_team_member(
+    body: InviteTeamMemberRequest, user: CurrentUser, db: DBSession
+) -> dict:
     email = body.email.strip().lower()
     role = body.role
 
@@ -570,6 +612,7 @@ async def remove_team_member(member_id: uuid.UUID, user: CurrentUser, db: DBSess
 
 # ── Round-robin assignment ──────────────────────────────────────────────────────
 
+
 @router.post("/conversations/{conv_id}/assign-roundrobin", response_model=dict)
 async def assign_roundrobin(conv_id: uuid.UUID, user: CurrentUser, db: DBSession) -> dict:
     """Assign conversation to the next available team member in round-robin order."""
@@ -580,12 +623,18 @@ async def assign_roundrobin(conv_id: uuid.UUID, user: CurrentUser, db: DBSession
     # Get active team members (scoped to the workspace owner)
     members_result = await db.execute(
         select(TeamMember)
-        .where(TeamMember.owner_user_id == owner_id, TeamMember.status == "active", TeamMember.member_user_id.isnot(None))
+        .where(
+            TeamMember.owner_user_id == owner_id,
+            TeamMember.status == "active",
+            TeamMember.member_user_id.isnot(None),
+        )
         .order_by(TeamMember.created_at)
     )
     members = members_result.scalars().all()
     if not members:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No active team members to assign")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="No active team members to assign"
+        )
 
     # Count existing assignments per member to find the one with fewest
     counts_result = await db.execute(
@@ -609,7 +658,9 @@ async def assign_roundrobin(conv_id: uuid.UUID, user: CurrentUser, db: DBSession
     if assignment:
         assignment.assigned_to_user_id = chosen.member_user_id
     else:
-        assignment = InboxAssignment(conversation_id=conv.id, assigned_to_user_id=chosen.member_user_id)
+        assignment = InboxAssignment(
+            conversation_id=conv.id, assigned_to_user_id=chosen.member_user_id
+        )
         db.add(assignment)
     await db.commit()
     await db.refresh(assignment)
@@ -625,6 +676,7 @@ async def assign_roundrobin(conv_id: uuid.UUID, user: CurrentUser, db: DBSession
 
 
 # ── Contact quick-edit ──────────────────────────────────────────────────────────
+
 
 class ContactUpdateRequest(BaseModel):
     first_name: str | None = None
@@ -715,6 +767,7 @@ async def update_conversation_contact(
 
 # ── AI Email Body Composer ─────────────────────────────────────────────────────
 
+
 @router.post("/conversations/{conv_id}/ai-compose", response_model=dict)
 async def ai_compose_email(
     conv_id: uuid.UUID,
@@ -731,8 +784,7 @@ async def ai_compose_email(
     # Build recent conversation history as context
     recent = conv.messages[-10:] if conv.messages else []
     history_text = "\n".join(
-        f"{'Customer' if m.role.value == 'user' else 'Support'}: {m.content[:400]}"
-        for m in recent
+        f"{'Customer' if m.role.value == 'user' else 'Support'}: {m.content[:400]}" for m in recent
     )
 
     system_prompt = (
@@ -748,6 +800,7 @@ async def ai_compose_email(
     try:
         from app.services.llm.base import ChatMessage as LLMMsg
         from app.services.llm.router import get_provider
+
         provider = get_provider("claude-sonnet-4-6")
         msgs = [
             LLMMsg(role="system", content=system_prompt),
@@ -756,12 +809,15 @@ async def ai_compose_email(
         resp = await provider.complete(msgs, max_tokens=400, temperature=0.7)
         draft = resp.content.strip()
     except Exception as exc:
-        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=f"AI service error: {exc}")
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY, detail=f"AI service error: {exc}"
+        )
 
     return {"success": True, "data": {"draft": draft}}
 
 
 # ── Email outbound dispatch ────────────────────────────────────────────────────
+
 
 async def _dispatch_email_reply(
     conv: Conversation,
@@ -783,11 +839,15 @@ async def _dispatch_email_reply(
             return
 
         from app.services.channels.email_sender import EmailSender
+
         sender = EmailSender(integration.config)
         subject = conv.title or "Re: Your message"
         if not subject.lower().startswith("re:"):
             subject = f"Re: {subject}"
-        await sender.send(to=conv.contact.email, subject=subject, body=content, attachments=attachments)
+        await sender.send(
+            to=conv.contact.email, subject=subject, body=content, attachments=attachments
+        )
     except Exception as exc:
         from loguru import logger
+
         logger.error(f"Failed to send email reply for conv {conv.id}: {exc}")

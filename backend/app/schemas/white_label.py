@@ -1,4 +1,5 @@
 """Pydantic request schemas for the White Label & Agency API."""
+
 import uuid
 from typing import Literal
 

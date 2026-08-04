@@ -11,6 +11,7 @@ FlowTriggerType = Literal["manual", "keyword", "webhook"]
 
 # ── Flows ─────────────────────────────────────────────────────────────────────
 
+
 class FlowGenerateRequest(BaseModel):
     # Stripped before length-checked so a whitespace-only description is
     # rejected, matching the previous (body.get("description") or "").strip() guard.
@@ -64,6 +65,7 @@ class FlowTriggerRequest(BaseModel):
 
 
 # ── Folders ───────────────────────────────────────────────────────────────────
+
 
 class FlowFolderCreate(BaseModel):
     # Stripped before length-checked, matching the previous

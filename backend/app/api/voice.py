@@ -5,6 +5,7 @@ Voice API
   GET  /api/voice/voices     — list ElevenLabs voices
   GET  /api/voice/usage      — current month TTS chars + STT seconds
 """
+
 import asyncio
 
 from fastapi import APIRouter, HTTPException, UploadFile, status
@@ -40,9 +41,7 @@ async def text_to_speech(
     voice_id = body.voice_id or voice_svc.DEFAULT_VOICE
 
     # ── Check cache ───────────────────────────────────────────────────────────
-    cached_url = await voice_svc.get_cached_audio_url(
-        redis, body.text, voice_id, body.model_id
-    )
+    cached_url = await voice_svc.get_cached_audio_url(redis, body.text, voice_id, body.model_id)
     if cached_url:
         if body.use_cache_url:
             return RedirectResponse(url=cached_url, status_code=302)
@@ -50,9 +49,7 @@ async def text_to_speech(
         return RedirectResponse(url=cached_url, status_code=302)
 
     # ── Track usage (fire-and-forget) ─────────────────────────────────────────
-    asyncio.create_task(
-        voice_svc.track_tts_chars(redis, str(user.id), len(body.text))
-    )
+    asyncio.create_task(voice_svc.track_tts_chars(redis, str(user.id), len(body.text)))
 
     # ── Stream from ElevenLabs + collect for caching ──────────────────────────
     collected: list[bytes] = []
@@ -69,11 +66,7 @@ async def text_to_speech(
             yield chunk
 
         # After streaming completes, cache in background
-        asyncio.create_task(
-            _cache_audio(
-                collected, body.text, voice_id, body.model_id, redis
-            )
-        )
+        asyncio.create_task(_cache_audio(collected, body.text, voice_id, body.model_id, redis))
 
     return StreamingResponse(
         audio_stream(),
@@ -105,7 +98,11 @@ async def speech_to_text(
     if len(data) > MAX_AUDIO_BYTES:
         raise HTTPException(
             status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
-            detail={"success": False, "error": "Audio file exceeds 25 MB", "code": "FILE_TOO_LARGE"},
+            detail={
+                "success": False,
+                "error": "Audio file exceeds 25 MB",
+                "code": "FILE_TOO_LARGE",
+            },
         )
 
     content_type = file.content_type or "audio/webm"
@@ -120,9 +117,7 @@ async def speech_to_text(
 
     # Estimate duration from file size and track usage
     estimated_seconds = len(data) / _MP3_BYTES_PER_SEC
-    asyncio.create_task(
-        voice_svc.track_stt_seconds(redis, str(user.id), estimated_seconds)
-    )
+    asyncio.create_task(voice_svc.track_stt_seconds(redis, str(user.id), estimated_seconds))
 
     return STTResponse(transcript=transcript, duration_seconds=round(estimated_seconds, 2))
 
@@ -135,7 +130,11 @@ async def get_voices(user: CurrentUser) -> list[VoiceItem]:
     except Exception as exc:
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
-            detail={"success": False, "error": f"Could not fetch voices: {exc}", "code": "VOICES_ERROR"},
+            detail={
+                "success": False,
+                "error": f"Could not fetch voices: {exc}",
+                "code": "VOICES_ERROR",
+            },
         )
     return [VoiceItem(**v) for v in voices]
 
@@ -149,6 +148,7 @@ async def get_usage(user: CurrentUser, redis: RedisClient) -> VoiceUsageResponse
 
 # ── Internal helpers ──────────────────────────────────────────────────────────
 
+
 async def _cache_audio(
     chunks: list[bytes],
     text: str,
@@ -160,10 +160,12 @@ async def _cache_audio(
     try:
         data = b"".join(chunks)
         import hashlib
+
         digest = hashlib.sha256(f"{text}|{voice_id}|{model_id}".encode()).hexdigest()[:12]
         filename = f"tts_{digest}.mp3"
         url = await voice_svc.upload_audio_to_storage(data, filename)
         await voice_svc.cache_audio_url(redis, text, voice_id, model_id, url)
     except Exception as exc:
         from app.core.logging import logger
+
         logger.warning(f"TTS cache upload failed: {exc!r}")

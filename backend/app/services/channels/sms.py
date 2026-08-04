@@ -5,6 +5,7 @@ Rich payload shapes for send_rich():
   text  — { "type": "text", "body": "..." }
   mms   — { "type": "mms", "body": "...", "media_url": "https://..." }
 """
+
 import base64
 
 import httpx

@@ -12,6 +12,7 @@ Per-minute limits by role:
     creator           — 300 rpm
     admin             — unlimited (10 000 rpm sentinel)
 """
+
 from __future__ import annotations
 
 from slowapi import Limiter

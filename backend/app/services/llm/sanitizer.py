@@ -3,7 +3,9 @@ import re
 # Patterns that suggest prompt injection attempts in user content.
 # We log and strip rather than hard-block so legitimate users aren't affected.
 _INJECTION_PATTERNS: list[re.Pattern[str]] = [
-    re.compile(r"ignore\s+(all\s+)?(previous|prior|above)\s+(instructions?|prompts?|context)", re.I),
+    re.compile(
+        r"ignore\s+(all\s+)?(previous|prior|above)\s+(instructions?|prompts?|context)", re.I
+    ),
     re.compile(r"you\s+are\s+now\s+(a\s+)?(?!an?\s+AI|an?\s+assistant)", re.I),
     re.compile(r"disregard\s+(all\s+)?(previous|prior|above)", re.I),
     re.compile(r"forget\s+(everything|all)\s+(above|previous|prior)", re.I),

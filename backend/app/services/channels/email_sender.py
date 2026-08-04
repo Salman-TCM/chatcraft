@@ -13,15 +13,15 @@ Config (stored in ChannelIntegration.config):
 Attachments format (passed to send/send_with_attachments):
   list of (filename: str, data: bytes, mime_type: str)
 """
+
 from __future__ import annotations
 
 import asyncio
 import smtplib
-from email.mime.application import MIMEApplication
+from email import encoders
 from email.mime.base import MIMEBase
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
-from email import encoders
 from typing import Any
 
 from loguru import logger
@@ -69,12 +69,18 @@ class EmailSender:
         alt = MIMEMultipart("alternative")
         alt.attach(MIMEText(body, "plain"))
         html_body = body.replace("\n", "<br>")
-        alt.attach(MIMEText(f"<div style='font-family:sans-serif;line-height:1.6'>{html_body}</div>", "html"))
+        alt.attach(
+            MIMEText(
+                f"<div style='font-family:sans-serif;line-height:1.6'>{html_body}</div>", "html"
+            )
+        )
         msg.attach(alt)
 
         # Attachments
-        for filename, data, mime_type in (attachments or []):
-            main_type, sub_type = (mime_type.split("/", 1) if "/" in mime_type else ("application", "octet-stream"))
+        for filename, data, mime_type in attachments or []:
+            main_type, sub_type = (
+                mime_type.split("/", 1) if "/" in mime_type else ("application", "octet-stream")
+            )
             part = MIMEBase(main_type, sub_type)
             part.set_payload(data)
             encoders.encode_base64(part)

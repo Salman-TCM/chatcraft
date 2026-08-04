@@ -28,9 +28,7 @@ class MCPServerConfig(TimestampMixin, Base):
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     server_url: Mapped[str] = mapped_column(String(2048), nullable=False)
     # none | bearer | header
-    auth_type: Mapped[str] = mapped_column(
-        String(50), nullable=False, server_default="none"
-    )
+    auth_type: Mapped[str] = mapped_column(String(50), nullable=False, server_default="none")
     auth_config: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
     is_active: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=True, server_default="true"

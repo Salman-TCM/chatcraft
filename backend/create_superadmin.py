@@ -1,9 +1,12 @@
 #!/usr/bin/env python3
 import asyncio
-from app.core.security import hash_password
-from app.models.user import User, UserRole
+
 from sqlalchemy import select
+
+from app.core.security import hash_password
 from app.db.session import AsyncSessionLocal
+from app.models.user import User, UserRole
+
 
 async def create_superadmin():
     async with AsyncSessionLocal() as db:
@@ -17,7 +20,7 @@ async def create_superadmin():
             await db.commit()
             print(f"✓ Upgraded {existing.email} to superadmin role")
             return
-        
+
         # Create superadmin
         superadmin = User(
             email="superadmin@chatcraft.ai",
@@ -29,11 +32,12 @@ async def create_superadmin():
         db.add(superadmin)
         await db.commit()
         await db.refresh(superadmin)
-        
-        print(f"✓ Superadmin created successfully!")
-        print(f"  Email: superadmin@chatcraft.ai")
-        print(f"  Password: SuperAdmin@123")
+
+        print("✓ Superadmin created successfully!")
+        print("  Email: superadmin@chatcraft.ai")
+        print("  Password: SuperAdmin@123")
         print(f"  Role: {superadmin.role}")
         print(f"  ID: {superadmin.id}")
+
 
 asyncio.run(create_superadmin())

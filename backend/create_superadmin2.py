@@ -1,9 +1,12 @@
 #!/usr/bin/env python3
 import asyncio
-from app.core.security import hash_password
-from app.models.user import User, UserRole
+
 from sqlalchemy import select
+
+from app.core.security import hash_password
 from app.db.session import AsyncSessionLocal
+from app.models.user import User, UserRole
+
 
 async def create_superadmin():
     async with AsyncSessionLocal() as db:
@@ -12,7 +15,7 @@ async def create_superadmin():
         if existing:
             print(f"✓ Superadmin already exists: {existing.email}")
             return
-        
+
         # Create superadmin
         superadmin = User(
             email="superadmin@gmail.com",
@@ -24,11 +27,12 @@ async def create_superadmin():
         db.add(superadmin)
         await db.commit()
         await db.refresh(superadmin)
-        
-        print(f"✓ Superadmin created successfully!")
-        print(f"  Email: superadmin@gmail.com")
-        print(f"  Password: Test@123")
+
+        print("✓ Superadmin created successfully!")
+        print("  Email: superadmin@gmail.com")
+        print("  Password: Test@123")
         print(f"  Role: {superadmin.role}")
         print(f"  ID: {superadmin.id}")
+
 
 asyncio.run(create_superadmin())

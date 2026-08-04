@@ -6,6 +6,7 @@ from fastapi import APIRouter
 from fastapi.responses import JSONResponse
 from sqlalchemy import text
 
+from app.core.config import settings
 from app.db.redis import get_async_redis
 from app.db.session import engine
 
@@ -90,15 +91,18 @@ async def queue_check() -> JSONResponse:
     start = time.monotonic()
     try:
         from app.workers.debug_worker import ping
+
         result = ping.apply_async()
         outcome = result.get(timeout=5)
         latency_ms = round((time.monotonic() - start) * 1000, 2)
-        return JSONResponse({
-            "status": "healthy",
-            "task_id": result.id,
-            "worker": outcome.get("worker"),
-            "latency_ms": latency_ms,
-        })
+        return JSONResponse(
+            {
+                "status": "healthy",
+                "task_id": result.id,
+                "worker": outcome.get("worker"),
+                "latency_ms": latency_ms,
+            }
+        )
     except Exception as exc:
         return JSONResponse(
             {"status": "unhealthy", "error": str(exc)},

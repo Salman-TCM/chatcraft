@@ -6,38 +6,39 @@ Widget API
   PUT  /api/widget/manage/{chatbot_id}          — owner: update widget config
   POST /api/widget/manage/{chatbot_id}/rotate-token — owner: regenerate embed token
 """
+
 import json
 import secrets
 import uuid
 from calendar import monthrange
-from datetime import datetime, timezone
-from typing import AsyncIterator
+from collections.abc import AsyncIterator
+from datetime import UTC, datetime
 
-from fastapi import APIRouter, BackgroundTasks, Header, HTTPException, Request, Response as FastAPIResponse, status
+from fastapi import APIRouter, BackgroundTasks, Header, HTTPException, Request, status
+from fastapi import Response as FastAPIResponse
 from fastapi.responses import StreamingResponse
-from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
-from jose import JWTError
+from fastapi.security import HTTPBearer
+from pydantic import BaseModel as _BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.core.dependencies import CurrentUser, DBSession, RedisClient
-from app.core.security import decode_token
-from app.db.session import get_db
 from app.models.chatbot_config import ChatbotConfig
 from app.models.conversation import Conversation
-from app.models.message import Message, MessageFeedback, MessageRole
-from app.models.user import User, UserRole
+from app.models.message import Message, MessageRole
 from app.models.widget_config import WidgetConfig
 from app.models.widget_license import WidgetLicense
 from app.schemas.chat import ChatRequest
 from app.schemas.widget import WidgetConfigResponse, WidgetConfigUpdate, WidgetPublicConfig
-from pydantic import BaseModel as _BaseModel
+
 
 class _LicenseCreate(_BaseModel):
     label: str = ""
     allowed_domain: str | None = None
     expires_at: datetime | None = None
+
+
 from app.services.kb.rag import RAGService
 from app.services.llm import (
     ChatMessage,
@@ -77,6 +78,7 @@ async def get_widget_config(
             cached = await redis.get(cache_key)
             if cached:
                 import json as _json
+
                 http_response.headers["Cache-Control"] = (
                     f"public, max-age={_WIDGET_CFG_TTL}, s-maxage={_WIDGET_CFG_TTL}, stale-while-revalidate=30"
                 )
@@ -99,6 +101,7 @@ async def get_widget_config(
     if wc.embedded_store_id:
         try:
             from app.models.commerce import CommerceStore
+
             store_result = await db.execute(
                 select(CommerceStore).where(CommerceStore.id == wc.embedded_store_id)
             )
@@ -140,9 +143,8 @@ async def get_widget_config(
     # Apply agency branding when chatbot belongs to an agency-owned account
     try:
         from app.models.white_label import Agency
-        agency_result = await db.execute(
-            select(Agency).where(Agency.owner_user_id == bot.user_id)
-        )
+
+        agency_result = await db.execute(select(Agency).where(Agency.owner_user_id == bot.user_id))
         agency = agency_result.scalar_one_or_none()
         if agency:
             data["agency_primary_colour"] = agency.primary_colour
@@ -157,7 +159,10 @@ async def get_widget_config(
     if redis is not None:
         try:
             import json as _json
-            await redis.setex(cache_key, _WIDGET_CFG_TTL, _json.dumps(response_payload, default=str))
+
+            await redis.setex(
+                cache_key, _WIDGET_CFG_TTL, _json.dumps(response_payload, default=str)
+            )
         except Exception:
             pass
 
@@ -170,6 +175,7 @@ async def get_widget_config(
 
 
 # ── Public store products ──────────────────────────────────────────────────────
+
 
 @router.get("/{chatbot_id}/store-products", response_model=dict)
 async def get_widget_store_products(
@@ -188,7 +194,8 @@ async def get_widget_store_products(
         return {"success": True, "data": {"products": [], "store": None}}
 
     try:
-        from app.models.commerce import CommerceStore, CommerceProduct
+        from app.models.commerce import CommerceProduct, CommerceStore
+
         store_result = await db.execute(
             select(CommerceStore).where(
                 CommerceStore.id == wc.embedded_store_id,
@@ -205,7 +212,9 @@ async def get_widget_store_products(
         )
         if category:
             q = q.where(CommerceProduct.category == category)
-        q = q.order_by(CommerceProduct.sort_order, CommerceProduct.created_at).limit(min(limit, 100))
+        q = q.order_by(CommerceProduct.sort_order, CommerceProduct.created_at).limit(
+            min(limit, 100)
+        )
 
         products_result = await db.execute(q)
         products = products_result.scalars().all()
@@ -226,7 +235,9 @@ async def get_widget_store_products(
                         "name": p.name,
                         "description": p.description,
                         "price": float(p.price),
-                        "compare_at_price": float(p.compare_at_price) if p.compare_at_price else None,
+                        "compare_at_price": float(p.compare_at_price)
+                        if p.compare_at_price
+                        else None,
                         "image_url": p.image_url,
                         "category": p.category,
                         "sku": p.sku,
@@ -241,6 +252,7 @@ async def get_widget_store_products(
 
 
 # ── Widget chat ────────────────────────────────────────────────────────────────
+
 
 @router.post("/{chatbot_id}/chat")
 async def widget_chat(
@@ -279,7 +291,11 @@ async def widget_chat(
             if req_host not in allowed:
                 raise HTTPException(
                     status_code=status.HTTP_403_FORBIDDEN,
-                    detail={"success": False, "error": "Domain not allowed", "code": "DOMAIN_NOT_ALLOWED"},
+                    detail={
+                        "success": False,
+                        "error": "Domain not allowed",
+                        "code": "DOMAIN_NOT_ALLOWED",
+                    },
                 )
 
     # ── load chatbot ──────────────────────────────────────────────────────────
@@ -317,11 +333,14 @@ async def widget_chat(
         await db.flush()
 
     from sqlalchemy import func
-    is_first = (await db.execute(
-        select(func.count()).select_from(Message).where(
-            Message.conversation_id == conv.id, Message.role == MessageRole.user
+
+    is_first = (
+        await db.execute(
+            select(func.count())
+            .select_from(Message)
+            .where(Message.conversation_id == conv.id, Message.role == MessageRole.user)
         )
-    )).scalar_one() == 0
+    ).scalar_one() == 0
 
     sanitized = sanitize(body.message)
     db.add(Message(conversation_id=conv.id, role=MessageRole.user, content=sanitized))
@@ -372,6 +391,7 @@ async def widget_chat(
                     break
                 if chunk.done:
                     from app.db.session import AsyncSessionLocal
+
                     async with AsyncSessionLocal() as session:
                         msg = Message(
                             conversation_id=conv_id,
@@ -400,6 +420,7 @@ async def widget_chat(
                     )
                     if is_first:
                         from app.api.chat import _generate_title
+
                         background_tasks.add_task(
                             _generate_title, conv_id, body.message, "".join(full), model_id
                         )
@@ -460,6 +481,7 @@ async def widget_push_subscribe(
     wc_result = await redis.get(f"wc:token:{x_widget_token}")
     if not wc_result:
         from app.db.session import AsyncSessionLocal
+
         async with AsyncSessionLocal() as session:
             r = await session.execute(
                 select(WidgetConfig).where(WidgetConfig.embed_token == x_widget_token)
@@ -474,6 +496,7 @@ async def widget_push_subscribe(
 
 
 # ── Owner: manage widget config ───────────────────────────────────────────────
+
 
 @router.get("/manage/{chatbot_id}", response_model=dict)
 async def get_manage(chatbot_id: uuid.UUID, user: CurrentUser, db: DBSession) -> dict:
@@ -517,6 +540,7 @@ async def rotate_token(chatbot_id: uuid.UUID, user: CurrentUser, db: DBSession) 
 
 # ── License endpoints ─────────────────────────────────────────────────────────
 
+
 def _license_out(lic: WidgetLicense) -> dict:
     return {
         "id": str(lic.id),
@@ -543,7 +567,9 @@ async def list_licenses(chatbot_id: uuid.UUID, user: CurrentUser, db: DBSession)
 
 
 @router.post("/manage/{chatbot_id}/licenses", status_code=status.HTTP_201_CREATED)
-async def create_license(chatbot_id: uuid.UUID, body: _LicenseCreate, user: CurrentUser, db: DBSession) -> dict:
+async def create_license(
+    chatbot_id: uuid.UUID, body: _LicenseCreate, user: CurrentUser, db: DBSession
+) -> dict:
     bot = await _owned_bot(chatbot_id, user.id, db)
     wc = await _get_or_create_widget_config(bot, db)
     lic = WidgetLicense(
@@ -559,7 +585,9 @@ async def create_license(chatbot_id: uuid.UUID, body: _LicenseCreate, user: Curr
 
 
 @router.delete("/manage/{chatbot_id}/licenses/{license_id}", status_code=status.HTTP_200_OK)
-async def revoke_license(chatbot_id: uuid.UUID, license_id: uuid.UUID, user: CurrentUser, db: DBSession) -> dict:
+async def revoke_license(
+    chatbot_id: uuid.UUID, license_id: uuid.UUID, user: CurrentUser, db: DBSession
+) -> dict:
     bot = await _owned_bot(chatbot_id, user.id, db)
     wc = await _get_or_create_widget_config(bot, db)
     result = await db.execute(
@@ -577,15 +605,15 @@ async def revoke_license(chatbot_id: uuid.UUID, license_id: uuid.UUID, user: Cur
 
 
 @router.get("/validate-license")
-async def validate_license(license_key: str, origin: str | None = None, db: DBSession = None) -> dict:
+async def validate_license(
+    license_key: str, origin: str | None = None, db: DBSession = None
+) -> dict:
     """Called by widget.js on load to check if the license key is valid."""
-    result = await db.execute(
-        select(WidgetLicense).where(WidgetLicense.license_key == license_key)
-    )
+    result = await db.execute(select(WidgetLicense).where(WidgetLicense.license_key == license_key))
     lic = result.scalar_one_or_none()
     if not lic or lic.status != "active":
         return {"success": False, "data": {"valid": False, "reason": "Invalid or revoked license"}}
-    if lic.expires_at and lic.expires_at < datetime.now(timezone.utc):
+    if lic.expires_at and lic.expires_at < datetime.now(UTC):
         return {"success": False, "data": {"valid": False, "reason": "License expired"}}
     if lic.allowed_domain and origin:
         host = _origin_host(origin)
@@ -596,10 +624,9 @@ async def validate_license(license_key: str, origin: str | None = None, db: DBSe
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
+
 async def _get_or_create_widget_config(bot: ChatbotConfig, db: AsyncSession) -> WidgetConfig:
-    result = await db.execute(
-        select(WidgetConfig).where(WidgetConfig.chatbot_id == bot.id)
-    )
+    result = await db.execute(select(WidgetConfig).where(WidgetConfig.chatbot_id == bot.id))
     wc = result.scalar_one_or_none()
     if not wc:
         wc = WidgetConfig(chatbot_id=bot.id)
@@ -609,9 +636,7 @@ async def _get_or_create_widget_config(bot: ChatbotConfig, db: AsyncSession) -> 
     return wc
 
 
-async def _owned_bot(
-    chatbot_id: uuid.UUID, user_id: uuid.UUID, db: AsyncSession
-) -> ChatbotConfig:
+async def _owned_bot(chatbot_id: uuid.UUID, user_id: uuid.UUID, db: AsyncSession) -> ChatbotConfig:
     bot = await db.get(ChatbotConfig, chatbot_id)
     if not bot or bot.user_id != user_id:
         raise HTTPException(
@@ -626,19 +651,19 @@ def _origin_host(origin: str) -> str:
     origin = origin.lower().strip()
     for prefix in ("https://", "http://"):
         if origin.startswith(prefix):
-            origin = origin[len(prefix):]
+            origin = origin[len(prefix) :]
     return origin.split("/")[0].split(":")[0]
 
 
 async def _guest_count(redis, guest_id: str) -> int:
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     key = f"guest_cap:{guest_id}:{now.year}-{now.month:02d}"
     val = await redis.get(key)
     return int(val) if val else 0
 
 
 async def _increment_guest(redis, guest_id: str) -> None:
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     key = f"guest_cap:{guest_id}:{now.year}-{now.month:02d}"
     _, days = monthrange(now.year, now.month)
     remaining = (days - now.day + 2) * 86400
@@ -650,6 +675,7 @@ async def _increment_guest(redis, guest_id: str) -> None:
 
 async def _load_history(db: AsyncSession, conversation_id: uuid.UUID) -> list[ChatMessage]:
     from sqlalchemy import select as _sel
+
     result = await db.execute(
         _sel(Message)
         .where(Message.conversation_id == conversation_id, Message.role != MessageRole.system)
@@ -678,6 +704,7 @@ async def _send_widget_push(redis, conv_id: uuid.UUID, bot_name: str, reply: str
         preview = reply[:80] + ("…" if len(reply) > 80 else "")
         payload = json.dumps({"title": bot_name, "body": preview})
         from pywebpush import webpush
+
         webpush(
             subscription_info=sub,
             data=payload,

@@ -22,9 +22,7 @@ class RequestIDMiddleware(BaseHTTPMiddleware):
     otherwise generates a new UUID. Echoes the ID back in the response header.
     """
 
-    async def dispatch(
-        self, request: Request, call_next: RequestResponseEndpoint
-    ) -> Response:
+    async def dispatch(self, request: Request, call_next: RequestResponseEndpoint) -> Response:
         request_id = request.headers.get(REQUEST_ID_HEADER) or str(uuid.uuid4())
         token = _request_id_var.set(request_id)
         try:

@@ -4,6 +4,7 @@ GET /api/v1/models — list all LLM models available to the authenticated user.
 A model is "available" when the user has saved a BYOK for that provider
 OR the platform has a global key configured in settings.
 """
+
 from fastapi import APIRouter
 
 from app.core.config import settings
@@ -116,14 +117,15 @@ async def list_models(user: CurrentUser, db: DBSession) -> dict:
         settings_key = _PROVIDER_SETTINGS_KEY.get(provider, "")
         platform_key = getattr(settings, settings_key, "") if settings_key else ""
         available = bool(user_keys.get(provider)) or bool(platform_key)
-        result.append({
-            "provider": provider,
-            "label": meta["label"],
-            "available": available,
-            "models": [
-                {**m, "allowed": is_model_allowed(user.role, m["id"])}
-                for m in meta["models"]
-            ],
-        })
+        result.append(
+            {
+                "provider": provider,
+                "label": meta["label"],
+                "available": available,
+                "models": [
+                    {**m, "allowed": is_model_allowed(user.role, m["id"])} for m in meta["models"]
+                ],
+            }
+        )
 
     return {"success": True, "data": result}

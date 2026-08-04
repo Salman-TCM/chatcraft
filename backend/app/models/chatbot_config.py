@@ -1,6 +1,6 @@
 import uuid
-
 from datetime import datetime
+
 from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Integer, String, Text
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -49,8 +49,7 @@ class ChatbotConfig(TimestampMixin, Base):
     )
     welcome_message: Mapped[str | None] = mapped_column(String(500), nullable=True)
     placeholder_text: Mapped[str] = mapped_column(
-        String(200), nullable=False,
-        default="Ask me anything…", server_default="Ask me anything…"
+        String(200), nullable=False, default="Ask me anything…", server_default="Ask me anything…"
     )
     # "rounded" | "square" | "pill"
     bubble_style: Mapped[str] = mapped_column(

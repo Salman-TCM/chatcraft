@@ -1,5 +1,4 @@
-from decimal import Decimal
-from typing import AsyncIterator
+from collections.abc import AsyncIterator
 
 from google import genai
 from google.genai import types
@@ -55,7 +54,9 @@ class GeminiProvider(LLMProvider):
         system, history_contents, last_user = _build_contents(messages)
         client = _make_client(self._api_key)
 
-        contents = history_contents + [types.Content(role="user", parts=[types.Part.from_text(last_user)])]
+        contents = history_contents + [
+            types.Content(role="user", parts=[types.Part.from_text(last_user)])
+        ]
         config = types.GenerateContentConfig(
             system_instruction=system,
             max_output_tokens=max_tokens,
@@ -88,7 +89,9 @@ class GeminiProvider(LLMProvider):
         system, history_contents, last_user = _build_contents(messages)
         client = _make_client(self._api_key)
 
-        contents = history_contents + [types.Content(role="user", parts=[types.Part.from_text(last_user)])]
+        contents = history_contents + [
+            types.Content(role="user", parts=[types.Part.from_text(last_user)])
+        ]
         config = types.GenerateContentConfig(
             system_instruction=system,
             max_output_tokens=max_tokens,

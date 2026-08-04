@@ -37,9 +37,7 @@ class Subscription(TimestampMixin, Base):
     stripe_subscription_id: Mapped[str | None] = mapped_column(
         String(255), unique=True, nullable=True, index=True
     )
-    stripe_price_id: Mapped[str | None] = mapped_column(
-        String(255), nullable=True
-    )
+    stripe_price_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
 
     plan: Mapped[SubscriptionPlan] = mapped_column(
         Enum(SubscriptionPlan, name="subscription_plan"),
@@ -63,9 +61,7 @@ class Subscription(TimestampMixin, Base):
     cancel_at_period_end: Mapped[bool] = mapped_column(
         nullable=False, default=False, server_default="false"
     )
-    canceled_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True
-    )
+    canceled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     payment_failed_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )

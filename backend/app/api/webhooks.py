@@ -16,6 +16,7 @@ Endpoints (no auth — public, verified via channel-specific secrets):
   POST /webhooks/twitter/{chatbot_id}    ← Twitter mention/DM events
   POST /webhooks/tiktok/{chatbot_id}     ← TikTok DM events
 """
+
 import hashlib
 import hmac
 import uuid
@@ -46,6 +47,7 @@ async def _get_integration(db, chatbot_id: uuid.UUID, channel: str) -> ChannelIn
 
 
 # ── Telegram ──────────────────────────────────────────────────────────────────
+
 
 @router.post("/telegram/{chatbot_id}", status_code=status.HTTP_200_OK)
 async def telegram_webhook(
@@ -83,6 +85,7 @@ async def telegram_webhook(
 
 
 # ── WhatsApp Cloud API ────────────────────────────────────────────────────────
+
 
 @router.get("/whatsapp/{chatbot_id}")
 async def whatsapp_verify(
@@ -144,6 +147,7 @@ async def whatsapp_webhook(
 
 # ── Facebook Messenger ────────────────────────────────────────────────────────
 
+
 @router.get("/facebook/{chatbot_id}")
 async def facebook_verify(
     chatbot_id: uuid.UUID,
@@ -173,9 +177,9 @@ async def facebook_webhook(
     if app_secret:
         sig_header = request.headers.get("X-Hub-Signature-256", "")
         raw_body = await request.body()
-        expected_sig = "sha256=" + hmac.new(
-            app_secret.encode(), raw_body, hashlib.sha256
-        ).hexdigest()
+        expected_sig = (
+            "sha256=" + hmac.new(app_secret.encode(), raw_body, hashlib.sha256).hexdigest()
+        )
         if not hmac.compare_digest(sig_header.encode(), expected_sig.encode()):
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Invalid signature")
 
@@ -235,6 +239,7 @@ async def _process_comment(
 ) -> None:
     """Process post comment: match automation, AI reply publicly, optionally send DM."""
     from sqlalchemy import select
+
     from app.db.session import AsyncSessionLocal
     from app.models.broadcast import CommentAutomation
     from app.models.chatbot_config import ChatbotConfig
@@ -272,6 +277,7 @@ async def _process_comment(
                 try:
                     from app.services.llm.base import ChatMessage
                     from app.services.llm.router import get_provider
+
                     provider = get_provider("claude-sonnet-4-6")
                     messages = [
                         ChatMessage(role="system", content=auto.ai_prompt),
@@ -288,6 +294,7 @@ async def _process_comment(
             # Post public comment reply via Graph API
             try:
                 import httpx
+
                 _GRAPH = "https://graph.facebook.com/v19.0"
                 reply_endpoint = f"{_GRAPH}/{comment_id}/comments"
                 async with httpx.AsyncClient(timeout=10) as client:
@@ -311,6 +318,7 @@ async def _process_comment(
 
 
 # ── Instagram DM ─────────────────────────────────────────────────────────────
+
 
 @router.get("/instagram/{chatbot_id}")
 async def instagram_verify(
@@ -395,6 +403,7 @@ async def instagram_webhook(
 
 # ── Twilio SMS ────────────────────────────────────────────────────────────────
 
+
 @router.post("/sms/{chatbot_id}", status_code=status.HTTP_200_OK)
 async def sms_webhook(
     chatbot_id: uuid.UUID,
@@ -427,6 +436,7 @@ async def sms_webhook(
 
 # ── Discord Bot ───────────────────────────────────────────────────────────────
 
+
 @router.post("/discord/{chatbot_id}", status_code=status.HTTP_200_OK)
 async def discord_webhook(
     chatbot_id: uuid.UUID,
@@ -448,7 +458,9 @@ async def discord_webhook(
         data = body.get("data", {})
         options = data.get("options", [])
         text = options[0].get("value", "") if options else ""
-        sender_id = str(body.get("member", {}).get("user", {}).get("id") or body.get("user", {}).get("id", ""))
+        sender_id = str(
+            body.get("member", {}).get("user", {}).get("id") or body.get("user", {}).get("id", "")
+        )
         sender_name = body.get("member", {}).get("user", {}).get("username")
         # channel_id acts as the recipient for reply
         channel_id = str(body.get("channel_id", ""))
@@ -488,6 +500,7 @@ async def discord_webhook(
 # SES receives email → SNS topic → HTTP POST to this endpoint.
 # SNS sends either a SubscriptionConfirmation or a Notification message.
 
+
 @router.post("/email/{chatbot_id}", status_code=status.HTTP_200_OK)
 async def email_webhook(
     chatbot_id: uuid.UUID,
@@ -505,6 +518,7 @@ async def email_webhook(
         subscribe_url = body.get("SubscribeURL")
         if subscribe_url:
             import httpx
+
             async with httpx.AsyncClient(timeout=10) as client:
                 await client.get(subscribe_url)
         return {"ok": True}
@@ -516,6 +530,7 @@ async def email_webhook(
 
     try:
         import json
+
         ses_payload = json.loads(raw_message) if isinstance(raw_message, str) else raw_message
     except Exception:
         return {"ok": True}
@@ -537,6 +552,7 @@ async def _process_story_mention(
     """Handle Instagram story mention: auto-DM the person who mentioned us."""
     try:
         from sqlalchemy import select as _sel
+
         from app.db.session import AsyncSessionLocal
         from app.models.broadcast import CommentAutomation
         from app.models.chatbot_config import ChatbotConfig
@@ -570,6 +586,7 @@ async def _process_story_mention(
             break  # Only one automation handles story mentions
     except Exception as exc:
         from loguru import logger
+
         logger.error(f"Failed to process story mention for chatbot {chatbot_id}: {exc}")
 
 
@@ -595,6 +612,7 @@ async def _process_inbound_email(chatbot_id: uuid.UUID, ses_payload: dict) -> No
         content_parts: list[dict] = ses_payload.get("content", [])
         body_text = ""
         import base64
+
         for part in content_parts:
             ct = part.get("contentType", "")
             if "text/plain" in ct:
@@ -624,10 +642,12 @@ async def _process_inbound_email(chatbot_id: uuid.UUID, ses_payload: dict) -> No
         )
     except Exception as exc:
         from loguru import logger
+
         logger.error(f"Failed to process inbound email for chatbot {chatbot_id}: {exc}")
 
 
 # ── Twitter/X ─────────────────────────────────────────────────────────────────
+
 
 @router.get("/twitter/{chatbot_id}", response_class=PlainTextResponse)
 async def twitter_crc(
@@ -641,6 +661,7 @@ async def twitter_crc(
     if not consumer_secret or not crc_token:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST)
     import base64
+
     digest = hmac.new(
         consumer_secret.encode(),
         crc_token.encode(),
@@ -669,6 +690,7 @@ async def twitter_webhook(
     body = await request.body()
     if consumer_secret and sig_header.startswith("sha256="):
         import base64
+
         expected = base64.b64encode(
             hmac.new(consumer_secret.encode(), body, hashlib.sha256).digest()
         ).decode()
@@ -704,6 +726,7 @@ async def twitter_webhook(
 
 # ── TikTok DM ─────────────────────────────────────────────────────────────────
 
+
 @router.post("/tiktok/{chatbot_id}", status_code=status.HTTP_200_OK)
 async def tiktok_webhook(
     chatbot_id: uuid.UUID,
@@ -720,6 +743,7 @@ async def tiktok_webhook(
     body = await request.body()
     if client_secret and sig_header:
         import base64
+
         expected = base64.b64encode(
             hmac.new(client_secret.encode(), body, hashlib.sha256).digest()
         ).decode()

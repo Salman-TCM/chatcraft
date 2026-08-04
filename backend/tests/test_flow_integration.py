@@ -2,6 +2,7 @@
 Flow builder execution engine integration tests.
 Tests flow CRUD + trigger endpoint.
 """
+
 import pytest
 
 REGISTER_URL = "/api/auth/register"
@@ -42,6 +43,7 @@ def _minimal_flow() -> dict:
 
 # ── Auth guard ────────────────────────────────────────────────────────────────
 
+
 @pytest.mark.asyncio
 async def test_list_flows_requires_auth(client):
     res = await client.get(FLOWS_URL)
@@ -49,6 +51,7 @@ async def test_list_flows_requires_auth(client):
 
 
 # ── CRUD ──────────────────────────────────────────────────────────────────────
+
 
 @pytest.mark.asyncio
 async def test_create_flow(client):

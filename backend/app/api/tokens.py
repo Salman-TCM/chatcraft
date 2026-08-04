@@ -5,10 +5,11 @@ GET    /api/tokens        — list tokens (hash never returned)
 POST   /api/tokens        — create token (full value returned once)
 DELETE /api/tokens/{id}   — revoke token
 """
+
 import hashlib
 import secrets
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from fastapi import APIRouter, HTTPException, status
 from sqlalchemy import select
@@ -21,7 +22,7 @@ router = APIRouter(prefix="/api/tokens", tags=["tokens"])
 
 
 def _token_dict(t: ApiToken, full_token: str | None = None) -> dict:
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     expires_at = t.expires_at
     is_expired = expires_at is not None and expires_at < now
 
@@ -42,9 +43,7 @@ def _token_dict(t: ApiToken, full_token: str | None = None) -> dict:
 @router.get("", response_model=dict)
 async def list_tokens(user: CurrentUser, db: DBSession) -> dict:
     result = await db.execute(
-        select(ApiToken)
-        .where(ApiToken.user_id == user.id)
-        .order_by(ApiToken.created_at.desc())
+        select(ApiToken).where(ApiToken.user_id == user.id).order_by(ApiToken.created_at.desc())
     )
     tokens = result.scalars().all()
     return {"success": True, "data": [_token_dict(t) for t in tokens]}
@@ -57,7 +56,8 @@ async def create_token(body: TokenCreateRequest, user: CurrentUser, db: DBSessio
     expires_at: datetime | None = None
     if body.expires_in_days is not None:
         from datetime import timedelta
-        expires_at = datetime.now(timezone.utc) + timedelta(days=body.expires_in_days)
+
+        expires_at = datetime.now(UTC) + timedelta(days=body.expires_in_days)
 
     raw = "cc_" + secrets.token_hex(32)
     token_hash = hashlib.sha256(raw.encode()).hexdigest()
