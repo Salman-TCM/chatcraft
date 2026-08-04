@@ -101,6 +101,10 @@ services:
     image: cloudflare/cloudflared:latest
     restart: unless-stopped
     command: tunnel --no-autoupdate run --token ${CLOUDFLARE_TUNNEL_TOKEN}
+    # Must be on the same network as nginx so it can resolve `nginx` by name.
+    # The Cloudflare Zero Trust dashboard ingress now routes to http://nginx:80,
+    # which means nginx owns TLS termination and blue/green switching.
+    networks: [edge]
     depends_on:
-      frontend:
-        condition: service_healthy
+      nginx:
+        condition: service_started
