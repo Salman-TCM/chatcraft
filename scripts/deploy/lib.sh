@@ -66,24 +66,48 @@ map \$host \$${service}_upstream {
 EOF
   mv "$tmp" "$live"
 
-  # Ensure nginx is running before we try to exec into it.
-  if ! compose exec -T nginx true >/dev/null 2>&1; then
+  # nginx reads ALL upstream-*.conf files at startup, so we must migrate the
+  # OTHER service's conf too — otherwise a stale `upstream {}` block from a
+  # never-deployed service will crash nginx before it can start.
+  local other
+  [[ "$service" == "backend" ]] && other="frontend" || other="backend"
+  ensure_upstream_conf "$other"
+
+  # Ensure nginx is running AND stable before we try to reload it.
+  local nginx_running=0
+  if compose exec -T nginx true >/dev/null 2>&1; then
+    nginx_running=1
+  else
     log "nginx is not running — starting it now..."
     compose up -d --no-deps nginx
     local waited=0
-    # Use `if` for the timeout check — `(( expr ))` returns exit code 1 when
-    # the expression is false, which would trigger set -e inside a loop body.
-    while ! compose exec -T nginx true >/dev/null 2>&1; do
+    while (( waited <= 30 )); do
+      if compose exec -T nginx true >/dev/null 2>&1; then
+        nginx_running=1
+        break
+      fi
       sleep 2
       waited=$((waited + 2))
-      if (( waited > 30 )); then
-        log "nginx failed to start within 30s"
-        log "nginx container logs:"
-        compose logs --tail=30 nginx || true
-        return 1
-      fi
     done
-    log "nginx is up"
+    if (( nginx_running == 0 )); then
+      log "nginx failed to start within 30s"
+      log "nginx container logs:"
+      compose logs --tail=50 nginx || true
+      return 1
+    fi
+    # Verify nginx stays up — the container may briefly respond to exec while
+    # the entrypoint is still running, only to crash a moment later. Sample
+    # the container state over a short window to catch a restart loop.
+    sleep 3
+    local state
+    state="$(docker inspect --format='{{.State.Status}}' "$(compose ps -q nginx)" 2>/dev/null || echo "unknown")"
+    if [[ "$state" != "running" ]]; then
+      log "nginx is not stable (state=${state}) — likely stuck in restart loop"
+      log "nginx container logs:"
+      compose logs --tail=50 nginx || true
+      return 1
+    fi
+    log "nginx is up and stable"
   fi
 
   compose exec -T nginx nginx -t
