@@ -30,6 +30,7 @@ from app.schemas.kb import (
 from app.services.kb.rag import RAGService
 from app.services.storage import (
     MAX_FILE_SIZE_BYTES,
+    delete_file,
     detect_doc_type,
     upload_file,
 )
@@ -238,8 +239,13 @@ async def delete_document(
             detail={"success": False, "error": "Document not found", "code": "NOT_FOUND"},
         )
 
+    file_url = doc.file_url
     await db.delete(doc)
     await db.commit()
+
+    if file_url:
+        await delete_file(file_url)
+
     return {"success": True, "data": None}
 
 

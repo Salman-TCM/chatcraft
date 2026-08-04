@@ -28,8 +28,8 @@ import { apiClient } from "@/lib/api";
 import { toast } from "@/hooks/use-toast";
 import { getErrorMessage } from "@/lib/errors";
 
-type DocStatus = "pending" | "processing" | "done" | "failed";
-type DocType = "pdf" | "docx" | "txt" | "csv" | "url" | "text";
+type DocStatus = "pending" | "processing" | "ready" | "error";
+type DocType = "pdf" | "docx" | "txt" | "url" | "text";
 
 interface KBDocument {
   id: string;
@@ -86,6 +86,16 @@ export default function KnowledgePage() {
     loadDocs();
   }, [id]);
 
+  // Poll while any document is still pending/processing so the status
+  // badge and chunk count update on their own once ingestion finishes,
+  // instead of requiring a manual page refresh.
+  useEffect(() => {
+    const hasInFlight = docs.some((d) => d.status === "pending" || d.status === "processing");
+    if (!hasInFlight) return;
+    const timer = setInterval(loadDocs, 3000);
+    return () => clearInterval(timer);
+  }, [docs, id]);
+
   async function loadDocs() {
     try {
       const { data } = await apiClient.get(`/api/kb/${id}/documents`);
@@ -97,11 +107,23 @@ export default function KnowledgePage() {
     }
   }
 
+  const MAX_FILE_SIZE_BYTES = 25 * 1024 * 1024;
+
   async function handleFileUpload(files: FileList | null) {
     if (!files?.length) return;
+    const file = files[0];
+    if (file.size > MAX_FILE_SIZE_BYTES) {
+      toast({
+        variant: "destructive",
+        title: "File too large",
+        description: `${file.name} is ${(file.size / 1024 / 1024).toFixed(1)} MB — max 25 MB.`,
+      });
+      if (fileRef.current) fileRef.current.value = "";
+      return;
+    }
     setUploading(true);
     const form = new FormData();
-    form.append("file", files[0]);
+    form.append("file", file);
     try {
       // Don't set Content-Type manually — axios/the browser needs to generate
       // it themselves so the multipart boundary is included; a hardcoded
@@ -203,8 +225,8 @@ export default function KnowledgePage() {
           <h1 className="text-xl font-semibold">Knowledge Base</h1>
           <p className="text-xs text-muted-foreground">
             {docs.length} document{docs.length !== 1 ? "s" : ""}
-            {docs.some((d) => d.status === "done") &&
-              ` · ${docs.filter((d) => d.status === "done").reduce((a, d) => a + (d.chunk_count ?? 0), 0)} chunks indexed`}
+            {docs.some((d) => d.status === "ready") &&
+              ` · ${docs.filter((d) => d.status === "ready").reduce((a, d) => a + (d.chunk_count ?? 0), 0)} chunks indexed`}
           </p>
         </div>
       </div>
@@ -247,7 +269,7 @@ export default function KnowledgePage() {
             <p className="text-sm font-medium">Upload Document</p>
             <button onClick={() => setAddMode(null)}><X className="h-4 w-4 text-muted-foreground" /></button>
           </div>
-          <p className="text-xs text-muted-foreground">PDF, DOCX, TXT, CSV · max 25 MB</p>
+          <p className="text-xs text-muted-foreground">PDF, DOCX, TXT · max 25 MB</p>
           <div
             className={`flex flex-col items-center justify-center gap-2 rounded-lg border-2 border-dashed p-8 transition-colors cursor-pointer ${
               dragOver ? "border-primary bg-primary/5" : "border-border hover:border-primary/50"
@@ -270,7 +292,7 @@ export default function KnowledgePage() {
             ref={fileRef}
             type="file"
             className="hidden"
-            accept=".pdf,.docx,.txt,.csv"
+            accept=".pdf,.docx,.txt"
             onChange={(e) => handleFileUpload(e.target.files)}
           />
         </Card>
@@ -522,7 +544,7 @@ function DocTypeIcon({ type }: { type: DocType }) {
 
 function StatusBadge({ status }: { status: DocStatus }) {
   const map: Record<DocStatus, { label: string; className: string; icon: React.ReactNode }> = {
-    done: {
+    ready: {
       label: "Indexed",
       className: "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400",
       icon: <CheckCircle2 className="h-3 w-3" />,
@@ -537,7 +559,7 @@ function StatusBadge({ status }: { status: DocStatus }) {
       className: "bg-muted text-muted-foreground",
       icon: <Clock className="h-3 w-3" />,
     },
-    failed: {
+    error: {
       label: "Failed",
       className: "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400",
       icon: <AlertCircle className="h-3 w-3" />,

@@ -6,6 +6,7 @@ Returns a public or pre-signed URL that the document processor can download.
 import mimetypes
 import uuid
 from pathlib import PurePosixPath
+from urllib.parse import urlsplit
 
 import boto3
 from botocore.exceptions import BotoCoreError, ClientError
@@ -88,6 +89,48 @@ async def upload_file(
         "No storage backend configured. Set AWS_ACCESS_KEY_ID + AWS_S3_BUCKET "
         "or SUPABASE_URL + SUPABASE_KEY."
     )
+
+
+async def delete_file(file_url: str) -> None:
+    """
+    Delete a previously uploaded file given the URL returned by upload_file/
+    upload_logo. Best-effort — logs and swallows errors so a storage hiccup
+    never blocks deleting the document record itself.
+    """
+    try:
+        parts = urlsplit(file_url)
+        if settings.aws_s3_bucket and parts.hostname == f"{settings.aws_s3_bucket}.s3.{settings.aws_region}.amazonaws.com":
+            key = parts.path.lstrip("/")
+            await _delete_s3(key)
+        elif settings.supabase_url and file_url.startswith(settings.supabase_url):
+            marker = "/storage/v1/object/public/chatcraft-kb/"
+            idx = file_url.find(marker)
+            if idx == -1:
+                logger.warning(f"Could not parse Supabase storage key from {file_url!r}")
+                return
+            key = file_url[idx + len(marker):]
+            await _delete_supabase(key)
+        else:
+            logger.warning(f"Unrecognized storage URL, skipping delete: {file_url!r}")
+    except (BotoCoreError, ClientError) as exc:
+        logger.warning(f"Failed to delete storage object for {file_url!r}: {exc!r}")
+    except Exception as exc:
+        logger.warning(f"Unexpected error deleting storage object for {file_url!r}: {exc!r}")
+
+
+async def _delete_s3(key: str) -> None:
+    import asyncio
+
+    loop = asyncio.get_event_loop()
+    client = _s3_client()
+    await loop.run_in_executor(None, lambda: client.delete_object(Bucket=settings.aws_s3_bucket, Key=key))
+
+
+async def _delete_supabase(key: str) -> None:
+    from supabase import create_client
+
+    sb = create_client(settings.supabase_url, settings.supabase_key)
+    sb.storage.from_("chatcraft-kb").remove([key])
 
 
 async def _upload_s3(data: bytes, key: str, content_type: str) -> str:
