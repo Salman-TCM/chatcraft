@@ -21,6 +21,12 @@ jobs:
     env:
       SLACK_ALERT_WEBHOOK_URL: ${{ secrets.SLACK_ALERT_WEBHOOK_URL }}
 
+    # See deploy.yml — the runner's default job workspace is not the live
+    # deployment checkout.
+    defaults:
+      run:
+        working-directory: /home/salman/Salman/deployment/chatcraft
+
     steps:
       - name: Run cleanup
         run: bash scripts/deploy/cleanup_docker.sh

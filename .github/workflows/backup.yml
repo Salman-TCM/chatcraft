@@ -25,6 +25,12 @@ jobs:
       AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
       AWS_S3_BUCKET: ${{ secrets.AWS_S3_BUCKET }}
 
+    # See deploy.yml — the runner's default job workspace is not the live
+    # deployment checkout.
+    defaults:
+      run:
+        working-directory: /home/salman/Salman/deployment/chatcraft
+
     steps:
       - name: Run backup
         run: bash scripts/backup_db.sh --compose-file docker-compose.prod.yml
