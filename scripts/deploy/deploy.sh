@@ -79,14 +79,15 @@ compose build "$IDLE_NAME"
 
 log "Starting ${IDLE_NAME}..."
 compose up -d --no-deps "$IDLE_NAME"
+IDLE_CONTAINER="$(compose ps -q "$IDLE_NAME")"
 
-if ! wait_healthy "$IDLE_NAME" "$DEEP_PATH" "$PORT" 180; then
+if ! wait_healthy "$IDLE_CONTAINER" "$DEEP_PATH" "$PORT" 180; then
   compose stop "$IDLE_NAME" || true
   fail "${IDLE_NAME} never became healthy — old slot (${ACTIVE_NAME}) is still serving traffic, nothing was cut over"
 fi
 
 if [[ "$SERVICE" == "backend" ]]; then
-  if ! bash scripts/deploy/migrate.sh "$IDLE_NAME"; then
+  if ! bash scripts/deploy/migrate.sh "$IDLE_CONTAINER"; then
     compose stop "$IDLE_NAME" || true
     fail "migration failed against ${IDLE_NAME} — old slot (${ACTIVE_NAME}) is still serving traffic, database was left at its previous verified state"
   fi
