@@ -1,4 +1,5 @@
 import asyncio
+import os
 
 import pytest
 import pytest_asyncio
@@ -9,8 +10,12 @@ from sqlalchemy.orm import sessionmaker
 from app.db.session import get_db
 from app.main import app
 
-# Use a test database URL (override via env or use SQLite for speed)
-TEST_DB_URL = "sqlite+aiosqlite:///:memory:"
+# Models use Postgres-only types (JSONB, ARRAY, pgvector) throughout, so
+# SQLite can't actually create this schema — it's an in-memory fallback for
+# quick local runs only. CI (and anywhere DATABASE_URL is set) already
+# provisions a real Postgres service container for `alembic upgrade head`;
+# point tests at that same database instead of a separate, incompatible one.
+TEST_DB_URL = os.environ.get("DATABASE_URL", "sqlite+aiosqlite:///:memory:")
 
 
 @pytest_asyncio.fixture(scope="session")
