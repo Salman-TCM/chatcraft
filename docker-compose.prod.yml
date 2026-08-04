@@ -244,6 +244,25 @@ services:
   frontend_green:
     <<: *frontend_common
 
+  # ---------------------------------------------------------------------------
+  # Cloudflare Tunnel — public entry point for tiertech.com.bd. No inbound
+  # ports opened on the host; Cloudflare edge -> cloudflared -> nginx :80.
+  # Ingress rules (hostname -> service mapping) live in the Cloudflare Zero
+  # Trust dashboard, NOT here — the tunnel is dashboard/token-based.
+  # Must be on the `edge` network so it can resolve `nginx` by name.
+  # ---------------------------------------------------------------------------
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    restart: unless-stopped
+    command: tunnel --no-autoupdate run --token ${CLOUDFLARE_TUNNEL_TOKEN}
+    networks: [edge]
+    depends_on:
+      nginx:
+        condition: service_started
+    logging:
+      driver: json-file
+      options: { max-size: "10m", max-file: "5" }
+
 
 networks:
   edge:
