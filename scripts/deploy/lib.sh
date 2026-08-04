@@ -9,13 +9,32 @@ COMPOSE_BASE=(-f "${REPO_ROOT}/docker-compose.yml")
 log() { echo "[$(date -u +%H:%M:%S)] $*"; }
 
 # Bootstraps the live (gitignored) upstream conf from its committed template
-# the first time this runs on a fresh checkout. No-op after that — deploy.sh
-# owns the file from here on.
+# the first time this runs on a fresh checkout. If the live file exists but
+# still uses the old `upstream {}` format, migrates it in-place to the new
+# `map` format while preserving the current slot.
 ensure_upstream_conf() {
   local service="$1"  # backend | frontend
   local live="${REPO_ROOT}/nginx/conf.d/upstream-${service}.conf"
   local template="${live}.template"
-  [[ -f "$live" ]] || cp "$template" "$live"
+
+  if [[ ! -f "$live" ]]; then
+    cp "$template" "$live"
+    return
+  fi
+
+  # Migrate old `upstream foo_upstream { server foo_blue:N; }` format to the
+  # new `map`-based format so nginx can start even when a slot doesn't exist.
+  if grep -q "^upstream " "$live"; then
+    local slot port
+    slot="$(grep -oP "${service}_\K(blue|green)" "$live" | head -1)"
+    port="$(grep -oP ":\K[0-9]+" "$live" | head -1)"
+    cat > "$live" <<EOF
+# Live runtime state — migrated from upstream{} to map format. Do not edit by hand.
+map \$host \$${service}_upstream {
+  default "${service}_${slot}:${port}";
+}
+EOF
+  fi
 }
 
 # Which slot (blue|green) is currently wired into nginx for $1 (backend|frontend).
