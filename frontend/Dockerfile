@@ -55,6 +55,12 @@ ARG NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY
 ARG NEXT_PUBLIC_POSTHOG_KEY
 ARG NEXT_PUBLIC_POSTHOG_HOST
 ARG NEXT_PUBLIC_SENTRY_DSN
+# BACKEND_URL is read by next.config.mjs INSIDE rewrites(), which Next.js
+# resolves at build time into routes-manifest.json. If unset at build,
+# it falls back to http://backend:8000, which doesn't exist in the prod
+# blue/green setup (only backend_blue/backend_green) — leaving every
+# proxied /api/* rewrite failing with EAI_AGAIN. Must be a build arg.
+ARG BACKEND_URL
 
 ENV NEXT_PUBLIC_API_URL=$NEXT_PUBLIC_API_URL
 ENV NEXT_PUBLIC_APP_URL=$NEXT_PUBLIC_APP_URL
@@ -63,6 +69,7 @@ ENV NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY=$NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY
 ENV NEXT_PUBLIC_POSTHOG_KEY=$NEXT_PUBLIC_POSTHOG_KEY
 ENV NEXT_PUBLIC_POSTHOG_HOST=$NEXT_PUBLIC_POSTHOG_HOST
 ENV NEXT_PUBLIC_SENTRY_DSN=$NEXT_PUBLIC_SENTRY_DSN
+ENV BACKEND_URL=$BACKEND_URL
 
 # Disable Next.js telemetry
 ENV NEXT_TELEMETRY_DISABLED=1
