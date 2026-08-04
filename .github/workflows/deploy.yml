@@ -67,6 +67,15 @@ jobs:
       TARGET_ENV: ${{ github.ref_name == 'develop' && 'staging' || 'production' }}
       SLACK_ALERT_WEBHOOK_URL: ${{ secrets.SLACK_ALERT_WEBHOOK_URL }}
 
+    # The runner's default job workspace (_work/chatcraft/chatcraft) is NOT
+    # the live deployment checkout — it's a separate, empty directory the
+    # runner service manages. The actual running stack lives at this fixed
+    # path on the server (matching the old deploy-server.yml). Every step
+    # below needs to run there, not in the runner's default workspace.
+    defaults:
+      run:
+        working-directory: /home/salman/Salman/deployment/chatcraft
+
     steps:
       # No actions/checkout — this runner's working copy at
       # /home/salman/Salman/deployment/chatcraft *is* the running stack.
