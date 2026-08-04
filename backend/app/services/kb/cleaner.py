@@ -2,6 +2,7 @@
 Text cleaning and normalisation applied to all extracted content
 before chunking. Goal: remove noise without destroying meaning.
 """
+
 import re
 import unicodedata
 
@@ -23,7 +24,8 @@ def clean(text: str) -> str:
 
     # Drop lines that are pure punctuation/noise (e.g. page separators)
     text = "\n".join(
-        line for line in text.splitlines()
+        line
+        for line in text.splitlines()
         if len(re.sub(r"[^a-zA-Z0-9]", "", line)) >= 2 or not line.strip()
     )
 

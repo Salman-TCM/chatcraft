@@ -5,8 +5,13 @@ from pydantic import BaseModel, Field
 # ── Grounded closed sets ────────────────────────────────────────────────────────
 # Program types: see wallet.py PROGRAM_TYPES / models/wallet.py comment on `type`.
 _ProgramType = Literal[
-    "membership", "punch_card", "points", "coupon",
-    "event_ticket", "prepaid_balance", "business_card",
+    "membership",
+    "punch_card",
+    "points",
+    "coupon",
+    "event_ticket",
+    "prepaid_balance",
+    "business_card",
 ]
 # Program status: see wallet.py _VALID_PROGRAM_STATUSES / models/wallet.py comment on `status`.
 _ProgramStatus = Literal["active", "inactive", "archived"]
@@ -14,19 +19,36 @@ _ProgramStatus = Literal["active", "inactive", "archived"]
 _JoinFormField = Literal["name", "email", "phone", "birthday", "postal_code"]
 # Card actions: see wallet.py _VALID_ACTIONS.
 _CardAction = Literal[
-    "add_punch", "remove_punch", "redeem", "set_punches",
-    "set_tier", "add_points", "remove_points", "redeem_points_reward",
-    "set_balance", "check_in", "un_check_in",
-    "deduct_balance", "load_balance", "refund_balance", "redeem_coupon",
+    "add_punch",
+    "remove_punch",
+    "redeem",
+    "set_punches",
+    "set_tier",
+    "add_points",
+    "remove_points",
+    "redeem_points_reward",
+    "set_balance",
+    "check_in",
+    "un_check_in",
+    "deduct_balance",
+    "load_balance",
+    "refund_balance",
+    "redeem_coupon",
 ]
 # Scanner-permitted subset: see wallet.py _SCANNER_ACTIONS.
 _ScannerAction = Literal[
-    "add_punch", "redeem", "add_points", "redeem_points_reward",
-    "check_in", "deduct_balance", "redeem_coupon",
+    "add_punch",
+    "redeem",
+    "add_points",
+    "redeem_points_reward",
+    "check_in",
+    "deduct_balance",
+    "redeem_coupon",
 ]
 
 
 # ── Programs ─────────────────────────────────────────────────────────────────────
+
 
 class WalletProgramCreate(BaseModel):
     name: str = Field(min_length=1, max_length=255)
@@ -57,6 +79,7 @@ class WalletProgramBulkDelete(BaseModel):
 
 # ── Public join / scanner ─────────────────────────────────────────────────────────
 
+
 class WalletSelfEnroll(BaseModel):
     email: str | None = Field(default=None, max_length=255)
     name: str | None = Field(default=None, max_length=255)
@@ -70,6 +93,7 @@ class WalletScannerAction(BaseModel):
 
 
 # ── Cards ────────────────────────────────────────────────────────────────────────
+
 
 class WalletCardIssue(BaseModel):
     customer_email: str | None = Field(default=None, max_length=255)
@@ -86,11 +110,13 @@ class WalletCardAction(BaseModel):
 
 # ── Receipt scanning ───────────────────────────────────────────────────────────────
 
+
 class WalletReceiptScanRequest(BaseModel):
     image: str = Field(min_length=1)
 
 
 # ── Push notifications ─────────────────────────────────────────────────────────────
+
 
 class WalletPushMessage(BaseModel):
     message: str | None = None
@@ -98,14 +124,17 @@ class WalletPushMessage(BaseModel):
 
 # ── Apple Wallet web-service ───────────────────────────────────────────────────────
 
+
 class AppleLogBody(BaseModel):
     """Apple's error-log webhook. Payload shape is Apple-defined and unused by us
     (handler just acks with {}), so this only pins down the documented `logs` field
     and otherwise ignores whatever else Apple sends."""
+
     logs: list[str] | None = None
 
 
 # ── Wallet credential settings ─────────────────────────────────────────────────────
+
 
 class WalletAppleCredentialsUpdate(BaseModel):
     pass_type_identifier: str | None = None

@@ -9,6 +9,7 @@ StoreCurrency = Literal["USD", "EUR", "GBP", "CAD", "AUD", "SGD", "AED", "INR"]
 
 # ── Stores ─────────────────────────────────────────────────────────────────────
 
+
 class StoreCreate(BaseModel):
     name: str = Field(min_length=1, max_length=255)
     description: str | None = Field(None, max_length=2000)
@@ -34,6 +35,7 @@ class StoreUpdate(BaseModel):
 
 
 # ── Products ───────────────────────────────────────────────────────────────────
+
 
 class ProductCreate(BaseModel):
     name: str = Field(min_length=1, max_length=255)
@@ -62,6 +64,7 @@ class ProductUpdate(BaseModel):
 
 
 # ── Stripe Checkout ────────────────────────────────────────────────────────────
+
 
 class PaymentIntentCreate(BaseModel):
     store_slug: str = Field(min_length=1, max_length=200)

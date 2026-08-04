@@ -7,11 +7,11 @@ Tests cover:
 - LLMRouter: complete — success, fallback, no-fallback re-raise
 - LLMRouter: stream — success, fallback before first chunk, no retry after first chunk
 """
+
 from __future__ import annotations
 
-import asyncio
+from collections.abc import AsyncIterator
 from decimal import Decimal
-from typing import AsyncIterator
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -24,7 +24,6 @@ from app.services.llm.router import (
     LLMRouter,
     get_provider,
 )
-
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -169,8 +168,14 @@ async def test_router_complete_reraises_when_fallback_same_as_primary():
 async def test_router_stream_success():
     chunks = [
         StreamChunk(delta="Hello"),
-        StreamChunk(delta=" world", done=True, model="claude-sonnet-4-6",
-                    input_tokens=5, output_tokens=10, cost_usd=Decimal("0.001")),
+        StreamChunk(
+            delta=" world",
+            done=True,
+            model="claude-sonnet-4-6",
+            input_tokens=5,
+            output_tokens=10,
+            cost_usd=Decimal("0.001"),
+        ),
     ]
     # Use MagicMock (not AsyncMock) so stream() returns the async generator directly,
     # matching how async generator provider methods behave when called.
@@ -190,8 +195,14 @@ async def test_router_stream_success():
 async def test_router_stream_fallback_before_first_chunk():
     """If primary raises before yielding anything, retry with fallback."""
     fallback_chunks = [
-        StreamChunk(delta="Fallback", done=True, model="gpt-4o-mini",
-                    input_tokens=5, output_tokens=5, cost_usd=Decimal("0.0001")),
+        StreamChunk(
+            delta="Fallback",
+            done=True,
+            model="gpt-4o-mini",
+            input_tokens=5,
+            output_tokens=5,
+            cost_usd=Decimal("0.0001"),
+        ),
     ]
 
     async def _primary_stream(*_, **__):

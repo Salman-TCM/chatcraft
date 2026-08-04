@@ -13,6 +13,7 @@ All send_* functions accept an optional `agency` dict:
 When present, SMTP is used (or Resend if smtp_config is absent). The platform
 name/logo never appears in agency-sent emails.
 """
+
 from __future__ import annotations
 
 import smtplib
@@ -24,8 +25,8 @@ from loguru import logger
 
 from app.core.config import settings
 
-
 # ── Low-level senders ─────────────────────────────────────────────────────────
+
 
 def _send_resend(to: str, subject: str, html: str, from_email: str | None = None) -> None:
     if not settings.resend_api_key:
@@ -33,13 +34,16 @@ def _send_resend(to: str, subject: str, html: str, from_email: str | None = None
         return
     try:
         import resend
+
         resend.api_key = settings.resend_api_key
-        resend.Emails.send({
-            "from": from_email or settings.resend_from_email,
-            "to": [to],
-            "subject": subject,
-            "html": html,
-        })
+        resend.Emails.send(
+            {
+                "from": from_email or settings.resend_from_email,
+                "to": [to],
+                "subject": subject,
+                "html": html,
+            }
+        )
     except Exception as exc:
         logger.error(f"Failed to send email via Resend to {to}: {exc}")
 
@@ -62,7 +66,9 @@ def _send_smtp(to: str, subject: str, html: str, cfg: dict[str, Any], from_addr:
 def _send(to: str, subject: str, html: str, agency: dict | None = None) -> None:
     if agency:
         smtp_cfg = agency.get("smtp_config")
-        from_addr = agency.get("from_email") or (smtp_cfg or {}).get("user") or settings.resend_from_email
+        from_addr = (
+            agency.get("from_email") or (smtp_cfg or {}).get("user") or settings.resend_from_email
+        )
         if smtp_cfg and smtp_cfg.get("host"):
             _send_smtp(to, subject, html, smtp_cfg, from_addr)
             return
@@ -73,6 +79,7 @@ def _send(to: str, subject: str, html: str, agency: dict | None = None) -> None:
 
 
 # ── HTML layout helpers ───────────────────────────────────────────────────────
+
 
 def _branded_html(
     body_html: str,
@@ -86,7 +93,11 @@ def _branded_html(
         if logo_url
         else f'<span style="font-size:20px;font-weight:700;color:{primary_colour}">{platform_name}</span>'
     )
-    footer_email = f'<a href="mailto:{support_email}" style="color:{primary_colour}">{support_email}</a>' if support_email else ""
+    footer_email = (
+        f'<a href="mailto:{support_email}" style="color:{primary_colour}">{support_email}</a>'
+        if support_email
+        else ""
+    )
     return f"""
 <div style="font-family:sans-serif;max-width:560px;margin:0 auto;padding:24px 16px">
   {logo_block}
@@ -123,6 +134,7 @@ def _get_branding(agency: dict | None) -> tuple[str, str, str | None, str | None
 
 
 # ── Public API ────────────────────────────────────────────────────────────────
+
 
 def send_verification_email(to: str, token: str, agency: dict | None = None) -> None:
     name, colour, logo, support = _get_branding(agency)

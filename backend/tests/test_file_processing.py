@@ -5,12 +5,13 @@ Tests the text cleaner and chunker — both are pure-Python, no I/O.
 The chunker requires tiktoken and langchain; they are skipped gracefully
 when unavailable (e.g. CI without optional ML deps).
 """
+
 import pytest
 
 from app.services.kb.cleaner import clean
 
-
 # ── Cleaner ───────────────────────────────────────────────────────────────────
+
 
 class TestClean:
     def test_basic_passthrough(self):
@@ -81,6 +82,7 @@ class TestClean:
 
 try:
     from app.services.kb.chunker import CHUNK_OVERLAP, CHUNK_SIZE, Chunk, chunk_text
+
     HAS_CHUNKER = True
 except ImportError:
     HAS_CHUNKER = False

@@ -3,6 +3,7 @@ Celery task: process_document
 Pipeline: extract text → clean → chunk → embed → store in pgvector.
 Document status is updated at each stage so the UI can reflect progress.
 """
+
 import asyncio
 import uuid
 
@@ -49,7 +50,7 @@ def process_document(self: EmbeddingTask, document_id: str) -> dict:
 
         # Retry transient errors (network, rate limits)
         if self.request.retries < self.max_retries:
-            raise self.retry(exc=exc, countdown=30 * (2 ** self.request.retries))
+            raise self.retry(exc=exc, countdown=30 * (2**self.request.retries))
         return {"document_id": document_id, "status": "error", "error": str(exc)}
 
 
@@ -106,10 +107,9 @@ async def _run_pipeline(document_id: str) -> None:
         # ── 6. Persist chunks ─────────────────────────────────────────────────
         # Delete any stale chunks from a previous (failed) attempt
         from sqlalchemy import delete
+
         await db.execute(
-            delete(KnowledgeBaseChunk).where(
-                KnowledgeBaseChunk.document_id == doc_uuid
-            )
+            delete(KnowledgeBaseChunk).where(KnowledgeBaseChunk.document_id == doc_uuid)
         )
 
         total_tokens = 0
@@ -133,8 +133,7 @@ async def _run_pipeline(document_id: str) -> None:
 
         await db.commit()
         logger.info(
-            f"[KB] Document {document_id} ready — "
-            f"{len(chunks)} chunks, {total_tokens} tokens"
+            f"[KB] Document {document_id} ready — {len(chunks)} chunks, {total_tokens} tokens"
         )
 
 

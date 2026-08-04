@@ -12,11 +12,11 @@ Routes:
   POST   /api/v1/landing-pages/{id}/ai        ← AI content generation
   GET    /p/{slug}                             ← public render (no auth)
 """
+
 import io
 import re
 import secrets
 import uuid
-from datetime import datetime, timezone
 from typing import Annotated
 
 from fastapi import APIRouter, HTTPException, Query, Request, status
@@ -72,21 +72,28 @@ async def _get_owned(page_id: uuid.UUID, user_id: uuid.UUID, db) -> LandingPage:
 
 # ── Authenticated CRUD ─────────────────────────────────────────────────────────
 
+
 @router.get("/api/v1/landing-pages", response_model=dict)
 async def list_pages(
-    user: CurrentUser, db: DBSession,
+    user: CurrentUser,
+    db: DBSession,
     page: Annotated[int, Query(ge=1)] = 1,
     limit: Annotated[int, Query(ge=1, le=100)] = 30,
 ) -> dict:
     offset = (page - 1) * limit
     result = await db.execute(
-        select(LandingPage).where(LandingPage.user_id == user.id)
-        .order_by(LandingPage.created_at.desc()).offset(offset).limit(limit)
+        select(LandingPage)
+        .where(LandingPage.user_id == user.id)
+        .order_by(LandingPage.created_at.desc())
+        .offset(offset)
+        .limit(limit)
     )
     pages = result.scalars().all()
-    total = (await db.execute(
-        select(func.count()).select_from(LandingPage).where(LandingPage.user_id == user.id)
-    )).scalar_one()
+    total = (
+        await db.execute(
+            select(func.count()).select_from(LandingPage).where(LandingPage.user_id == user.id)
+        )
+    ).scalar_one()
     return {
         "success": True,
         "data": [_page_dict(p, include_content=False) for p in pages],
@@ -137,7 +144,9 @@ async def get_page(page_id: uuid.UUID, user: CurrentUser, db: DBSession) -> dict
 
 
 @router.patch("/api/v1/landing-pages/{page_id}", response_model=dict)
-async def update_page(page_id: uuid.UUID, body: LandingPageUpdate, user: CurrentUser, db: DBSession) -> dict:
+async def update_page(
+    page_id: uuid.UUID, body: LandingPageUpdate, user: CurrentUser, db: DBSession
+) -> dict:
     page = await _get_owned(page_id, user.id, db)
     for field, value in body.model_dump(exclude_unset=True).items():
         setattr(page, field, value)
@@ -165,6 +174,7 @@ async def toggle_publish(page_id: uuid.UUID, user: CurrentUser, db: DBSession) -
 @router.get("/api/v1/landing-pages/{page_id}/attribution", response_model=dict)
 async def get_attribution(page_id: uuid.UUID, user: CurrentUser, db: DBSession) -> dict:
     from app.models.attribution import AttributionEvent
+
     page = await _get_owned(page_id, user.id, db)
 
     result = await db.execute(
@@ -209,6 +219,7 @@ async def get_attribution(page_id: uuid.UUID, user: CurrentUser, db: DBSession) 
 
 # ── QR code ───────────────────────────────────────────────────────────────────
 
+
 @router.get("/api/v1/landing-pages/{page_id}/qr")
 async def get_qr(
     page_id: uuid.UUID,
@@ -250,6 +261,7 @@ async def get_qr(
 
 # ── AI content generation ──────────────────────────────────────────────────────
 
+
 @router.post("/api/v1/landing-pages/{page_id}/ai", response_model=dict)
 async def ai_generate(
     page_id: uuid.UUID,
@@ -261,6 +273,7 @@ async def ai_generate(
     prompt = body.prompt  # already stripped/validated non-empty by LandingPageAIGenerate
 
     from app.services.llm import ChatMessage, LLMRouter
+
     llm = LLMRouter(model=body.model or "claude-sonnet-4-6")
     messages = [
         ChatMessage(
@@ -280,6 +293,7 @@ async def ai_generate(
 
 # ── Public page render (no auth) ───────────────────────────────────────────────
 
+
 @router.get("/p/{slug}", response_class=HTMLResponse)
 async def public_page(
     slug: str,
@@ -294,7 +308,9 @@ async def public_page(
     if not page:
         # Also try short_id lookup
         result2 = await db.execute(
-            select(LandingPage).where(LandingPage.short_id == slug, LandingPage.is_published.is_(True))
+            select(LandingPage).where(
+                LandingPage.short_id == slug, LandingPage.is_published.is_(True)
+            )
         )
         page = result2.scalar_one_or_none()
 
@@ -307,23 +323,27 @@ async def public_page(
 
     # Record attribution event (fire-and-forget; don't block the response)
     import hashlib as _hashlib
+
     from app.models.attribution import AttributionEvent
+
     client_ip = request.client.host if request.client else ""
     ip_hash = _hashlib.sha256(client_ip.encode()).hexdigest()[:16] if client_ip else None
-    db.add(AttributionEvent(
-        user_id=page.user_id,
-        landing_page_id=page.id,
-        touch_type="first",
-        ref=request.query_params.get("ref"),
-        utm_source=request.query_params.get("utm_source"),
-        utm_medium=request.query_params.get("utm_medium"),
-        utm_campaign=request.query_params.get("utm_campaign"),
-        utm_content=request.query_params.get("utm_content"),
-        utm_term=request.query_params.get("utm_term"),
-        page_slug=page.slug,
-        session_id=request.query_params.get("sid"),
-        ip_hash=ip_hash,
-    ))
+    db.add(
+        AttributionEvent(
+            user_id=page.user_id,
+            landing_page_id=page.id,
+            touch_type="first",
+            ref=request.query_params.get("ref"),
+            utm_source=request.query_params.get("utm_source"),
+            utm_medium=request.query_params.get("utm_medium"),
+            utm_campaign=request.query_params.get("utm_campaign"),
+            utm_content=request.query_params.get("utm_content"),
+            utm_term=request.query_params.get("utm_term"),
+            page_slug=page.slug,
+            session_id=request.query_params.get("sid"),
+            ip_hash=ip_hash,
+        )
+    )
     await db.commit()
 
     # Pre-fill URL params substitution in html_content
@@ -344,7 +364,7 @@ async def public_page(
     robots = seo.get("robots", "index,follow")
 
     full_html = f"""<!DOCTYPE html>
-<html lang="en" class="{'dark' if is_dark else ''}">
+<html lang="en" class="{"dark" if is_dark else ""}">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
@@ -353,13 +373,13 @@ async def public_page(
   <meta name="robots" content="{robots}" />
   <meta property="og:title" content="{title}" />
   <meta property="og:description" content="{description}" />
-  {f'<meta property="og:image" content="{og_image}" />' if og_image else ''}
+  {f'<meta property="og:image" content="{og_image}" />' if og_image else ""}
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
   <style>
     *, *::before, *::after {{ box-sizing: border-box; }}
     :root {{ --primary: {primary}; }}
-    body {{ font-family: 'Inter', sans-serif; margin: 0; {'background:#0f172a;color:#f1f5f9;' if is_dark else 'background:#fff;color:#0f172a;'} }}
+    body {{ font-family: 'Inter', sans-serif; margin: 0; {"background:#0f172a;color:#f1f5f9;" if is_dark else "background:#fff;color:#0f172a;"} }}
     a {{ color: var(--primary); }}
   </style>
 </head>
@@ -372,6 +392,7 @@ async def public_page(
 
 
 # ── Helpers ────────────────────────────────────────────────────────────────────
+
 
 def _default_html(name: str) -> str:
     return f"""<section style="max-width:720px;margin:80px auto;padding:0 24px;text-align:center">

@@ -4,6 +4,7 @@ Integration tests: widget endpoints.
 - POST /api/widget/{id}/chat — requires X-Widget-Token header
 - Domain whitelist check via origin header
 """
+
 import pytest
 
 WIDGET_CONFIG_URL = "/api/widget/{chatbot_id}/config"

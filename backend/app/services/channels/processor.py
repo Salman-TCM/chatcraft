@@ -12,8 +12,9 @@ Flow:
     → send reply via ChannelSender
     → log usage
 """
+
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -24,7 +25,6 @@ from app.models.conversation import Conversation
 from app.models.crm import Contact
 from app.models.message import Message, MessageRole
 from app.services import usage as usage_svc
-from app.services.channels import get_sender
 from app.services.kb.rag import RAGService
 from app.services.llm import (
     ChatMessage,
@@ -38,7 +38,7 @@ from app.services.llm import (
 async def process_incoming(
     chatbot_id: uuid.UUID,
     channel: str,
-    sender_id: str,        # e.g. Telegram chat_id, WhatsApp phone, FB PSID
+    sender_id: str,  # e.g. Telegram chat_id, WhatsApp phone, FB PSID
     text: str,
     sender_name: str | None = None,
     sender_phone: str | None = None,
@@ -56,9 +56,7 @@ async def process_incoming(
         )
 
         # ── find/create conversation ──────────────────────────────────────────
-        conv = await _get_or_create_conversation(
-            db, chatbot_id, channel, contact.id, sender_id
-        )
+        conv = await _get_or_create_conversation(db, chatbot_id, channel, contact.id, sender_id)
 
         # ── persist user message ──────────────────────────────────────────────
         sanitized = sanitize(text)
@@ -68,7 +66,7 @@ async def process_incoming(
             content=sanitized,
         )
         db.add(user_msg)
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         conv.last_message_at = now
         conv.last_user_message_at = now  # used for 24-hour window enforcement
         conv.unread_count = (conv.unread_count or 0) + 1
@@ -80,6 +78,7 @@ async def process_incoming(
 
         # ── keyword matching (before LLM) ────────────────────────────────────
         from app.services.keyword_matcher import match as match_keyword
+
         keyword_rule = await match_keyword(sanitized, bot.user_id, chatbot_id, db)
         if keyword_rule:
             if keyword_rule.response_type == "text" and keyword_rule.response_text:
@@ -90,11 +89,12 @@ async def process_incoming(
                     content=reply_text,
                 )
                 db.add(asst_msg)
-                conv.last_message_at = datetime.now(timezone.utc)
+                conv.last_message_at = datetime.now(UTC)
                 await db.commit()
                 # Send outbound
                 from app.models.channel_integration import ChannelIntegration
                 from app.services.channels import get_sender
+
                 r = await db.execute(
                     select(ChannelIntegration).where(
                         ChannelIntegration.chatbot_id == chatbot_id,
@@ -112,10 +112,12 @@ async def process_incoming(
             elif keyword_rule.response_type == "flow" and keyword_rule.flow_id:
                 from app.models.flow import Flow
                 from app.services.flow.executor import start_run
+
                 flow = await db.get(Flow, keyword_rule.flow_id)
                 if flow and flow.is_active:
                     await start_run(
-                        flow, db,
+                        flow,
+                        db,
                         contact_id=contact.id,
                         conversation_id=conv.id,
                     )
@@ -156,7 +158,7 @@ async def process_incoming(
             cost_usd=response.cost_usd,
         )
         db.add(asst_msg)
-        conv.last_message_at = datetime.now(timezone.utc)
+        conv.last_message_at = datetime.now(UTC)
         await db.commit()
         await db.refresh(asst_msg)
 
@@ -173,6 +175,7 @@ async def process_incoming(
 
         # ── send reply via channel ────────────────────────────────────────────
         from app.models.channel_integration import ChannelIntegration
+
         result = await db.execute(
             select(ChannelIntegration).where(
                 ChannelIntegration.chatbot_id == chatbot_id,

@@ -29,6 +29,7 @@ class WidgetConfigUpdate(BaseModel):
 
 class WidgetPublicConfig(BaseModel):
     """Returned to the widget.js script — no auth required."""
+
     model_config = {"from_attributes": True}
 
     id: uuid.UUID

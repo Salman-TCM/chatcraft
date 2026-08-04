@@ -1,7 +1,7 @@
 import json
 import secrets
 import urllib.parse
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import httpx
 from fastapi import APIRouter, Cookie, Header, HTTPException, Query, Response, status
@@ -93,7 +93,11 @@ async def login(
     if attempts and int(attempts) >= _LOGIN_ATTEMPT_LIMIT:
         raise HTTPException(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-            detail={"success": False, "error": "Too many login attempts. Try again in 15 minutes.", "code": "TOO_MANY_ATTEMPTS"},
+            detail={
+                "success": False,
+                "error": "Too many login attempts. Try again in 15 minutes.",
+                "code": "TOO_MANY_ATTEMPTS",
+            },
         )
 
     user = await db.scalar(select(User).where(User.email == body.email))
@@ -104,7 +108,11 @@ async def login(
         await pipe.execute()
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail={"success": False, "error": "Invalid credentials", "code": "INVALID_CREDENTIALS"},
+            detail={
+                "success": False,
+                "error": "Invalid credentials",
+                "code": "INVALID_CREDENTIALS",
+            },
         )
 
     # Successful login — clear attempt counter
@@ -113,10 +121,16 @@ async def login(
     if user.is_suspended:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail={"success": False, "error": "Account suspended. Contact support.", "code": "ACCOUNT_SUSPENDED"},
+            detail={
+                "success": False,
+                "error": "Account suspended. Contact support.",
+                "code": "ACCOUNT_SUSPENDED",
+            },
         )
 
-    access_token = create_access_token(user.id, user.role.value, allowed_features=user.allowed_features)
+    access_token = create_access_token(
+        user.id, user.role.value, allowed_features=user.allowed_features
+    )
     refresh_token, jti = create_refresh_token(user.id)
 
     # Store JTI in Redis so it can be revoked on logout
@@ -163,7 +177,11 @@ async def logout(
 
 _INVALID_REFRESH = HTTPException(
     status_code=status.HTTP_401_UNAUTHORIZED,
-    detail={"success": False, "error": "Invalid or expired refresh token", "code": "INVALID_REFRESH_TOKEN"},
+    detail={
+        "success": False,
+        "error": "Invalid or expired refresh token",
+        "code": "INVALID_REFRESH_TOKEN",
+    },
 )
 
 
@@ -230,7 +248,9 @@ async def refresh(
     if not user or user.is_suspended:
         raise _INVALID_REFRESH
 
-    access_token = create_access_token(user.id, user.role.value, allowed_features=user.allowed_features)
+    access_token = create_access_token(
+        user.id, user.role.value, allowed_features=user.allowed_features
+    )
     new_refresh_token, new_jti = create_refresh_token(user.id)
     await redis.setex(f"refresh:{new_jti}", _REFRESH_TTL, str(user.id))
 
@@ -239,11 +259,13 @@ async def refresh(
     await redis.setex(
         f"refresh:{jti}:grace",
         30,
-        json.dumps({
-            "access_token": access_token,
-            "refresh_token": new_refresh_token,
-            "user_id": str(user.id),
-        }),
+        json.dumps(
+            {
+                "access_token": access_token,
+                "refresh_token": new_refresh_token,
+                "user_id": str(user.id),
+            }
+        ),
     )
 
     # Revoke old token after grace key is in place
@@ -300,12 +322,20 @@ async def change_password(
     if not current_user.password_hash:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail={"success": False, "error": "Account uses social login — no password set", "code": "NO_PASSWORD"},
+            detail={
+                "success": False,
+                "error": "Account uses social login — no password set",
+                "code": "NO_PASSWORD",
+            },
         )
     if not verify_password(current_pwd, current_user.password_hash):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail={"success": False, "error": "Current password is incorrect", "code": "WRONG_PASSWORD"},
+            detail={
+                "success": False,
+                "error": "Current password is incorrect",
+                "code": "WRONG_PASSWORD",
+            },
         )
 
     current_user.password_hash = hash_password(new_pwd)
@@ -319,13 +349,15 @@ async def verify_email(
     token: str = Query(...),
 ) -> dict:
     """Mark the user's email as verified using the token sent on registration."""
-    user = await db.scalar(
-        select(User).where(User.email_verification_token == token)
-    )
+    user = await db.scalar(select(User).where(User.email_verification_token == token))
     if not user:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail={"success": False, "error": "Invalid or expired verification token", "code": "INVALID_VERIFICATION_TOKEN"},
+            detail={
+                "success": False,
+                "error": "Invalid or expired verification token",
+                "code": "INVALID_VERIFICATION_TOKEN",
+            },
         )
 
     user.email_verified = True
@@ -349,31 +381,40 @@ async def forgot_password(body: ForgotPasswordRequest, db: DBSession) -> dict:
     if user and user.password_hash:  # only email+password accounts can reset
         token = secrets.token_urlsafe(32)
         user.password_reset_token = token
-        user.password_reset_expires_at = datetime.now(timezone.utc) + timedelta(
+        user.password_reset_expires_at = datetime.now(UTC) + timedelta(
             hours=_RESET_TOKEN_EXPIRY_HOURS
         )
         await db.commit()
         send_password_reset_email(user.email, token)
 
-    return {"success": True, "data": {"message": "If that email exists, a reset link has been sent"}}
+    return {
+        "success": True,
+        "data": {"message": "If that email exists, a reset link has been sent"},
+    }
 
 
 @router.post("/reset-password")
 async def reset_password(body: ResetPasswordRequest, db: DBSession) -> dict:
     """Set a new password using a valid reset token."""
-    user = await db.scalar(
-        select(User).where(User.password_reset_token == body.token)
-    )
+    user = await db.scalar(select(User).where(User.password_reset_token == body.token))
     if not user or not user.password_reset_expires_at:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail={"success": False, "error": "Invalid or expired reset token", "code": "INVALID_RESET_TOKEN"},
+            detail={
+                "success": False,
+                "error": "Invalid or expired reset token",
+                "code": "INVALID_RESET_TOKEN",
+            },
         )
 
-    if user.password_reset_expires_at.replace(tzinfo=timezone.utc) < datetime.now(timezone.utc):
+    if user.password_reset_expires_at.replace(tzinfo=UTC) < datetime.now(UTC):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail={"success": False, "error": "Reset token has expired", "code": "RESET_TOKEN_EXPIRED"},
+            detail={
+                "success": False,
+                "error": "Reset token has expired",
+                "code": "RESET_TOKEN_EXPIRED",
+            },
         )
 
     user.password_hash = hash_password(body.password)
@@ -401,21 +442,27 @@ async def google_oauth_redirect(redis: RedisClient) -> RedirectResponse:
     if not settings.google_oauth_client_id:
         raise HTTPException(
             status_code=status.HTTP_501_NOT_IMPLEMENTED,
-            detail={"success": False, "error": "Google OAuth not configured", "code": "OAUTH_NOT_CONFIGURED"},
+            detail={
+                "success": False,
+                "error": "Google OAuth not configured",
+                "code": "OAUTH_NOT_CONFIGURED",
+            },
         )
 
     state = secrets.token_urlsafe(32)
     await redis.setex(f"oauth:state:{state}", _OAUTH_STATE_TTL, "1")
 
-    params = urllib.parse.urlencode({
-        "client_id": settings.google_oauth_client_id,
-        "redirect_uri": settings.google_oauth_redirect_uri,
-        "response_type": "code",
-        "scope": "openid email profile",
-        "state": state,
-        "access_type": "offline",
-        "prompt": "select_account",
-    })
+    params = urllib.parse.urlencode(
+        {
+            "client_id": settings.google_oauth_client_id,
+            "redirect_uri": settings.google_oauth_redirect_uri,
+            "response_type": "code",
+            "scope": "openid email profile",
+            "state": state,
+            "access_type": "offline",
+            "prompt": "select_account",
+        }
+    )
     return RedirectResponse(url=f"{_GOOGLE_AUTH_URL}?{params}")
 
 
@@ -434,7 +481,11 @@ async def google_oauth_callback(
     if not valid:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail={"success": False, "error": "Invalid OAuth state", "code": "INVALID_OAUTH_STATE"},
+            detail={
+                "success": False,
+                "error": "Invalid OAuth state",
+                "code": "INVALID_OAUTH_STATE",
+            },
         )
     await redis.delete(state_key)
 
@@ -453,7 +504,11 @@ async def google_oauth_callback(
         if token_resp.status_code != 200:
             raise HTTPException(
                 status_code=status.HTTP_502_BAD_GATEWAY,
-                detail={"success": False, "error": "Google token exchange failed", "code": "OAUTH_TOKEN_ERROR"},
+                detail={
+                    "success": False,
+                    "error": "Google token exchange failed",
+                    "code": "OAUTH_TOKEN_ERROR",
+                },
             )
         google_access_token = token_resp.json().get("access_token", "")
 
@@ -465,7 +520,11 @@ async def google_oauth_callback(
         if userinfo_resp.status_code != 200:
             raise HTTPException(
                 status_code=status.HTTP_502_BAD_GATEWAY,
-                detail={"success": False, "error": "Google userinfo fetch failed", "code": "OAUTH_USERINFO_ERROR"},
+                detail={
+                    "success": False,
+                    "error": "Google userinfo fetch failed",
+                    "code": "OAUTH_USERINFO_ERROR",
+                },
             )
         info = userinfo_resp.json()
 
@@ -477,7 +536,11 @@ async def google_oauth_callback(
     if not google_id or not email:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail={"success": False, "error": "Incomplete Google profile", "code": "OAUTH_INCOMPLETE_PROFILE"},
+            detail={
+                "success": False,
+                "error": "Incomplete Google profile",
+                "code": "OAUTH_INCOMPLETE_PROFILE",
+            },
         )
 
     # Find by google_id first, then fall back to email (link existing account)
@@ -507,7 +570,9 @@ async def google_oauth_callback(
         await db.refresh(user)
 
     # Issue tokens
-    access_token = create_access_token(user.id, user.role.value, allowed_features=user.allowed_features)
+    access_token = create_access_token(
+        user.id, user.role.value, allowed_features=user.allowed_features
+    )
     refresh_token, jti = create_refresh_token(user.id)
     await redis.setex(f"refresh:{jti}", _REFRESH_TTL, str(user.id))
 
@@ -524,8 +589,7 @@ async def google_oauth_callback(
     # Redirect to frontend with the access token as a query param so the
     # client can store it in memory (the refresh token arrives via cookie)
     redirect_url = (
-        f"{settings.frontend_url}/auth/callback"
-        f"?access_token={urllib.parse.quote(access_token)}"
+        f"{settings.frontend_url}/auth/callback?access_token={urllib.parse.quote(access_token)}"
     )
     return RedirectResponse(url=redirect_url, status_code=302)
 
@@ -566,10 +630,16 @@ async def google_sync(
     if user.is_suspended:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail={"success": False, "error": "Account suspended. Contact support.", "code": "ACCOUNT_SUSPENDED"},
+            detail={
+                "success": False,
+                "error": "Account suspended. Contact support.",
+                "code": "ACCOUNT_SUSPENDED",
+            },
         )
 
-    access_token = create_access_token(user.id, user.role.value, allowed_features=user.allowed_features)
+    access_token = create_access_token(
+        user.id, user.role.value, allowed_features=user.allowed_features
+    )
     refresh_token, jti = create_refresh_token(user.id)
     await redis.setex(f"refresh:{jti}", _REFRESH_TTL, str(user.id))
 

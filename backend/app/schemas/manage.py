@@ -1,4 +1,5 @@
 """Request schemas for the /api/manage endpoints (widget/function management via API tokens)."""
+
 import uuid
 from typing import Literal
 
@@ -7,8 +8,18 @@ from pydantic import BaseModel, Field
 # Fixed channel set — mirrors app.models.inbox.ConversationChannel, plus the
 # "all" sentinel this endpoint uses to mean "every channel".
 Channel = Literal[
-    "all", "web", "facebook", "instagram", "whatsapp", "telegram",
-    "discord", "sms", "phone", "twitter", "tiktok", "email",
+    "all",
+    "web",
+    "facebook",
+    "instagram",
+    "whatsapp",
+    "telegram",
+    "discord",
+    "sms",
+    "phone",
+    "twitter",
+    "tiktok",
+    "email",
 ]
 
 # "rounded" | "square" | "pill" — see app.models.chatbot_config.ChatbotConfig.bubble_style

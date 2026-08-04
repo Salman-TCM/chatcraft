@@ -5,16 +5,17 @@ Architecture:
 - If BROWSERBASE_API_KEY is set, sessions are delegated to Browserbase (production).
 - Otherwise, page fetching via httpx + BeautifulSoup (development / direct-browse only).
 """
+
 import secrets
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 import httpx
 from bs4 import BeautifulSoup
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
-from sqlalchemy import func, select, update
+from sqlalchemy import func, select
 
 from app.core.config import settings
 from app.core.dependencies import CurrentUser, DBSession, require_feature
@@ -22,13 +23,36 @@ from app.core.features import BROWSER_AGENT
 from app.models.browser import BrowserSession
 from app.models.user import UserRole
 
-router = APIRouter(prefix="/api/v1/browser", tags=["browser"], dependencies=[Depends(require_feature(BROWSER_AGENT))])
+router = APIRouter(
+    prefix="/api/v1/browser",
+    tags=["browser"],
+    dependencies=[Depends(require_feature(BROWSER_AGENT))],
+)
 
 _PRIVATE_RANGES = [
-    "10.", "172.16.", "172.17.", "172.18.", "172.19.", "172.20.", "172.21.",
-    "172.22.", "172.23.", "172.24.", "172.25.", "172.26.", "172.27.", "172.28.",
-    "172.29.", "172.30.", "172.31.", "192.168.", "127.", "169.254.", "::1",
-    "fc00:", "fe80:",
+    "10.",
+    "172.16.",
+    "172.17.",
+    "172.18.",
+    "172.19.",
+    "172.20.",
+    "172.21.",
+    "172.22.",
+    "172.23.",
+    "172.24.",
+    "172.25.",
+    "172.26.",
+    "172.27.",
+    "172.28.",
+    "172.29.",
+    "172.30.",
+    "172.31.",
+    "192.168.",
+    "127.",
+    "169.254.",
+    "::1",
+    "fc00:",
+    "fe80:",
 ]
 
 
@@ -40,6 +64,7 @@ def _is_private(url: str) -> bool:
 
 
 # ─── Session management ───────────────────────────────────────────────────────
+
 
 class CreateSessionRequest(BaseModel):
     max_pages: int = 5
@@ -68,10 +93,12 @@ async def create_session(
     # ── Monthly session limit check ───────────────────────────────────────────
     monthly_limit = _MONTHLY_LIMITS.get(current_user.role, 50)
     if monthly_limit < 999999:
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
         count_result = await db.execute(
-            select(func.count()).select_from(BrowserSession).where(
+            select(func.count())
+            .select_from(BrowserSession)
+            .where(
                 BrowserSession.user_id == current_user.id,
                 BrowserSession.created_at >= month_start,
             )
@@ -168,7 +195,7 @@ async def close_session(session_id: str, current_user: CurrentUser, db: DBSessio
         raise HTTPException(status_code=404, detail="Session not found")
 
     session.status = "closed"
-    session.closed_at = datetime.now(timezone.utc)
+    session.closed_at = datetime.now(UTC)
 
     if session.external_session_id and settings.browserbase_api_key:
         async with httpx.AsyncClient() as client:
@@ -183,6 +210,7 @@ async def close_session(session_id: str, current_user: CurrentUser, db: DBSessio
 
 
 # ─── Browser actions ──────────────────────────────────────────────────────────
+
 
 class BrowserActionRequest(BaseModel):
     action: str  # navigate | screenshot | extract | search | click | type | scroll
@@ -236,7 +264,10 @@ async def browser_action(
         session.pages_visited += 1
 
     elif body.action == "screenshot":
-        action_result = {"screenshot": None, "message": "Screenshot requires Playwright/Browserbase"}
+        action_result = {
+            "screenshot": None,
+            "message": "Screenshot requires Playwright/Browserbase",
+        }
 
     else:
         raise HTTPException(status_code=400, detail=f"Unknown action: {body.action}")
@@ -271,6 +302,7 @@ async def session_view(session_id: str, current_user: CurrentUser, db: DBSession
 
 
 # ─── Helpers ──────────────────────────────────────────────────────────────────
+
 
 async def _navigate(url: str, session: BrowserSession) -> dict:
     """Fetch page and return title + content summary."""

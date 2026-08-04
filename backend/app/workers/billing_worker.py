@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from loguru import logger
 
@@ -21,22 +21,26 @@ def expire_payment_grace_periods(self) -> dict:
     Runs every hour via Celery beat.
     """
     import asyncio
+
     from sqlalchemy import select
+
     from app.db.session import AsyncSessionLocal
     from app.models.subscription import Subscription, SubscriptionState
-    from app.models.user import User, UserRole, SubscriptionStatus
+    from app.models.user import SubscriptionStatus, User, UserRole
 
-    cutoff = datetime.now(timezone.utc) - timedelta(days=GRACE_PERIOD_DAYS)
+    cutoff = datetime.now(UTC) - timedelta(days=GRACE_PERIOD_DAYS)
 
     async def _run() -> dict:
         downgraded = 0
         async with AsyncSessionLocal() as db:
-            subs = (await db.scalars(
-                select(Subscription).where(
-                    Subscription.status == SubscriptionState.past_due,
-                    Subscription.payment_failed_at <= cutoff,
+            subs = (
+                await db.scalars(
+                    select(Subscription).where(
+                        Subscription.status == SubscriptionState.past_due,
+                        Subscription.payment_failed_at <= cutoff,
+                    )
                 )
-            )).all()
+            ).all()
 
             for sub in subs:
                 user: User | None = await db.get(User, sub.user_id)

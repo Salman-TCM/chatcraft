@@ -10,16 +10,16 @@ Execution lifecycle:
   execute(run) → runs until 'waiting' (needs user input / delay) or 'completed'/'failed'
   resume(run, input_value?) → resumes from waiting state
 """
+
 import uuid
-from datetime import datetime, timezone
-from typing import Any
+from datetime import UTC, datetime
 
 import httpx
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.flow import Flow, FlowRun
-from app.services.llm import ChatMessage, LLMRouter, sanitize
+from app.services.llm import ChatMessage, LLMRouter
 
 # Max nodes to visit before aborting (prevents infinite loops)
 _MAX_STEPS = 200
@@ -71,7 +71,7 @@ class FlowExecutor:
                 current_id = self._next_node_id(current_id, handle)
 
             self.run.status = "completed"
-            self.run.completed_at = datetime.now(timezone.utc)
+            self.run.completed_at = datetime.now(UTC)
             await self.db.commit()
 
         except Exception as exc:
@@ -90,7 +90,7 @@ class FlowExecutor:
             ctx.pop("_waiting_var", None)
             self.run.context = ctx
 
-        self.run.resumed_at = datetime.now(timezone.utc)
+        self.run.resumed_at = datetime.now(UTC)
         # Advance past the user_input node
         handle = "default"
         next_id = self._next_node_id(self.run.current_node_id or "", handle)
@@ -151,25 +151,28 @@ class FlowExecutor:
     async def _exec_carousel(self, data: dict) -> dict:
         """Emit a <<<RICH>>> carousel block to the conversation."""
         import json as _json
+
         cards = data.get("cards", [])
         if not cards or not self.run.conversation_id:
             return {"status": "continue"}
         # Resolve template variables in card text fields
         resolved_cards = []
         for card in cards:
-            resolved_cards.append({
-                "title": self._resolve(card.get("title", "")),
-                "subtitle": self._resolve(card.get("subtitle", "")),
-                "image_url": self._resolve(card.get("image_url", "")),
-                "buttons": [
-                    {
-                        "type": btn.get("type", "url"),
-                        "label": self._resolve(btn.get("label", "")),
-                        "value": self._resolve(btn.get("value", "")),
-                    }
-                    for btn in card.get("buttons", [])
-                ],
-            })
+            resolved_cards.append(
+                {
+                    "title": self._resolve(card.get("title", "")),
+                    "subtitle": self._resolve(card.get("subtitle", "")),
+                    "image_url": self._resolve(card.get("image_url", "")),
+                    "buttons": [
+                        {
+                            "type": btn.get("type", "url"),
+                            "label": self._resolve(btn.get("label", "")),
+                            "value": self._resolve(btn.get("value", "")),
+                        }
+                        for btn in card.get("buttons", [])
+                    ],
+                }
+            )
         rich_json = _json.dumps({"type": "carousel", "items": resolved_cards})
         rich_block = f"<<<RICH>>>{rich_json}<<<END>>>"
         channel_override = data.get("channel")
@@ -258,6 +261,7 @@ class FlowExecutor:
 
         # Schedule Celery task to resume this run
         from app.workers.flow_worker import resume_flow_run
+
         resume_flow_run.apply_async(
             args=[str(self.run.id)],
             countdown=delay_seconds,
@@ -420,6 +424,7 @@ class FlowExecutor:
 
     async def _exec_randomizer(self, data: dict) -> dict:
         import random
+
         paths = data.get("paths", [])
         if not paths:
             return {"status": "continue", "handle": "default"}
@@ -475,7 +480,7 @@ class FlowExecutor:
         AI Web node — Search, Fetch, or Browse mode.
         Saves result to context variable; optionally sends summary as reply.
         """
-        mode = data.get("mode", "fetch")   # "search" | "fetch" | "browse"
+        mode = data.get("mode", "fetch")  # "search" | "fetch" | "browse"
         query_or_url = self._resolve(data.get("query", data.get("url", "")))
         save_to = data.get("save_to", "web_result")
         send_reply = data.get("send_reply", False)
@@ -488,12 +493,14 @@ class FlowExecutor:
                     resp = await client.get(query_or_url, headers={"User-Agent": "ChatCraft/1.0"})
                     # Strip HTML tags crudely for context injection
                     import re as _re
+
                     raw = resp.text[:8000]
                     result_text = _re.sub(r"<[^>]+>", " ", raw).strip()
 
             elif mode == "search":
                 # Use Perplexity or fall back to a DuckDuckGo instant answer
                 from app.core.config import settings
+
                 if settings.perplexity_api_key:
                     llm = LLMRouter(model="sonar", provider_override="perplexity")
                     r = await llm.complete(
@@ -513,12 +520,14 @@ class FlowExecutor:
             elif mode == "browse":
                 # Direct URL visit via browser service
                 from app.services.browser import BrowserService
+
                 bs = BrowserService()
                 result_text = await bs.fetch_content(query_or_url)
 
             elif mode == "research":
                 # Autonomous multi-page research: search + visit top results
                 from app.services.browser import BrowserService
+
                 max_pages = int(data.get("max_pages", 5))
                 bs = BrowserService()
                 result_text = await bs.research(query_or_url, max_pages=max(1, min(max_pages, 10)))
@@ -534,7 +543,12 @@ class FlowExecutor:
             llm = LLMRouter(model=model)
             try:
                 summary = await llm.complete(
-                    [ChatMessage(role="user", content=f"Summarise this in 2-3 sentences:\n{result_text[:3000]}")],
+                    [
+                        ChatMessage(
+                            role="user",
+                            content=f"Summarise this in 2-3 sentences:\n{result_text[:3000]}",
+                        )
+                    ],
                     max_tokens=256,
                 )
                 await self._send_to_conversation(summary.content.strip())
@@ -551,7 +565,8 @@ class FlowExecutor:
         if not field_key or not self.run.contact_id:
             return
 
-        from app.models.crm import Contact, ContactFieldValue, CustomField
+        from app.models.crm import ContactFieldValue, CustomField
+
         result = await self.db.execute(
             select(CustomField).where(
                 CustomField.field_key == field_key,
@@ -572,9 +587,7 @@ class FlowExecutor:
         if fv:
             fv.value = value
         else:
-            fv = ContactFieldValue(
-                contact_id=self.run.contact_id, field_id=field.id, value=value
-            )
+            fv = ContactFieldValue(contact_id=self.run.contact_id, field_id=field.id, value=value)
             self.db.add(fv)
         # Also save to run context
         ctx = dict(self.run.context or {})
@@ -585,7 +598,8 @@ class FlowExecutor:
         tag_name = data.get("tag", "")
         if not tag_name or not self.run.contact_id:
             return
-        from app.models.crm import Contact, Tag, ContactTag
+        from app.models.crm import ContactTag, Tag
+
         result = await self.db.execute(
             select(Tag).where(Tag.name == tag_name, Tag.user_id == self.flow.user_id)
         )
@@ -605,7 +619,8 @@ class FlowExecutor:
         tag_name = data.get("tag", "")
         if not tag_name or not self.run.contact_id:
             return
-        from app.models.crm import Tag, ContactTag
+        from app.models.crm import ContactTag, Tag
+
         result = await self.db.execute(
             select(Tag).where(Tag.name == tag_name, Tag.user_id == self.flow.user_id)
         )
@@ -626,6 +641,7 @@ class FlowExecutor:
         if not self.run.conversation_id:
             return
         from app.models.conversation import Conversation
+
         conv = await self.db.get(Conversation, self.run.conversation_id)
         if conv:
             conv.status = "closed"
@@ -634,7 +650,11 @@ class FlowExecutor:
         url = self._resolve(data.get("url", ""))
         if not url:
             return
-        payload = {"flow_id": str(self.flow.id), "run_id": str(self.run.id), "context": self.run.context}
+        payload = {
+            "flow_id": str(self.flow.id),
+            "run_id": str(self.run.id),
+            "context": self.run.context,
+        }
         try:
             async with httpx.AsyncClient(timeout=10) as client:
                 await client.post(url, json=payload)
@@ -647,8 +667,10 @@ class FlowExecutor:
         user_id_str = data.get("user_id", "")
         if not user_id_str:
             return
-        from app.models.inbox import InboxAssignment
         from sqlalchemy import select
+
+        from app.models.inbox import InboxAssignment
+
         result = await self.db.execute(
             select(InboxAssignment).where(
                 InboxAssignment.conversation_id == self.run.conversation_id
@@ -659,16 +681,19 @@ class FlowExecutor:
         if assignment:
             assignment.assigned_to_user_id = uid
         else:
-            self.db.add(InboxAssignment(
-                conversation_id=self.run.conversation_id,
-                assigned_to_user_id=uid,
-            ))
+            self.db.add(
+                InboxAssignment(
+                    conversation_id=self.run.conversation_id,
+                    assigned_to_user_id=uid,
+                )
+            )
 
     async def _action_clear_field(self, data: dict) -> None:
         field_key = data.get("field_key", "")
         if not field_key or not self.run.contact_id:
             return
-        from app.models.crm import CustomField, ContactFieldValue
+        from app.models.crm import ContactFieldValue, CustomField
+
         result = await self.db.execute(
             select(CustomField).where(
                 CustomField.field_key == field_key,
@@ -691,8 +716,10 @@ class FlowExecutor:
     async def _action_clear_chat_history(self) -> None:
         if not self.run.conversation_id:
             return
-        from app.models.message import Message
         from sqlalchemy import delete
+
+        from app.models.message import Message
+
         await self.db.execute(
             delete(Message).where(Message.conversation_id == self.run.conversation_id)
         )
@@ -704,15 +731,19 @@ class FlowExecutor:
         if not note_text:
             return
         from app.models.inbox import InternalNote
-        self.db.add(InternalNote(
-            conversation_id=self.run.conversation_id,
-            content=note_text,
-        ))
+
+        self.db.add(
+            InternalNote(
+                conversation_id=self.run.conversation_id,
+                content=note_text,
+            )
+        )
 
     async def _action_pause_conversation(self, paused: bool) -> None:
         if not self.run.conversation_id:
             return
         from app.models.conversation import Conversation
+
         conv = await self.db.get(Conversation, self.run.conversation_id)
         if conv:
             conv.ai_paused = paused
@@ -721,6 +752,7 @@ class FlowExecutor:
         if not self.run.contact_id:
             return
         from app.models.crm import Contact
+
         contact = await self.db.get(Contact, self.run.contact_id)
         if contact:
             await self.db.delete(contact)
@@ -729,6 +761,7 @@ class FlowExecutor:
         if not self.run.contact_id:
             return
         from app.models.crm import Contact
+
         contact = await self.db.get(Contact, self.run.contact_id)
         if contact and hasattr(contact, flag):
             setattr(contact, flag, value)
@@ -738,6 +771,7 @@ class FlowExecutor:
         if not sequence_id_str or not self.run.contact_id:
             return
         from app.models.automation import SequenceEnrollment
+
         sid = uuid.UUID(sequence_id_str)
         existing = await self.db.execute(
             select(SequenceEnrollment).where(
@@ -746,18 +780,22 @@ class FlowExecutor:
             )
         )
         if not existing.scalar_one_or_none():
-            self.db.add(SequenceEnrollment(
-                sequence_id=sid,
-                contact_id=self.run.contact_id,
-                current_step=0,
-            ))
+            self.db.add(
+                SequenceEnrollment(
+                    sequence_id=sid,
+                    contact_id=self.run.contact_id,
+                    current_step=0,
+                )
+            )
 
     async def _action_unassign_sequence(self, data: dict) -> None:
         sequence_id_str = data.get("sequence_id", "")
         if not sequence_id_str or not self.run.contact_id:
             return
-        from app.models.automation import SequenceEnrollment
         from sqlalchemy import delete
+
+        from app.models.automation import SequenceEnrollment
+
         sid = uuid.UUID(sequence_id_str)
         await self.db.execute(
             delete(SequenceEnrollment).where(
@@ -772,14 +810,17 @@ class FlowExecutor:
         if not pipeline_id_str or not self.run.contact_id:
             return
         from app.models.crm import Deal
-        self.db.add(Deal(
-            pipeline_id=uuid.UUID(pipeline_id_str),
-            stage_id=uuid.UUID(stage_id_str) if stage_id_str else None,
-            contact_id=self.run.contact_id,
-            user_id=self.flow.user_id,
-            title=self._resolve(data.get("title", "Deal")),
-            value=float(data.get("value", 0)),
-        ))
+
+        self.db.add(
+            Deal(
+                pipeline_id=uuid.UUID(pipeline_id_str),
+                stage_id=uuid.UUID(stage_id_str) if stage_id_str else None,
+                contact_id=self.run.contact_id,
+                user_id=self.flow.user_id,
+                title=self._resolve(data.get("title", "Deal")),
+                value=float(data.get("value", 0)),
+            )
+        )
 
     async def _action_pipeline_move(self, data: dict) -> None:
         deal_id_str = data.get("deal_id", "")
@@ -787,6 +828,7 @@ class FlowExecutor:
         if not deal_id_str or not stage_id_str:
             return
         from app.models.crm import Deal
+
         deal = await self.db.get(Deal, uuid.UUID(deal_id_str))
         if deal:
             deal.stage_id = uuid.UUID(stage_id_str)
@@ -796,6 +838,7 @@ class FlowExecutor:
         if not deal_id_str:
             return
         from app.models.crm import Deal
+
         deal = await self.db.get(Deal, uuid.UUID(deal_id_str))
         if deal:
             await self.db.delete(deal)
@@ -805,6 +848,7 @@ class FlowExecutor:
         if not deal_id_str:
             return
         from app.models.crm import Deal
+
         deal = await self.db.get(Deal, uuid.UUID(deal_id_str))
         if deal:
             deal.value = float(self._resolve(str(data.get("value", 0))))
@@ -812,16 +856,15 @@ class FlowExecutor:
     async def _action_cancel_pending_flow(self, data: dict) -> None:
         if not self.run.contact_id:
             return
-        from app.models.flow import FlowRun
         from sqlalchemy import update
+
+        from app.models.flow import FlowRun
+
         target_flow_id_str = data.get("flow_id", "")
-        stmt = (
-            update(FlowRun)
-            .where(
-                FlowRun.contact_id == self.run.contact_id,
-                FlowRun.status.in_(["running", "waiting"]),
-                FlowRun.id != self.run.id,
-            )
+        stmt = update(FlowRun).where(
+            FlowRun.contact_id == self.run.contact_id,
+            FlowRun.status.in_(["running", "waiting"]),
+            FlowRun.id != self.run.id,
         )
         if target_flow_id_str:
             stmt = stmt.where(FlowRun.flow_id == uuid.UUID(target_flow_id_str))
@@ -833,10 +876,12 @@ class FlowExecutor:
         if not to or not body:
             return
         from app.core.config import settings
+
         if not settings.twilio_account_sid:
             return
         try:
             from twilio.rest import Client
+
             client = Client(settings.twilio_account_sid, settings.twilio_auth_token)
             client.messages.create(body=body, from_=settings.twilio_phone_number, to=to)
         except Exception:
@@ -849,6 +894,7 @@ class FlowExecutor:
         if not to or not subject:
             return
         from app.services.email import send_custom_email
+
         try:
             await send_custom_email(to=to, subject=subject, html=body)
         except Exception:
@@ -862,6 +908,7 @@ class FlowExecutor:
             return
         try:
             from app.services.push import send_push_to_contact
+
             await send_push_to_contact(contact_id=contact_id, title=title, body=body, db=self.db)
         except Exception:
             pass
@@ -871,6 +918,7 @@ class FlowExecutor:
         if not message:
             return
         from app.core.config import settings
+
         if settings.slack_alert_webhook_url:
             try:
                 async with httpx.AsyncClient(timeout=5) as client:
@@ -886,11 +934,15 @@ class FlowExecutor:
         if not to:
             return
         from app.core.config import settings
+
         if not settings.twilio_account_sid:
             return
         try:
             from twilio.rest import Client
-            twiml_url = self._resolve(data.get("twiml_url", f"{settings.api_base_url}/api/webhooks/twilio/voice/answer"))
+
+            twiml_url = self._resolve(
+                data.get("twiml_url", f"{settings.api_base_url}/api/webhooks/twilio/voice/answer")
+            )
             client = Client(settings.twilio_account_sid, settings.twilio_auth_token)
             client.calls.create(to=to, from_=settings.twilio_phone_number, url=twiml_url)
         except Exception:
@@ -903,10 +955,12 @@ class FlowExecutor:
         if not to or not self.run.conversation_id:
             return
         from app.core.config import settings
+
         if not settings.twilio_account_sid:
             return
         try:
             from app.models.conversation import Conversation
+
             conv = await self.db.get(Conversation, self.run.conversation_id)
             if not conv or conv.channel != "phone" or not conv.guest_id:
                 return
@@ -915,7 +969,7 @@ class FlowExecutor:
             safe_to = to.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
             twiml = (
                 '<?xml version="1.0" encoding="UTF-8"?>'
-                f"<Response><Say voice=\"Polly.Joanna\">{safe_msg}</Say>"
+                f'<Response><Say voice="Polly.Joanna">{safe_msg}</Say>'
                 f"<Dial>{safe_to}</Dial></Response>"
             )
             async with httpx.AsyncClient(timeout=10) as client:
@@ -933,20 +987,24 @@ class FlowExecutor:
         if not self.run.conversation_id:
             return
         from app.core.config import settings
+
         if not settings.twilio_account_sid:
             return
         try:
             from app.models.conversation import Conversation
+
             conv = await self.db.get(Conversation, self.run.conversation_id)
             if not conv or conv.channel != "phone" or not conv.guest_id:
                 return
             call_sid = conv.guest_id
             async with httpx.AsyncClient(timeout=10) as client:
                 if message:
-                    safe_msg = message.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+                    safe_msg = (
+                        message.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+                    )
                     twiml = (
                         '<?xml version="1.0" encoding="UTF-8"?>'
-                        f"<Response><Say voice=\"Polly.Joanna\">{safe_msg}</Say><Hangup/></Response>"
+                        f'<Response><Say voice="Polly.Joanna">{safe_msg}</Say><Hangup/></Response>'
                     )
                     await client.post(
                         f"https://api.twilio.com/2010-04-01/Accounts/{settings.twilio_account_sid}/Calls/{call_sid}.json",
@@ -971,6 +1029,7 @@ class FlowExecutor:
             async with httpx.AsyncClient(timeout=15, follow_redirects=True) as client:
                 resp = await client.get(url, headers={"User-Agent": "ChatCraft/1.0"})
                 import re as _re
+
                 text = _re.sub(r"<[^>]+>", " ", resp.text[:6000]).strip()
             ctx = dict(self.run.context or {})
             ctx[save_to] = text
@@ -1000,8 +1059,10 @@ class FlowExecutor:
         save_to = data.get("save_to", "extracted")
         conversation_context = ""
         if self.run.conversation_id:
-            from app.models.message import Message
             from sqlalchemy import select as _select
+
+            from app.models.message import Message
+
             msgs = await self.db.execute(
                 _select(Message)
                 .where(Message.conversation_id == self.run.conversation_id)
@@ -1020,6 +1081,7 @@ class FlowExecutor:
         try:
             resp = await llm.complete([ChatMessage(role="user", content=prompt)], max_tokens=512)
             import json as _json
+
             extracted = _json.loads(resp.content.strip().strip("```json").strip("```"))
             ctx = dict(self.run.context or {})
             ctx[save_to] = extracted
@@ -1037,9 +1099,17 @@ class FlowExecutor:
         ctx = dict(self.run.context or {})
         # Sandboxed exec with restricted builtins + context injection
         sandbox: dict = {
-            "__builtins__": {"str": str, "int": int, "float": float, "bool": bool,
-                             "list": list, "dict": dict, "len": len, "range": range,
-                             "print": lambda *a: None},
+            "__builtins__": {
+                "str": str,
+                "int": int,
+                "float": float,
+                "bool": bool,
+                "list": list,
+                "dict": dict,
+                "len": len,
+                "range": range,
+                "print": lambda *a: None,
+            },
             "context": dict(ctx),
             "result": None,
         }
@@ -1058,6 +1128,7 @@ class FlowExecutor:
             return
         try:
             from app.services.wallet.service import WalletService
+
             ws = WalletService(db=self.db)
             message = self._resolve(data.get("message", "")) or None
             silent = bool(data.get("silent", False))
@@ -1080,7 +1151,9 @@ class FlowExecutor:
             return
         try:
             from sqlalchemy import select
-            from app.models.wallet import WalletCard, WalletProgram, WalletPushSubscription
+
+            from app.models.wallet import WalletCard, WalletProgram
+
             result = await self.db.execute(select(WalletCard).where(WalletCard.serial == serial))
             card = result.scalar_one_or_none()
             if not card:
@@ -1088,7 +1161,8 @@ class FlowExecutor:
             program = await self.db.get(WalletProgram, card.program_id)
             if not program or program.user_id != self.flow.user_id:
                 return
-            from app.api.wallet import _render_message, _push_card_devices
+            from app.api.wallet import _push_card_devices, _render_message
+
             rendered = _render_message(message, card, program)
             await _push_card_devices(card, program, rendered, self.db)
         except Exception:
@@ -1105,12 +1179,14 @@ class FlowExecutor:
         try:
             import gspread
             from google.oauth2.service_account import Credentials
+
             from app.core.config import settings
 
             creds_json = getattr(settings, "google_service_account_json", None)
             if not creds_json:
                 return
             import json as _json
+
             creds = Credentials.from_service_account_info(
                 _json.loads(creds_json),
                 scopes=["https://www.googleapis.com/auth/spreadsheets"],
@@ -1123,7 +1199,11 @@ class FlowExecutor:
             if op == "append_row":
                 # Support both list row_data and comma-separated row_text
                 row_text = self._resolve(data.get("row_text", ""))
-                row_data: list = [v.strip() for v in row_text.split(",")] if row_text else data.get("row_data", [])
+                row_data: list = (
+                    [v.strip() for v in row_text.split(",")]
+                    if row_text
+                    else data.get("row_data", [])
+                )
                 resolved = [self._resolve(str(v)) for v in row_data]
                 ws.append_row(resolved)
                 ctx[save_to] = {"appended": resolved}
@@ -1139,7 +1219,11 @@ class FlowExecutor:
             elif op == "update_row":
                 row_num = int(self._resolve(str(data.get("row_number", 1))))
                 row_text = self._resolve(data.get("row_text", ""))
-                row_data = [v.strip() for v in row_text.split(",")] if row_text else data.get("row_data", [])
+                row_data = (
+                    [v.strip() for v in row_text.split(",")]
+                    if row_text
+                    else data.get("row_data", [])
+                )
                 resolved = [self._resolve(str(v)) for v in row_data]
                 ws.update(f"A{row_num}", [resolved])
                 ctx[save_to] = {"updated_row": row_num}
@@ -1151,6 +1235,7 @@ class FlowExecutor:
             elif op == "get_random_row":
                 all_rows = ws.get_all_values()
                 import random as _random
+
                 skip_header = data.get("skip_header", True)
                 eligible = all_rows[1:] if skip_header and len(all_rows) > 1 else all_rows
                 ctx[save_to] = _random.choice(eligible) if eligible else []
@@ -1175,8 +1260,10 @@ class FlowExecutor:
         save_to = data.get("save_to", "doc_result")
         try:
             import json as _json
+
             from google.oauth2.service_account import Credentials
             from googleapiclient.discovery import build
+
             from app.core.config import settings
 
             creds_json = getattr(settings, "google_service_account_json", None)
@@ -1195,7 +1282,11 @@ class FlowExecutor:
                 if content and created_id:
                     service.documents().batchUpdate(
                         documentId=created_id,
-                        body={"requests": [{"insertText": {"location": {"index": 1}, "text": content}}]},
+                        body={
+                            "requests": [
+                                {"insertText": {"location": {"index": 1}, "text": content}}
+                            ]
+                        },
                     ).execute()
                 ctx[save_to] = {
                     "doc_id": created_id,
@@ -1210,7 +1301,11 @@ class FlowExecutor:
                 if content:
                     service.documents().batchUpdate(
                         documentId=doc_id,
-                        body={"requests": [{"insertText": {"location": {"index": end_index}, "text": content}}]},
+                        body={
+                            "requests": [
+                                {"insertText": {"location": {"index": end_index}, "text": content}}
+                            ]
+                        },
                     ).execute()
                 ctx[save_to] = {
                     "doc_id": doc_id,
@@ -1232,9 +1327,11 @@ class FlowExecutor:
         if not template_name or not self.run.conversation_id:
             return
         try:
-            from app.models.conversation import Conversation
-            from app.models.channel_integration import ChannelIntegration
             from sqlalchemy import select as _sel
+
+            from app.models.channel_integration import ChannelIntegration
+            from app.models.conversation import Conversation
+
             conv = await self.db.get(Conversation, self.run.conversation_id)
             if not conv:
                 return
@@ -1249,6 +1346,7 @@ class FlowExecutor:
             if not integ:
                 return
             from app.services.channels.whatsapp import WhatsAppSender
+
             sender = WhatsAppSender(integ.config)
             # Resolve component text placeholders
             resolved_components = []
@@ -1256,21 +1354,26 @@ class FlowExecutor:
                 rc = dict(comp)
                 if "parameters" in rc:
                     rc["parameters"] = [
-                        {**p, "text": self._resolve(p.get("text", ""))} if p.get("type") == "text" else p
+                        {**p, "text": self._resolve(p.get("text", ""))}
+                        if p.get("type") == "text"
+                        else p
                         for p in rc["parameters"]
                     ]
                 resolved_components.append(rc)
             recipient_id = conv.guest_id or ""
             if not recipient_id:
                 return
-            await sender.send_rich(recipient_id, {
-                "type": "template",
-                "template": {
-                    "name": template_name,
-                    "language": {"code": language_code},
-                    "components": resolved_components,
+            await sender.send_rich(
+                recipient_id,
+                {
+                    "type": "template",
+                    "template": {
+                        "name": template_name,
+                        "language": {"code": language_code},
+                        "components": resolved_components,
+                    },
                 },
-            })
+            )
         except Exception:
             pass
 
@@ -1281,9 +1384,11 @@ class FlowExecutor:
         if not self.run.conversation_id:
             return
         try:
-            from app.models.conversation import Conversation
-            from app.models.channel_integration import ChannelIntegration
             from sqlalchemy import select as _sel
+
+            from app.models.channel_integration import ChannelIntegration
+            from app.models.conversation import Conversation
+
             conv = await self.db.get(Conversation, self.run.conversation_id)
             if not conv:
                 return
@@ -1298,6 +1403,7 @@ class FlowExecutor:
             if not integ:
                 return
             from app.services.channels.facebook import FacebookSender
+
             sender = FacebookSender(integ.config)
             if set_mode:
                 await sender.set_persistent_menu(menu_items)
@@ -1312,9 +1418,11 @@ class FlowExecutor:
         if not self.run.conversation_id:
             return
         try:
-            from app.models.conversation import Conversation
-            from app.models.channel_integration import ChannelIntegration
             from sqlalchemy import select as _sel
+
+            from app.models.channel_integration import ChannelIntegration
+            from app.models.conversation import Conversation
+
             conv = await self.db.get(Conversation, self.run.conversation_id)
             if not conv:
                 return
@@ -1329,6 +1437,7 @@ class FlowExecutor:
             if not integ:
                 return
             from app.services.channels.telegram import TelegramSender
+
             sender = TelegramSender(integ.config)
             if set_mode:
                 await sender.set_commands(commands)
@@ -1343,9 +1452,11 @@ class FlowExecutor:
         if not self.run.conversation_id:
             return
         try:
-            from app.models.conversation import Conversation
-            from app.models.channel_integration import ChannelIntegration
             from sqlalchemy import select as _sel
+
+            from app.models.channel_integration import ChannelIntegration
+            from app.models.conversation import Conversation
+
             conv = await self.db.get(Conversation, self.run.conversation_id)
             if not conv:
                 return
@@ -1360,6 +1471,7 @@ class FlowExecutor:
             if not integ:
                 return
             from app.services.channels.discord import DiscordSender
+
             sender = DiscordSender(integ.config)
             channel_id = self._resolve(data.get("channel_id", "")) or conv.guest_id or ""
             if op == "send_message":
@@ -1393,8 +1505,10 @@ class FlowExecutor:
         if not content:
             return
         try:
-            from app.models.broadcast import SocialAccount
             from sqlalchemy import select as _sel
+
+            from app.models.broadcast import SocialAccount
+
             r = await self.db.execute(
                 _sel(SocialAccount).where(
                     SocialAccount.user_id == self.flow.user_id,
@@ -1403,6 +1517,7 @@ class FlowExecutor:
             )
             accounts = r.scalars().all()
             import httpx
+
             _GRAPH = "https://graph.facebook.com/v19.0"
             async with httpx.AsyncClient(timeout=15) as client:
                 for account in accounts:
@@ -1413,12 +1528,20 @@ class FlowExecutor:
                             params["link"] = image_url
                         await client.post(f"{_GRAPH}/{account.page_id}/feed", params=params)
                     elif account.platform == "instagram" and account.page_id and image_url:
-                        c = await client.post(f"{_GRAPH}/{account.page_id}/media",
-                            params={"image_url": image_url, "caption": content, "access_token": token})
+                        c = await client.post(
+                            f"{_GRAPH}/{account.page_id}/media",
+                            params={
+                                "image_url": image_url,
+                                "caption": content,
+                                "access_token": token,
+                            },
+                        )
                         cid = c.json().get("id")
                         if cid:
-                            await client.post(f"{_GRAPH}/{account.page_id}/media_publish",
-                                params={"creation_id": cid, "access_token": token})
+                            await client.post(
+                                f"{_GRAPH}/{account.page_id}/media_publish",
+                                params={"creation_id": cid, "access_token": token},
+                            )
         except Exception:
             pass
 
@@ -1429,8 +1552,10 @@ class FlowExecutor:
         if not media_id or not message:
             return
         try:
-            from app.models.channel_integration import ChannelIntegration
             from sqlalchemy import select as _sel
+
+            from app.models.channel_integration import ChannelIntegration
+
             r = await self.db.execute(
                 _sel(ChannelIntegration).where(
                     ChannelIntegration.chatbot_id == self.flow.chatbot_id,
@@ -1460,12 +1585,12 @@ class FlowExecutor:
         # Explicit entry point set by user
         if self.flow.starting_node_id:
             return self.flow.starting_node_id
-        for node in (self.flow.nodes or []):
+        for node in self.flow.nodes or []:
             if node.get("type") == "start":
                 return node["id"]
         # Fallback: first node with no incoming edges
         targets = {e["target"] for e in self._edges}
-        for node in (self.flow.nodes or []):
+        for node in self.flow.nodes or []:
             if node["id"] not in targets:
                 return node["id"]
         return None
@@ -1485,6 +1610,7 @@ class FlowExecutor:
         """Replace {{variable}} placeholders from run context."""
         ctx = self.run.context or {}
         import re
+
         def replacer(m: re.Match) -> str:
             key = m.group(1).strip()
             val = ctx
@@ -1495,13 +1621,13 @@ class FlowExecutor:
                     val = ""
                     break
             return str(val)
+
         return re.sub(r"\{\{(.+?)\}\}", replacer, text)
 
     async def _send_to_conversation(self, text: str, channel_override: str | None = None) -> None:
         """Persist a message and deliver it via the conversation's channel."""
         from app.models.conversation import Conversation
         from app.models.message import Message, MessageRole
-        from datetime import timezone
 
         conv = await self.db.get(Conversation, self.run.conversation_id)
         if not conv:
@@ -1513,18 +1639,22 @@ class FlowExecutor:
             content=text,
         )
         self.db.add(msg)
-        conv.last_message_at = datetime.now(timezone.utc)
+        conv.last_message_at = datetime.now(UTC)
 
         # Determine which channel to use
         effective_channel = (
-            channel_override if channel_override and channel_override != "omni"
-            else conv.channel
+            channel_override if channel_override and channel_override != "omni" else conv.channel
         )
 
         # Send outbound via channel
         if effective_channel and effective_channel not in ("web", "web_widget") and conv.guest_id:
             from app.models.channel_integration import ChannelIntegration
-            from app.services.channels import get_sender, is_within_meta_window, META_WINDOW_CHANNELS
+            from app.services.channels import (
+                META_WINDOW_CHANNELS,
+                get_sender,
+                is_within_meta_window,
+            )
+
             result = await self.db.execute(
                 select(ChannelIntegration).where(
                     ChannelIntegration.chatbot_id == conv.chatbot_id,
@@ -1551,7 +1681,8 @@ class FlowExecutor:
     async def _contact_has_tag(self, tag_name: str) -> bool:
         if not self.run.contact_id:
             return False
-        from app.models.crm import Tag, ContactTag
+        from app.models.crm import ContactTag, Tag
+
         result = await self.db.execute(
             select(Tag).where(Tag.name == tag_name, Tag.user_id == self.flow.user_id)
         )
@@ -1569,11 +1700,12 @@ class FlowExecutor:
     async def _fail(self, error: str) -> None:
         self.run.status = "failed"
         self.run.error = error
-        self.run.completed_at = datetime.now(timezone.utc)
+        self.run.completed_at = datetime.now(UTC)
         await self.db.commit()
 
 
 # ── Factory ────────────────────────────────────────────────────────────────────
+
 
 async def start_run(
     flow: Flow,

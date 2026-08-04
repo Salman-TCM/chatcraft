@@ -1,7 +1,9 @@
 """
 Celery tasks for periodic sync operations.
 """
+
 import asyncio
+from datetime import UTC
 
 from app.workers.celery_app import celery_app
 
@@ -21,14 +23,16 @@ def sync_docs_system_prompts(self) -> dict:
 
 async def _sync_all() -> dict:
     """Fetch all chatbots with docs_system_prompt_doc_id and sync each."""
-    from datetime import datetime, timedelta, timezone
+    from datetime import datetime, timedelta
+
     from sqlalchemy import select
+
+    from app.api.chatbots import _sync_doc_to_prompt
     from app.db.session import AsyncSessionLocal
     from app.models.chatbot_config import ChatbotConfig
-    from app.api.chatbots import _sync_doc_to_prompt
 
     synced = failed = 0
-    cutoff = datetime.now(timezone.utc) - timedelta(minutes=10)
+    cutoff = datetime.now(UTC) - timedelta(minutes=10)
 
     async with AsyncSessionLocal() as db:
         result = await db.execute(

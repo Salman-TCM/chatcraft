@@ -8,6 +8,7 @@ Requires environment variables:
   APPLE_PASS_KEY_PEM          — PEM-encoded private key
   APPLE_WWDR_PEM              — Apple WWDR certificate (G4 or G6)
 """
+
 import hashlib
 import io
 import json
@@ -24,15 +25,15 @@ def _sha1(data: bytes) -> str:
 def _sign_manifest(manifest_json: bytes) -> bytes:
     """Return CMS detached signature over the manifest."""
     try:
-        from cryptography.hazmat.primitives import hashes, serialization
-        from cryptography.hazmat.primitives.asymmetric import padding
-        from cryptography.x509 import load_pem_x509_certificate
-        from cryptography.hazmat.backends import default_backend
-        from cryptography import x509
         import cryptography.hazmat.primitives.serialization.pkcs7 as pkcs7_mod
+        from cryptography.hazmat.backends import default_backend
+        from cryptography.hazmat.primitives import hashes, serialization
+        from cryptography.x509 import load_pem_x509_certificate
 
         cert = load_pem_x509_certificate(settings.apple_pass_cert_pem.encode(), default_backend())
-        key = serialization.load_pem_private_key(settings.apple_pass_key_pem.encode(), password=None, backend=default_backend())
+        key = serialization.load_pem_private_key(
+            settings.apple_pass_key_pem.encode(), password=None, backend=default_backend()
+        )
         wwdr = load_pem_x509_certificate(settings.apple_wwdr_pem.encode(), default_backend())
 
         signed = (
@@ -71,41 +72,93 @@ def build_pkpass(
             punches = state.get("punches", 0)
             return {
                 "primary": [{"key": "punches", "label": "Punches", "value": f"{punches}/{max_p}"}],
-                "secondary": [{"key": "name", "label": "Name", "value": card.customer_name or "Guest"}],
-                "auxiliary": [{"key": "reward", "label": "Reward", "value": cfg.get("reward_description", "Free item")}],
+                "secondary": [
+                    {"key": "name", "label": "Name", "value": card.customer_name or "Guest"}
+                ],
+                "auxiliary": [
+                    {
+                        "key": "reward",
+                        "label": "Reward",
+                        "value": cfg.get("reward_description", "Free item"),
+                    }
+                ],
             }
         elif t == "points":
             return {
-                "primary": [{"key": "points", "label": "Points", "value": str(state.get("points", 0))}],
-                "secondary": [{"key": "name", "label": "Member", "value": card.customer_name or "Guest"}],
-                "auxiliary": [{"key": "tier", "label": "Tier", "value": state.get("tier", cfg.get("default_tier", "Standard"))}],
+                "primary": [
+                    {"key": "points", "label": "Points", "value": str(state.get("points", 0))}
+                ],
+                "secondary": [
+                    {"key": "name", "label": "Member", "value": card.customer_name or "Guest"}
+                ],
+                "auxiliary": [
+                    {
+                        "key": "tier",
+                        "label": "Tier",
+                        "value": state.get("tier", cfg.get("default_tier", "Standard")),
+                    }
+                ],
             }
         elif t == "membership":
             return {
-                "primary": [{"key": "member", "label": "Member", "value": card.customer_name or "Guest"}],
-                "secondary": [{"key": "tier", "label": "Tier", "value": state.get("tier", "Standard")}],
-                "auxiliary": [{"key": "since", "label": "Member Since", "value": card.created_at.strftime("%b %Y") if card.created_at else ""}],
+                "primary": [
+                    {"key": "member", "label": "Member", "value": card.customer_name or "Guest"}
+                ],
+                "secondary": [
+                    {"key": "tier", "label": "Tier", "value": state.get("tier", "Standard")}
+                ],
+                "auxiliary": [
+                    {
+                        "key": "since",
+                        "label": "Member Since",
+                        "value": card.created_at.strftime("%b %Y") if card.created_at else "",
+                    }
+                ],
             }
         elif t == "prepaid_balance":
             balance = state.get("balance", cfg.get("initial_balance", 0))
             currency = cfg.get("currency", "USD")
             return {
-                "primary": [{"key": "balance", "label": "Balance", "value": f"{currency} {float(balance):.2f}"}],
-                "secondary": [{"key": "name", "label": "Cardholder", "value": card.customer_name or "Guest"}],
+                "primary": [
+                    {
+                        "key": "balance",
+                        "label": "Balance",
+                        "value": f"{currency} {float(balance):.2f}",
+                    }
+                ],
+                "secondary": [
+                    {"key": "name", "label": "Cardholder", "value": card.customer_name or "Guest"}
+                ],
             }
         elif t == "event_ticket":
             return {
-                "primary": [{"key": "event", "label": "Event", "value": cfg.get("event_name", program.name)}],
-                "secondary": [{"key": "holder", "label": "Holder", "value": card.customer_name or "Guest"}],
+                "primary": [
+                    {"key": "event", "label": "Event", "value": cfg.get("event_name", program.name)}
+                ],
+                "secondary": [
+                    {"key": "holder", "label": "Holder", "value": card.customer_name or "Guest"}
+                ],
                 "auxiliary": [
                     {"key": "date", "label": "Date", "value": cfg.get("event_date", "")},
-                    {"key": "seat", "label": "Seat", "value": state.get("seat", cfg.get("default_seat", "General"))},
+                    {
+                        "key": "seat",
+                        "label": "Seat",
+                        "value": state.get("seat", cfg.get("default_seat", "General")),
+                    },
                 ],
             }
         else:  # coupon / business_card / default
             return {
-                "primary": [{"key": "offer", "label": cfg.get("offer_label", "Offer"), "value": cfg.get("offer_value", program.name)}],
-                "secondary": [{"key": "name", "label": "Name", "value": card.customer_name or "Guest"}],
+                "primary": [
+                    {
+                        "key": "offer",
+                        "label": cfg.get("offer_label", "Offer"),
+                        "value": cfg.get("offer_value", program.name),
+                    }
+                ],
+                "secondary": [
+                    {"key": "name", "label": "Name", "value": card.customer_name or "Guest"}
+                ],
             }
 
     fields = _fields_for_type()
@@ -127,14 +180,20 @@ def build_pkpass(
     rs_cfg = getattr(program, "receipt_scanning_config", None) or {}
     if rs_cfg.get("enabled") and program.type in ("points", "punch_card"):
         from app.core.config import settings as _s
-        frontend_base = getattr(_s, "frontend_base_url", "") or getattr(_s, "api_base_url", "") or ""
+
+        frontend_base = (
+            getattr(_s, "frontend_base_url", "") or getattr(_s, "api_base_url", "") or ""
+        )
         receipt_url = f"{frontend_base}/pass/{card.serial}/scan-receipt"
-        back_fields.insert(0, {
-            "key": "receipt_scan",
-            "label": "Scan Receipt",
-            "value": "Tap to earn from your receipt",
-            "attributedValue": f"<a href='{receipt_url}'>Scan Receipt for Points</a>",
-        })
+        back_fields.insert(
+            0,
+            {
+                "key": "receipt_scan",
+                "label": "Scan Receipt",
+                "value": "Tap to earn from your receipt",
+                "attributedValue": f"<a href='{receipt_url}'>Scan Receipt for Points</a>",
+            },
+        )
 
     auth_token = getattr(card, "auth_token", None) or card.serial
 

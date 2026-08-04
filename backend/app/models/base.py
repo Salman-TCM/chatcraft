@@ -1,7 +1,6 @@
 import uuid
 from datetime import datetime
 
-from pgvector.sqlalchemy import Vector
 from sqlalchemy import DateTime, func, text
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
@@ -12,6 +11,7 @@ class Base(DeclarativeBase):
     DeclarativeBase for all SQLAlchemy models.
     Import this in alembic/env.py so autogenerate picks up all tables.
     """
+
     pass
 
 

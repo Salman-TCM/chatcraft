@@ -1,14 +1,15 @@
+from collections.abc import AsyncGenerator
 from functools import lru_cache
-from typing import AsyncGenerator
 
-import redis.asyncio as aioredis
 import redis as sync_redis
+import redis.asyncio as aioredis
 
 from app.core.config import settings
 
 # ---------------------------------------------------------------------------
 # Async client — used by FastAPI route handlers
 # ---------------------------------------------------------------------------
+
 
 @lru_cache(maxsize=1)
 def _get_async_pool() -> aioredis.ConnectionPool:
@@ -49,6 +50,7 @@ async def redis_dependency() -> AsyncGenerator[aioredis.Redis, None]:
 # Sync client — used by Celery workers (cannot use async)
 # ---------------------------------------------------------------------------
 
+
 @lru_cache(maxsize=1)
 def get_sync_redis() -> sync_redis.Redis:
     """Return a synchronous Redis client for Celery tasks."""
@@ -61,6 +63,7 @@ def get_sync_redis() -> sync_redis.Redis:
 # ---------------------------------------------------------------------------
 # Health check helper
 # ---------------------------------------------------------------------------
+
 
 async def ping_redis() -> bool:
     """Return True if Redis responds to PING."""

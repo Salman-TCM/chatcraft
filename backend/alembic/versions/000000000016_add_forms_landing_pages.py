@@ -4,11 +4,12 @@ Revision ID: 000000000016
 Revises: 000000000015
 Create Date: 2026-05-18
 """
-from alembic import op
+
 import sqlalchemy as sa
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 
-from app.models.base import set_updated_at_trigger, drop_updated_at_trigger
+from alembic import op
+from app.models.base import drop_updated_at_trigger, set_updated_at_trigger
 
 revision = "000000000016"
 down_revision = "000000000015"
@@ -19,16 +20,37 @@ depends_on = None
 def upgrade() -> None:
     op.create_table(
         "forms",
-        sa.Column("id", UUID(as_uuid=True), primary_key=True, server_default=sa.text("gen_random_uuid()")),
-        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
-        sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
-        sa.Column("user_id", UUID(as_uuid=True), sa.ForeignKey("users.id", ondelete="CASCADE"), nullable=False),
-        sa.Column("chatbot_id", UUID(as_uuid=True), sa.ForeignKey("chatbot_configs.id", ondelete="SET NULL"), nullable=True),
+        sa.Column(
+            "id", UUID(as_uuid=True), primary_key=True, server_default=sa.text("gen_random_uuid()")
+        ),
+        sa.Column(
+            "created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False
+        ),
+        sa.Column(
+            "updated_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False
+        ),
+        sa.Column(
+            "user_id",
+            UUID(as_uuid=True),
+            sa.ForeignKey("users.id", ondelete="CASCADE"),
+            nullable=False,
+        ),
+        sa.Column(
+            "chatbot_id",
+            UUID(as_uuid=True),
+            sa.ForeignKey("chatbot_configs.id", ondelete="SET NULL"),
+            nullable=True,
+        ),
         sa.Column("name", sa.String(255), nullable=False),
         sa.Column("description", sa.Text, nullable=True),
         sa.Column("fields", JSONB, nullable=False, server_default="[]"),
         sa.Column("is_active", sa.Boolean, nullable=False, server_default="true"),
-        sa.Column("success_message", sa.String(500), nullable=False, server_default="Thank you! We'll be in touch."),
+        sa.Column(
+            "success_message",
+            sa.String(500),
+            nullable=False,
+            server_default="Thank you! We'll be in touch.",
+        ),
         sa.Column("submit_button_text", sa.String(100), nullable=False, server_default="Submit"),
         sa.Column("public_id", sa.String(24), nullable=False, unique=True),
     )
@@ -38,11 +60,25 @@ def upgrade() -> None:
 
     op.create_table(
         "form_submissions",
-        sa.Column("id", UUID(as_uuid=True), primary_key=True, server_default=sa.text("gen_random_uuid()")),
-        sa.Column("form_id", UUID(as_uuid=True), sa.ForeignKey("forms.id", ondelete="CASCADE"), nullable=False),
-        sa.Column("contact_id", UUID(as_uuid=True), sa.ForeignKey("contacts.id", ondelete="SET NULL"), nullable=True),
+        sa.Column(
+            "id", UUID(as_uuid=True), primary_key=True, server_default=sa.text("gen_random_uuid()")
+        ),
+        sa.Column(
+            "form_id",
+            UUID(as_uuid=True),
+            sa.ForeignKey("forms.id", ondelete="CASCADE"),
+            nullable=False,
+        ),
+        sa.Column(
+            "contact_id",
+            UUID(as_uuid=True),
+            sa.ForeignKey("contacts.id", ondelete="SET NULL"),
+            nullable=True,
+        ),
         sa.Column("data", JSONB, nullable=False, server_default="{}"),
-        sa.Column("submitted_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
+        sa.Column(
+            "submitted_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False
+        ),
         sa.Column("ip_address", sa.String(45), nullable=True),
     )
     op.create_index("ix_form_submissions_form_id", "form_submissions", ["form_id"])
@@ -50,11 +86,27 @@ def upgrade() -> None:
 
     op.create_table(
         "landing_pages",
-        sa.Column("id", UUID(as_uuid=True), primary_key=True, server_default=sa.text("gen_random_uuid()")),
-        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
-        sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
-        sa.Column("user_id", UUID(as_uuid=True), sa.ForeignKey("users.id", ondelete="CASCADE"), nullable=False),
-        sa.Column("chatbot_id", UUID(as_uuid=True), sa.ForeignKey("chatbot_configs.id", ondelete="SET NULL"), nullable=True),
+        sa.Column(
+            "id", UUID(as_uuid=True), primary_key=True, server_default=sa.text("gen_random_uuid()")
+        ),
+        sa.Column(
+            "created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False
+        ),
+        sa.Column(
+            "updated_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False
+        ),
+        sa.Column(
+            "user_id",
+            UUID(as_uuid=True),
+            sa.ForeignKey("users.id", ondelete="CASCADE"),
+            nullable=False,
+        ),
+        sa.Column(
+            "chatbot_id",
+            UUID(as_uuid=True),
+            sa.ForeignKey("chatbot_configs.id", ondelete="SET NULL"),
+            nullable=True,
+        ),
         sa.Column("title", sa.String(255), nullable=False),
         sa.Column("name", sa.String(255), nullable=False),
         sa.Column("slug", sa.String(200), nullable=False),

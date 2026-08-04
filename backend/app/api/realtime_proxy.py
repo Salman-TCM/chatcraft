@@ -12,6 +12,7 @@ Client connects to:
 The proxy injects the chatbot's system prompt and voice configuration on session
 creation, then forwards all subsequent messages bidirectionally.
 """
+
 import asyncio
 import json
 import uuid
@@ -27,8 +28,16 @@ from app.models.chatbot_config import ChatbotConfig
 router = APIRouter(prefix="/api/v1/realtime", tags=["realtime"])
 
 OPENAI_VOICES = [
-    "alloy", "echo", "fable", "onyx", "nova",
-    "shimmer", "ash", "ballad", "coral", "sage",
+    "alloy",
+    "echo",
+    "fable",
+    "onyx",
+    "nova",
+    "shimmer",
+    "ash",
+    "ballad",
+    "coral",
+    "sage",
 ]
 XAI_VOICES = ["Eve", "Ara", "Leo", "Rex", "Sal"]
 
@@ -50,10 +59,14 @@ async def _do_web_search(query: str) -> str:
     """Execute a web search and return a text result summary."""
     try:
         import httpx
+
         async with httpx.AsyncClient(timeout=10) as client:
             resp = await client.get(
                 "https://api.search.brave.com/res/v1/web/search",
-                headers={"Accept": "application/json", "X-Subscription-Token": settings.brave_search_api_key or ""},
+                headers={
+                    "Accept": "application/json",
+                    "X-Subscription-Token": settings.brave_search_api_key or "",
+                },
                 params={"q": query, "count": 5},
             )
         if resp.status_code == 200:
@@ -68,6 +81,7 @@ async def _do_web_search(query: str) -> str:
 
 
 # ─── OpenAI Realtime ──────────────────────────────────────────────────────────
+
 
 @router.websocket("/openai/{chatbot_id}")
 async def openai_realtime(
@@ -98,7 +112,9 @@ async def openai_realtime(
 
     try:
         async with websockets.connect(openai_url, additional_headers=openai_headers) as upstream:
-            system_prompt = getattr(chatbot, "system_prompt", None) or "You are a helpful assistant."
+            system_prompt = (
+                getattr(chatbot, "system_prompt", None) or "You are a helpful assistant."
+            )
             session: dict = {
                 "modalities": ["text", "audio"],
                 "instructions": system_prompt,
@@ -135,6 +151,7 @@ async def openai_realtime(
 
 # ─── xAI Grok Realtime ────────────────────────────────────────────────────────
 
+
 @router.websocket("/grok/{chatbot_id}")
 async def grok_realtime(
     websocket: WebSocket,
@@ -162,7 +179,9 @@ async def grok_realtime(
 
     try:
         async with websockets.connect(grok_url, additional_headers=grok_headers) as upstream:
-            system_prompt = getattr(chatbot, "system_prompt", None) or "You are a helpful assistant."
+            system_prompt = (
+                getattr(chatbot, "system_prompt", None) or "You are a helpful assistant."
+            )
             session: dict = {
                 "modalities": ["text", "audio"],
                 "instructions": system_prompt,
@@ -193,6 +212,7 @@ async def grok_realtime(
 
 # ─── Metadata endpoints ───────────────────────────────────────────────────────
 
+
 @router.get("/voices")
 async def list_voices():
     """Return available voices for each Realtime provider."""
@@ -206,6 +226,7 @@ async def list_voices():
 
 
 # ─── Helpers ──────────────────────────────────────────────────────────────────
+
 
 async def _get_chatbot(chatbot_id: str, db: DBSession) -> ChatbotConfig | None:
     try:
@@ -287,7 +308,9 @@ async def _proxy_with_tools(
                 elif etype == "response.function_call_arguments.done":
                     call_id = event.get("call_id", "")
                     name = event.get("name") or pending_calls.get(call_id, {}).get("name", "")
-                    raw_args = event.get("arguments") or pending_calls.get(call_id, {}).get("args", "{}")
+                    raw_args = event.get("arguments") or pending_calls.get(call_id, {}).get(
+                        "args", "{}"
+                    )
                     pending_calls.pop(call_id, None)
                     await client.send_text(message)
 
@@ -299,14 +322,18 @@ async def _proxy_with_tools(
                             query = ""
                         result = await _do_web_search(query)
                         # Submit function output back to OpenAI
-                        await upstream.send(json.dumps({
-                            "type": "conversation.item.create",
-                            "item": {
-                                "type": "function_call_output",
-                                "call_id": call_id,
-                                "output": result,
-                            },
-                        }))
+                        await upstream.send(
+                            json.dumps(
+                                {
+                                    "type": "conversation.item.create",
+                                    "item": {
+                                        "type": "function_call_output",
+                                        "call_id": call_id,
+                                        "output": result,
+                                    },
+                                }
+                            )
+                        )
                         # Ask OpenAI to continue generating the response
                         await upstream.send(json.dumps({"type": "response.create"}))
                 else:

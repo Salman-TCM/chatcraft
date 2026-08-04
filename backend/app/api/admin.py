@@ -3,8 +3,9 @@ Superadmin API — all routes require the `admin` role.
 Provides platform-wide stats, user management, chatbot oversight,
 subscription overrides, and short-lived impersonation tokens.
 """
+
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from typing import Annotated
 
 from fastapi import APIRouter, HTTPException, Query, status
@@ -13,7 +14,6 @@ from sqlalchemy.orm import selectinload
 
 from app.core.dependencies import CurrentUser, DBSession, RequireAdmin
 from app.core.features import ALL_FEATURES
-from app.core.security import create_access_token
 from app.models.chatbot_config import ChatbotConfig
 from app.models.conversation import Conversation
 from app.models.message import Message, MessageRole
@@ -34,10 +34,11 @@ router = APIRouter(prefix="/api/admin", tags=["admin"], dependencies=[RequireAdm
 # PLATFORM STATS
 # ══════════════════════════════════════════════════════════════════════════════
 
+
 @router.get("/stats", response_model=dict)
 async def get_platform_stats(db: DBSession) -> dict:
     """High-level KPIs for the whole platform."""
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
     today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
     yesterday_start = today_start - timedelta(days=1)
@@ -50,9 +51,7 @@ async def get_platform_stats(db: DBSession) -> dict:
 
     total_users = sum(role_counts.values())
     paying_users = (
-        role_counts.get("premium", 0)
-        + role_counts.get("creator", 0)
-        + role_counts.get("trial", 0)
+        role_counts.get("premium", 0) + role_counts.get("creator", 0) + role_counts.get("trial", 0)
     )
 
     new_today_res = await db.execute(
@@ -61,24 +60,24 @@ async def get_platform_stats(db: DBSession) -> dict:
     new_today = new_today_res.scalar_one()
 
     new_yesterday_res = await db.execute(
-        select(func.count()).select_from(User).where(
-            User.created_at >= yesterday_start, User.created_at < today_start
-        )
+        select(func.count())
+        .select_from(User)
+        .where(User.created_at >= yesterday_start, User.created_at < today_start)
     )
     new_yesterday = new_yesterday_res.scalar_one()
 
     # ── Subscriptions ────────────────────────────────────────────────────────
     active_subs_res = await db.execute(
-        select(func.count()).select_from(Subscription).where(
-            Subscription.status.in_([SubscriptionState.active, SubscriptionState.trialing])
-        )
+        select(func.count())
+        .select_from(Subscription)
+        .where(Subscription.status.in_([SubscriptionState.active, SubscriptionState.trialing]))
     )
     active_subs = active_subs_res.scalar_one()
 
     past_due_res = await db.execute(
-        select(func.count()).select_from(Subscription).where(
-            Subscription.status == SubscriptionState.past_due
-        )
+        select(func.count())
+        .select_from(Subscription)
+        .where(Subscription.status == SubscriptionState.past_due)
     )
     past_due_subs = past_due_res.scalar_one()
 
@@ -104,7 +103,9 @@ async def get_platform_stats(db: DBSession) -> dict:
     chatbot_count = chatbot_count_res.scalar_one()
 
     msgs_today_res = await db.execute(
-        select(func.count()).select_from(Message).where(
+        select(func.count())
+        .select_from(Message)
+        .where(
             Message.created_at >= today_start,
             Message.role == MessageRole.user,
         )
@@ -112,7 +113,9 @@ async def get_platform_stats(db: DBSession) -> dict:
     msgs_today = msgs_today_res.scalar_one()
 
     msgs_month_res = await db.execute(
-        select(func.count()).select_from(Message).where(
+        select(func.count())
+        .select_from(Message)
+        .where(
             Message.created_at >= month_start,
             Message.role == MessageRole.user,
         )
@@ -153,7 +156,7 @@ async def get_signups_per_day(
     db: DBSession,
     days: Annotated[int, Query(ge=7, le=90)] = 30,
 ) -> dict:
-    since = (datetime.now(timezone.utc) - timedelta(days=days - 1)).date()
+    since = (datetime.now(UTC) - timedelta(days=days - 1)).date()
     res = await db.execute(
         select(
             func.date(User.created_at).label("day"),
@@ -164,7 +167,8 @@ async def get_signups_per_day(
         .order_by(func.date(User.created_at))
     )
     row_map = {str(r.day): int(r.count) for r in res.all()}
-    from datetime import date, timedelta as td
+    from datetime import timedelta as td
+
     data = [
         {"date": str(since + td(days=i)), "count": row_map.get(str(since + td(days=i)), 0)}
         for i in range(days)
@@ -177,7 +181,7 @@ async def get_revenue_per_day(
     db: DBSession,
     days: Annotated[int, Query(ge=7, le=90)] = 30,
 ) -> dict:
-    since = (datetime.now(timezone.utc) - timedelta(days=days - 1)).date()
+    since = (datetime.now(UTC) - timedelta(days=days - 1)).date()
     res = await db.execute(
         select(
             func.date(Payment.created_at).label("day"),
@@ -191,7 +195,8 @@ async def get_revenue_per_day(
         .order_by(func.date(Payment.created_at))
     )
     row_map = {str(r.day): int(r.total) for r in res.all()}
-    from datetime import date, timedelta as td
+    from datetime import timedelta as td
+
     data = [
         {"date": str(since + td(days=i)), "amount_cents": row_map.get(str(since + td(days=i)), 0)}
         for i in range(days)
@@ -202,6 +207,7 @@ async def get_revenue_per_day(
 # ══════════════════════════════════════════════════════════════════════════════
 # USER MANAGEMENT
 # ══════════════════════════════════════════════════════════════════════════════
+
 
 def _user_dict(u: User) -> dict:
     sub = u.subscription
@@ -216,8 +222,12 @@ def _user_dict(u: User) -> dict:
         "subscription": {
             "plan": sub.plan.value if sub else None,
             "status": sub.status.value if sub else None,
-            "current_period_end": sub.current_period_end.isoformat() if sub and sub.current_period_end else None,
-        } if sub else None,
+            "current_period_end": sub.current_period_end.isoformat()
+            if sub and sub.current_period_end
+            else None,
+        }
+        if sub
+        else None,
         "stripe_customer_id": u.stripe_customer_id,
         "allowed_features": u.allowed_features,  # None = unrestricted, list = specific features only
         "created_at": u.created_at.isoformat(),
@@ -242,9 +252,7 @@ async def list_users(
         .limit(limit)
     )
     if q:
-        stmt = stmt.where(
-            or_(User.email.ilike(f"%{q}%"), User.name.ilike(f"%{q}%"))
-        )
+        stmt = stmt.where(or_(User.email.ilike(f"%{q}%"), User.name.ilike(f"%{q}%")))
     if role:
         stmt = stmt.where(User.role == UserRole(role))
 
@@ -253,9 +261,7 @@ async def list_users(
 
     count_stmt = select(func.count()).select_from(User)
     if q:
-        count_stmt = count_stmt.where(
-            or_(User.email.ilike(f"%{q}%"), User.name.ilike(f"%{q}%"))
-        )
+        count_stmt = count_stmt.where(or_(User.email.ilike(f"%{q}%"), User.name.ilike(f"%{q}%")))
     if role:
         count_stmt = count_stmt.where(User.role == UserRole(role))
     total = (await db.execute(count_stmt)).scalar_one()
@@ -272,9 +278,7 @@ async def list_users(
 @router.get("/users/{user_id}", response_model=dict)
 async def get_user(user_id: uuid.UUID, db: DBSession) -> dict:
     result = await db.execute(
-        select(User)
-        .where(User.id == user_id)
-        .options(selectinload(User.subscription))
+        select(User).where(User.id == user_id).options(selectinload(User.subscription))
     )
     u = result.scalar_one_or_none()
     if not u:
@@ -288,7 +292,8 @@ async def get_user(user_id: uuid.UUID, db: DBSession) -> dict:
 
     # Total messages sent by this user's chatbots
     msg_count_res = await db.execute(
-        select(func.count()).select_from(Message)
+        select(func.count())
+        .select_from(Message)
         .join(Conversation, Message.conversation_id == Conversation.id)
         .join(ChatbotConfig, Conversation.chatbot_id == ChatbotConfig.id)
         .where(ChatbotConfig.user_id == user_id, Message.role == MessageRole.user)
@@ -297,8 +302,7 @@ async def get_user(user_id: uuid.UUID, db: DBSession) -> dict:
 
     # Total AI spend
     spend_res = await db.execute(
-        select(func.coalesce(func.sum(UsageLog.cost_usd), 0))
-        .where(UsageLog.user_id == user_id)
+        select(func.coalesce(func.sum(UsageLog.cost_usd), 0)).where(UsageLog.user_id == user_id)
     )
     total_spend = spend_res.scalar_one()
 
@@ -337,7 +341,11 @@ async def update_user(
     updates = body.model_dump(exclude_unset=True)
 
     # Prevent any user from stripping their own elevated role
-    if str(u.id) == str(caller.id) and updates.get("role") and updates["role"] not in ("admin", "superadmin"):
+    if (
+        str(u.id) == str(caller.id)
+        and updates.get("role")
+        and updates["role"] not in ("admin", "superadmin")
+    ):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Cannot demote your own account",
@@ -352,43 +360,49 @@ async def update_user(
             )
         old_role = u.role.value
         u.role = UserRole(updates["role"])
-        db.add(AdminActionLog(
-            admin_user_id=caller.id,
-            admin_email=caller.email,
-            action="role_change",
-            target_user_id=u.id,
-            target_email=u.email,
-            old_value=old_role,
-            new_value=updates["role"],
-        ))
+        db.add(
+            AdminActionLog(
+                admin_user_id=caller.id,
+                admin_email=caller.email,
+                action="role_change",
+                target_user_id=u.id,
+                target_email=u.email,
+                old_value=old_role,
+                new_value=updates["role"],
+            )
+        )
 
     if "email_verified" in updates:
         old_ev = str(u.email_verified)
         u.email_verified = bool(updates["email_verified"])
-        db.add(AdminActionLog(
-            admin_user_id=caller.id,
-            admin_email=caller.email,
-            action="verify_email",
-            target_user_id=u.id,
-            target_email=u.email,
-            old_value=old_ev,
-            new_value=str(u.email_verified),
-        ))
+        db.add(
+            AdminActionLog(
+                admin_user_id=caller.id,
+                admin_email=caller.email,
+                action="verify_email",
+                target_user_id=u.id,
+                target_email=u.email,
+                old_value=old_ev,
+                new_value=str(u.email_verified),
+            )
+        )
 
     # Override subscription plan/status
     if ("plan" in updates or "subscription_status" in updates) and u.subscription:
         if "plan" in updates:
             old_plan = u.subscription.plan.value
             u.subscription.plan = SubscriptionPlan(updates["plan"])
-            db.add(AdminActionLog(
-                admin_user_id=caller.id,
-                admin_email=caller.email,
-                action="plan_change",
-                target_user_id=u.id,
-                target_email=u.email,
-                old_value=old_plan,
-                new_value=updates["plan"],
-            ))
+            db.add(
+                AdminActionLog(
+                    admin_user_id=caller.id,
+                    admin_email=caller.email,
+                    action="plan_change",
+                    target_user_id=u.id,
+                    target_email=u.email,
+                    old_value=old_plan,
+                    new_value=updates["plan"],
+                )
+            )
         if "subscription_status" in updates:
             u.subscription.status = SubscriptionState(updates["subscription_status"])
 
@@ -422,15 +436,17 @@ async def delete_user(
             detail="Only superadmins can delete superadmin accounts",
         )
 
-    db.add(AdminActionLog(
-        admin_user_id=caller.id,
-        admin_email=caller.email,
-        action="user_delete",
-        target_user_id=u.id,
-        target_email=u.email,
-        old_value=u.role.value,
-        new_value=None,
-    ))
+    db.add(
+        AdminActionLog(
+            admin_user_id=caller.id,
+            admin_email=caller.email,
+            action="user_delete",
+            target_user_id=u.id,
+            target_email=u.email,
+            old_value=u.role.value,
+            new_value=None,
+        )
+    )
     await db.delete(u)
     await db.commit()
     return {"success": True, "data": None}
@@ -452,13 +468,16 @@ async def impersonate_user(
     if not u:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
     if str(u.id) == str(caller.id):
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Cannot impersonate yourself")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="Cannot impersonate yourself"
+        )
 
     from jose import jwt
+
     from app.core.config import settings
     from app.models.white_label import ImpersonationAuditLog
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     payload = {
         "sub": str(u.id),
         "role": u.role.value,
@@ -470,18 +489,23 @@ async def impersonate_user(
     token = jwt.encode(payload, settings.secret_key, algorithm=settings.jwt_algorithm)
 
     db.add(ImpersonationAuditLog(actor_user_id=caller.id, target_user_id=u.id))
-    db.add(AdminActionLog(
-        admin_user_id=caller.id,
-        admin_email=caller.email,
-        action="impersonate",
-        target_user_id=u.id,
-        target_email=u.email,
-        old_value=None,
-        new_value=None,
-    ))
+    db.add(
+        AdminActionLog(
+            admin_user_id=caller.id,
+            admin_email=caller.email,
+            action="impersonate",
+            target_user_id=u.id,
+            target_email=u.email,
+            old_value=None,
+            new_value=None,
+        )
+    )
     await db.commit()
 
-    return {"success": True, "data": {"access_token": token, "expires_in": 900, "user": _user_dict(u)}}
+    return {
+        "success": True,
+        "data": {"access_token": token, "expires_in": 900, "user": _user_dict(u)},
+    }
 
 
 @router.post("/users/{user_id}/suspend", response_model=dict)
@@ -491,8 +515,9 @@ async def suspend_user(
     caller: CurrentUser,
     reason: str | None = None,
 ) -> dict:
+    from datetime import datetime
+
     from app.models.admin_log import AdminActionLog
-    from datetime import datetime, timezone
 
     if str(user_id) == str(caller.id):
         raise HTTPException(status_code=400, detail="Cannot suspend your own account")
@@ -501,13 +526,19 @@ async def suspend_user(
     if not u:
         raise HTTPException(status_code=404, detail="User not found")
     u.is_suspended = True
-    u.suspended_at = datetime.now(timezone.utc)
+    u.suspended_at = datetime.now(UTC)
     u.suspended_reason = reason
-    db.add(AdminActionLog(
-        admin_user_id=caller.id, admin_email=caller.email,
-        action="suspend", target_user_id=u.id, target_email=u.email,
-        old_value="active", new_value=f"suspended: {reason or 'no reason'}",
-    ))
+    db.add(
+        AdminActionLog(
+            admin_user_id=caller.id,
+            admin_email=caller.email,
+            action="suspend",
+            target_user_id=u.id,
+            target_email=u.email,
+            old_value="active",
+            new_value=f"suspended: {reason or 'no reason'}",
+        )
+    )
     await db.commit()
     return {"success": True}
 
@@ -523,11 +554,17 @@ async def unsuspend_user(user_id: uuid.UUID, db: DBSession, caller: CurrentUser)
     u.is_suspended = False
     u.suspended_at = None
     u.suspended_reason = None
-    db.add(AdminActionLog(
-        admin_user_id=caller.id, admin_email=caller.email,
-        action="unsuspend", target_user_id=u.id, target_email=u.email,
-        old_value="suspended", new_value="active",
-    ))
+    db.add(
+        AdminActionLog(
+            admin_user_id=caller.id,
+            admin_email=caller.email,
+            action="unsuspend",
+            target_user_id=u.id,
+            target_email=u.email,
+            old_value="suspended",
+            new_value="active",
+        )
+    )
     await db.commit()
     return {"success": True}
 
@@ -624,6 +661,7 @@ async def list_impersonation_log(
     limit: Annotated[int, Query(ge=1, le=200)] = 50,
 ) -> dict:
     from app.models.white_label import ImpersonationAuditLog
+
     offset = (page - 1) * limit
     result = await db.execute(
         select(ImpersonationAuditLog)
@@ -656,6 +694,7 @@ async def list_impersonation_log(
 # ══════════════════════════════════════════════════════════════════════════════
 # CHATBOT OVERSIGHT
 # ══════════════════════════════════════════════════════════════════════════════
+
 
 @router.get("/chatbots", response_model=dict)
 async def list_all_chatbots(
@@ -696,7 +735,9 @@ async def list_all_chatbots(
                     "id": str(b.user.id),
                     "email": b.user.email,
                     "name": b.user.name,
-                } if b.user else None,
+                }
+                if b.user
+                else None,
             }
             for b in bots
         ],
@@ -709,6 +750,7 @@ async def list_all_chatbots(
 # ══════════════════════════════════════════════════════════════════════════════
 # RECENT PAYMENTS
 # ══════════════════════════════════════════════════════════════════════════════
+
 
 @router.get("/payments", response_model=dict)
 async def list_payments(
@@ -740,7 +782,9 @@ async def list_payments(
                 "user": {
                     "id": str(p.user.id),
                     "email": p.user.email,
-                } if p.user else None,
+                }
+                if p.user
+                else None,
             }
             for p in payments
         ],
@@ -753,6 +797,7 @@ async def list_payments(
 # ══════════════════════════════════════════════════════════════════════════════
 # FEATURE ACCESS MANAGEMENT
 # ══════════════════════════════════════════════════════════════════════════════
+
 
 @router.get("/features", response_model=dict)
 async def list_all_features() -> dict:
@@ -806,6 +851,7 @@ async def update_user_features(
     await db.commit()
 
     from app.models.admin_log import AdminActionLog
+
     log = AdminActionLog(
         admin_user_id=caller.id,
         admin_email=caller.email,

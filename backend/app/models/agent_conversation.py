@@ -1,6 +1,6 @@
 import uuid
 
-from sqlalchemy import ForeignKey, Integer, String, Text, func, DateTime
+from sqlalchemy import DateTime, ForeignKey, Integer, func
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -9,6 +9,7 @@ from app.models.base import Base
 
 class AgentConversation(Base):
     """Persisted conversation sessions for agents with memory enabled."""
+
     __tablename__ = "agent_conversations"
 
     id: Mapped[uuid.UUID] = mapped_column(

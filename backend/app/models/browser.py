@@ -23,7 +23,9 @@ class BrowserSession(TimestampMixin, Base):
     session_token: Mapped[str] = mapped_column(String(128), nullable=False, unique=True, index=True)
     # active | closed | expired
     status: Mapped[str] = mapped_column(String(20), nullable=False, server_default="active")
-    pages_visited: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    pages_visited: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default="0"
+    )
     max_pages: Mapped[int] = mapped_column(Integer, nullable=False, default=5, server_default="5")
     # allow_login, private, block_private_ips, mode (direct|research|form_fill)
     config: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)

@@ -1,6 +1,7 @@
 """
 Integration tests: chatbot CRUD — requires auth.
 """
+
 import pytest
 
 REGISTER_URL = "/api/auth/register"
@@ -11,7 +12,9 @@ CHATBOTS_URL = "/api/chatbots"
 async def _auth_headers(client) -> dict:
     creds = {"email": "botowner@example.com", "password": "BotPass99!", "name": "Bot Owner"}
     await client.post(REGISTER_URL, json=creds)
-    login = await client.post(LOGIN_URL, json={"email": creds["email"], "password": creds["password"]})
+    login = await client.post(
+        LOGIN_URL, json={"email": creds["email"], "password": creds["password"]}
+    )
     token = login.json()["data"]["access_token"]
     return {"Authorization": f"Bearer {token}"}
 
@@ -76,7 +79,9 @@ async def test_cannot_access_other_users_chatbot(client):
     # Register user 2 and try to access
     creds2 = {"email": "attacker@example.com", "password": "AtkPass99!", "name": "Attacker"}
     await client.post(REGISTER_URL, json=creds2)
-    login2 = await client.post(LOGIN_URL, json={"email": creds2["email"], "password": creds2["password"]})
+    login2 = await client.post(
+        LOGIN_URL, json={"email": creds2["email"], "password": creds2["password"]}
+    )
     h2 = {"Authorization": f"Bearer {login2.json()['data']['access_token']}"}
 
     res = await client.get(f"{CHATBOTS_URL}/{bot_id}", headers=h2)

@@ -20,13 +20,13 @@ Routes (all require authenticated chatbot owner):
   DELETE /api/v1/chatbots/{chatbot_id}/integrations/facebook/menu
   POST   /api/v1/chatbots/{chatbot_id}/integrations/sms/test
 """
+
 import secrets
 import uuid
 
 from fastapi import APIRouter, HTTPException, Request, status
 from sqlalchemy import select
 
-from app.core.config import settings
 from app.core.dependencies import CurrentUser, DBSession
 from app.models.channel_integration import ChannelIntegration
 from app.models.chatbot_config import ChatbotConfig
@@ -40,10 +40,27 @@ from app.schemas.integrations import (
 
 router = APIRouter(prefix="/api/v1", tags=["integrations"])
 
-SUPPORTED_CHANNELS = {"telegram", "whatsapp", "facebook", "sms", "email", "discord", "instagram", "twitter", "tiktok"}
+SUPPORTED_CHANNELS = {
+    "telegram",
+    "whatsapp",
+    "facebook",
+    "sms",
+    "email",
+    "discord",
+    "instagram",
+    "twitter",
+    "tiktok",
+}
 
 # Fields that should be masked in responses (contain credentials)
-_SECRET_FIELDS = {"bot_token", "access_token", "page_access_token", "auth_token", "app_secret", "smtp_password"}
+_SECRET_FIELDS = {
+    "bot_token",
+    "access_token",
+    "page_access_token",
+    "auth_token",
+    "app_secret",
+    "smtp_password",
+}
 
 
 def _mask(config: dict) -> dict:
@@ -160,6 +177,7 @@ async def delete_integration(
 
 # ── Telegram: register webhook with Bot API ────────────────────────────────────
 
+
 @router.post("/chatbots/{chatbot_id}/integrations/telegram/set-webhook", response_model=dict)
 async def telegram_set_webhook(
     chatbot_id: uuid.UUID,
@@ -176,9 +194,12 @@ async def telegram_set_webhook(
     )
     integration = result.scalar_one_or_none()
     if not integration:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Telegram integration not configured")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Telegram integration not configured"
+        )
 
     from app.services.channels.telegram import TelegramSender
+
     sender = TelegramSender(integration.config)
 
     base_url = str(request.base_url).rstrip("/")
@@ -192,6 +213,7 @@ async def telegram_set_webhook(
 
 
 # ── Connection test endpoints ──────────────────────────────────────────────────
+
 
 @router.post("/chatbots/{chatbot_id}/integrations/telegram/test", response_model=dict)
 async def test_telegram(chatbot_id: uuid.UUID, user: CurrentUser, db: DBSession) -> dict:
@@ -207,6 +229,7 @@ async def test_telegram(chatbot_id: uuid.UUID, user: CurrentUser, db: DBSession)
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not configured")
 
     from app.services.channels.telegram import TelegramSender
+
     try:
         info = await TelegramSender(integration.config).get_me()
     except Exception as exc:
@@ -228,6 +251,7 @@ async def test_whatsapp(chatbot_id: uuid.UUID, user: CurrentUser, db: DBSession)
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not configured")
 
     import httpx
+
     phone_number_id = integration.config.get("phone_number_id", "")
     access_token = integration.config.get("access_token", "")
     try:
@@ -240,7 +264,13 @@ async def test_whatsapp(chatbot_id: uuid.UUID, user: CurrentUser, db: DBSession)
             data = r.json()
     except Exception as exc:
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc))
-    return {"success": True, "data": {"display_phone_number": data.get("display_phone_number"), "verified_name": data.get("verified_name")}}
+    return {
+        "success": True,
+        "data": {
+            "display_phone_number": data.get("display_phone_number"),
+            "verified_name": data.get("verified_name"),
+        },
+    }
 
 
 @router.post("/chatbots/{chatbot_id}/integrations/facebook/test", response_model=dict)
@@ -257,6 +287,7 @@ async def test_facebook(chatbot_id: uuid.UUID, user: CurrentUser, db: DBSession)
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not configured")
 
     import httpx
+
     token = integration.config.get("page_access_token", "")
     try:
         async with httpx.AsyncClient(timeout=10) as client:
@@ -285,6 +316,7 @@ async def test_instagram(chatbot_id: uuid.UUID, user: CurrentUser, db: DBSession
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not configured")
 
     import httpx
+
     token = integration.config.get("page_access_token", "")
     try:
         async with httpx.AsyncClient(timeout=10) as client:
@@ -313,7 +345,9 @@ async def test_sms(chatbot_id: uuid.UUID, user: CurrentUser, db: DBSession) -> d
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not configured")
 
     import base64
+
     import httpx
+
     account_sid = integration.config.get("account_sid", "")
     auth_token = integration.config.get("auth_token", "")
     creds = base64.b64encode(f"{account_sid}:{auth_token}".encode()).decode()
@@ -327,7 +361,14 @@ async def test_sms(chatbot_id: uuid.UUID, user: CurrentUser, db: DBSession) -> d
             data = r.json()
     except Exception as exc:
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc))
-    return {"success": True, "data": {"account_sid": data.get("sid"), "friendly_name": data.get("friendly_name"), "status": data.get("status")}}
+    return {
+        "success": True,
+        "data": {
+            "account_sid": data.get("sid"),
+            "friendly_name": data.get("friendly_name"),
+            "status": data.get("status"),
+        },
+    }
 
 
 @router.post("/chatbots/{chatbot_id}/integrations/discord/test", response_model=dict)
@@ -344,6 +385,7 @@ async def test_discord(chatbot_id: uuid.UUID, user: CurrentUser, db: DBSession) 
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not configured")
 
     import httpx
+
     token = integration.config.get("bot_token", "")
     try:
         async with httpx.AsyncClient(timeout=10) as client:
@@ -355,7 +397,14 @@ async def test_discord(chatbot_id: uuid.UUID, user: CurrentUser, db: DBSession) 
             data = r.json()
     except Exception as exc:
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc))
-    return {"success": True, "data": {"bot_id": data.get("id"), "username": data.get("username"), "discriminator": data.get("discriminator")}}
+    return {
+        "success": True,
+        "data": {
+            "bot_id": data.get("id"),
+            "username": data.get("username"),
+            "discriminator": data.get("discriminator"),
+        },
+    }
 
 
 @router.post("/chatbots/{chatbot_id}/integrations/twitter/test", response_model=dict)
@@ -372,6 +421,7 @@ async def test_twitter(chatbot_id: uuid.UUID, user: CurrentUser, db: DBSession) 
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not configured")
 
     import httpx
+
     bearer_token = integration.config.get("bearer_token", "")
     if not bearer_token:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Bearer token not set")
@@ -386,7 +436,14 @@ async def test_twitter(chatbot_id: uuid.UUID, user: CurrentUser, db: DBSession) 
             data = r.json().get("data", {})
     except Exception as exc:
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc))
-    return {"success": True, "data": {"user_id": data.get("id"), "name": data.get("name"), "username": data.get("username")}}
+    return {
+        "success": True,
+        "data": {
+            "user_id": data.get("id"),
+            "name": data.get("name"),
+            "username": data.get("username"),
+        },
+    }
 
 
 @router.post("/chatbots/{chatbot_id}/integrations/tiktok/test", response_model=dict)
@@ -403,6 +460,7 @@ async def test_tiktok(chatbot_id: uuid.UUID, user: CurrentUser, db: DBSession) -
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not configured")
 
     import httpx
+
     access_token = integration.config.get("access_token", "")
     if not access_token:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Access token not set")
@@ -417,10 +475,14 @@ async def test_tiktok(chatbot_id: uuid.UUID, user: CurrentUser, db: DBSession) -
             data = r.json().get("data", {}).get("user", {})
     except Exception as exc:
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc))
-    return {"success": True, "data": {"open_id": data.get("open_id"), "display_name": data.get("display_name")}}
+    return {
+        "success": True,
+        "data": {"open_id": data.get("open_id"), "display_name": data.get("display_name")},
+    }
 
 
 # ── Telegram Bot Commands ──────────────────────────────────────────────────────
+
 
 async def _get_telegram_sender(chatbot_id: uuid.UUID, user_id: uuid.UUID, db):
     await _get_owned_bot(chatbot_id, user_id, db)
@@ -434,6 +496,7 @@ async def _get_telegram_sender(chatbot_id: uuid.UUID, user_id: uuid.UUID, db):
     if not integration:
         raise HTTPException(status_code=404, detail="Telegram integration not configured")
     from app.services.channels.telegram import TelegramSender
+
     return TelegramSender(integration.config)
 
 
@@ -472,6 +535,7 @@ async def delete_telegram_commands(chatbot_id: uuid.UUID, user: CurrentUser, db:
 
 # ── WhatsApp Templates ─────────────────────────────────────────────────────────
 
+
 async def _get_whatsapp_sender(chatbot_id: uuid.UUID, user_id: uuid.UUID, db):
     await _get_owned_bot(chatbot_id, user_id, db)
     result = await db.execute(
@@ -484,6 +548,7 @@ async def _get_whatsapp_sender(chatbot_id: uuid.UUID, user_id: uuid.UUID, db):
     if not integration:
         raise HTTPException(status_code=404, detail="WhatsApp integration not configured")
     from app.services.channels.whatsapp import WhatsAppSender
+
     return WhatsAppSender(integration.config)
 
 
@@ -497,7 +562,9 @@ async def list_whatsapp_templates(chatbot_id: uuid.UUID, user: CurrentUser, db: 
     return {"success": True, "data": templates}
 
 
-@router.post("/chatbots/{chatbot_id}/integrations/whatsapp/templates", response_model=dict, status_code=201)
+@router.post(
+    "/chatbots/{chatbot_id}/integrations/whatsapp/templates", response_model=dict, status_code=201
+)
 async def create_whatsapp_template(
     chatbot_id: uuid.UUID, body: CreateWhatsAppTemplateRequest, user: CurrentUser, db: DBSession
 ) -> dict:
@@ -509,7 +576,9 @@ async def create_whatsapp_template(
     return {"success": True, "data": result}
 
 
-@router.delete("/chatbots/{chatbot_id}/integrations/whatsapp/templates/{template_name}", response_model=dict)
+@router.delete(
+    "/chatbots/{chatbot_id}/integrations/whatsapp/templates/{template_name}", response_model=dict
+)
 async def delete_whatsapp_template(
     chatbot_id: uuid.UUID, template_name: str, user: CurrentUser, db: DBSession
 ) -> dict:
@@ -523,6 +592,7 @@ async def delete_whatsapp_template(
 
 # ── Messenger Persistent Menu ──────────────────────────────────────────────────
 
+
 async def _get_facebook_sender(chatbot_id: uuid.UUID, user_id: uuid.UUID, db):
     await _get_owned_bot(chatbot_id, user_id, db)
     result = await db.execute(
@@ -535,6 +605,7 @@ async def _get_facebook_sender(chatbot_id: uuid.UUID, user_id: uuid.UUID, db):
     if not integration:
         raise HTTPException(status_code=404, detail="Facebook integration not configured")
     from app.services.channels.facebook import FacebookSender
+
     return FacebookSender(integration.config)
 
 
@@ -575,6 +646,7 @@ async def delete_messenger_menu(chatbot_id: uuid.UUID, user: CurrentUser, db: DB
 
 # ── Email Integration: test send ───────────────────────────────────────────────
 
+
 @router.post("/chatbots/{chatbot_id}/integrations/email/test", response_model=dict)
 async def test_email_integration(
     chatbot_id: uuid.UUID, body: TestEmailIntegrationRequest, user: CurrentUser, db: DBSession
@@ -594,6 +666,7 @@ async def test_email_integration(
     to = body.to
 
     from app.services.channels.email_sender import EmailSender
+
     sender = EmailSender(integration.config)
     try:
         await sender.send(

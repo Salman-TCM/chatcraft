@@ -1,19 +1,28 @@
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta, timezone
 
 from app.services.channels.base import ChannelSender
-from app.services.channels.telegram import TelegramSender
-from app.services.channels.whatsapp import WhatsAppSender
+from app.services.channels.discord import DiscordSender
 from app.services.channels.facebook import FacebookSender
 from app.services.channels.instagram import InstagramSender
 from app.services.channels.sms import SMSSender
-from app.services.channels.discord import DiscordSender
-from app.services.channels.twitter import TwitterSender
+from app.services.channels.telegram import TelegramSender
 from app.services.channels.tiktok import TikTokSender
+from app.services.channels.twitter import TwitterSender
+from app.services.channels.whatsapp import WhatsAppSender
 
 __all__ = [
-    "ChannelSender", "TelegramSender", "WhatsAppSender",
-    "FacebookSender", "InstagramSender", "SMSSender", "DiscordSender",
-    "TwitterSender", "TikTokSender", "get_sender", "is_within_meta_window", "META_WINDOW_CHANNELS",
+    "ChannelSender",
+    "TelegramSender",
+    "WhatsAppSender",
+    "FacebookSender",
+    "InstagramSender",
+    "SMSSender",
+    "DiscordSender",
+    "TwitterSender",
+    "TikTokSender",
+    "get_sender",
+    "is_within_meta_window",
+    "META_WINDOW_CHANNELS",
 ]
 
 # Channels that enforce a 24-hour messaging window
@@ -35,8 +44,8 @@ def is_within_meta_window(channel: str, last_user_message_at: datetime | None) -
         return False
     ts = last_user_message_at
     if ts.tzinfo is None:
-        ts = ts.replace(tzinfo=timezone.utc)
-    return ts >= datetime.now(timezone.utc) - timedelta(hours=_META_WINDOW_HOURS)
+        ts = ts.replace(tzinfo=UTC)
+    return ts >= datetime.now(UTC) - timedelta(hours=_META_WINDOW_HOURS)
 
 
 def get_sender(channel: str, config: dict) -> "ChannelSender":

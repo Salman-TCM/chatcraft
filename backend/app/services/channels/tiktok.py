@@ -5,6 +5,7 @@ Config fields:
   access_token   — TikTok app access token (from OAuth 2.0 PKCE flow)
   open_id        — TikTok user open_id (the authenticated business account)
 """
+
 import httpx
 
 from app.services.channels.base import ChannelSender

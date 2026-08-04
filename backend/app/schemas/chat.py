@@ -6,10 +6,9 @@ from pydantic import BaseModel, Field
 
 from app.core.plan_limits import DEFAULT_MODEL
 from app.models.message import MessageFeedback
-from app.services.llm.costs import supported_models
-
 
 # ── Chatbot schemas ──────────────────────────────────────────────────────────
+
 
 class ChatbotCreateRequest(BaseModel):
     name: str = Field(..., min_length=1, max_length=255)
@@ -96,6 +95,7 @@ class ChatbotResponse(BaseModel):
 
 
 # ── Chat / message schemas ───────────────────────────────────────────────────
+
 
 class ChatRequest(BaseModel):
     message: str = Field(..., min_length=1, max_length=32_000)

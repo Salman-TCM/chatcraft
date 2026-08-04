@@ -20,11 +20,11 @@ Folder routes:
   PATCH  /api/v1/flows/folders/{id}         — rename / recolour
   DELETE /api/v1/flows/folders/{id}         — delete (flows moved to no-folder)
 """
+
 import json
 import re
 import secrets
 import uuid
-from datetime import datetime, timezone
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -48,14 +48,11 @@ router = APIRouter(tags=["flows"], dependencies=[Depends(require_feature(FLOWS))
 
 # ── Simplified list (must be registered before /{flow_id} to avoid UUID parse) ─
 
+
 @router.get("/api/v1/flows/list", response_model=dict)
 async def list_flows_simple(user: CurrentUser, db: DBSession) -> dict:
     """Minimal list for integrations — id, name, is_active only."""
-    result = await db.execute(
-        select(Flow)
-        .where(Flow.user_id == user.id)
-        .order_by(Flow.name)
-    )
+    result = await db.execute(select(Flow).where(Flow.user_id == user.id).order_by(Flow.name))
     flows = result.scalars().all()
     return {
         "success": True,
@@ -181,6 +178,7 @@ async def _get_owned_flow(flow_id: uuid.UUID, user_id: uuid.UUID, db) -> Flow:
 
 # ── CRUD ───────────────────────────────────────────────────────────────────────
 
+
 @router.get("/api/v1/flows", response_model=dict)
 async def list_flows(
     user: CurrentUser,
@@ -222,7 +220,12 @@ async def list_flows(
 async def create_flow(body: FlowCreate, user: CurrentUser, db: DBSession) -> dict:
     # Default canvas: start + end nodes
     default_nodes = [
-        {"id": "start-1", "type": "start", "position": {"x": 250, "y": 50}, "data": {"label": "Start"}},
+        {
+            "id": "start-1",
+            "type": "start",
+            "position": {"x": 250, "y": 50},
+            "data": {"label": "Start"},
+        },
         {"id": "end-1", "type": "end", "position": {"x": 250, "y": 250}, "data": {"label": "End"}},
     ]
     default_edges = [
@@ -254,7 +257,9 @@ async def get_flow(flow_id: uuid.UUID, user: CurrentUser, db: DBSession) -> dict
 
 
 @router.patch("/api/v1/flows/{flow_id}", response_model=dict)
-async def update_flow(flow_id: uuid.UUID, body: FlowUpdate, user: CurrentUser, db: DBSession) -> dict:
+async def update_flow(
+    flow_id: uuid.UUID, body: FlowUpdate, user: CurrentUser, db: DBSession
+) -> dict:
     flow = await _get_owned_flow(flow_id, user.id, db)
     for field, value in body.model_dump(exclude_unset=True).items():
         setattr(flow, field, value)
@@ -271,7 +276,9 @@ async def delete_flow(flow_id: uuid.UUID, user: CurrentUser, db: DBSession) -> d
     return {"success": True, "data": None}
 
 
-@router.post("/api/v1/flows/{flow_id}/duplicate", response_model=dict, status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/api/v1/flows/{flow_id}/duplicate", response_model=dict, status_code=status.HTTP_201_CREATED
+)
 async def duplicate_flow(flow_id: uuid.UUID, user: CurrentUser, db: DBSession) -> dict:
     flow = await _get_owned_flow(flow_id, user.id, db)
     copy = Flow(
@@ -301,6 +308,7 @@ async def toggle_flow(flow_id: uuid.UUID, user: CurrentUser, db: DBSession) -> d
 
 # ── Webhook config ────────────────────────────────────────────────────────────
 
+
 @router.get("/api/v1/flows/{flow_id}/webhook", response_model=dict)
 async def get_webhook_config(flow_id: uuid.UUID, user: CurrentUser, db: DBSession) -> dict:
     flow = await _get_owned_flow(flow_id, user.id, db)
@@ -316,7 +324,9 @@ async def get_webhook_config(flow_id: uuid.UUID, user: CurrentUser, db: DBSessio
 
 
 @router.post("/api/v1/flows/{flow_id}/webhook", response_model=dict)
-async def configure_webhook(flow_id: uuid.UUID, body: WebhookConfigureRequest, user: CurrentUser, db: DBSession) -> dict:
+async def configure_webhook(
+    flow_id: uuid.UUID, body: WebhookConfigureRequest, user: CurrentUser, db: DBSession
+) -> dict:
     flow = await _get_owned_flow(flow_id, user.id, db)
     data = body.model_dump(exclude_unset=True)
     if data.get("regenerate"):
@@ -337,13 +347,19 @@ async def configure_webhook(flow_id: uuid.UUID, body: WebhookConfigureRequest, u
 
 # ── Manual trigger ─────────────────────────────────────────────────────────────
 
-@router.post("/api/v1/flows/{flow_id}/trigger", response_model=dict, status_code=status.HTTP_201_CREATED)
-async def trigger_flow(flow_id: uuid.UUID, body: FlowTriggerRequest, user: CurrentUser, db: DBSession) -> dict:
+
+@router.post(
+    "/api/v1/flows/{flow_id}/trigger", response_model=dict, status_code=status.HTTP_201_CREATED
+)
+async def trigger_flow(
+    flow_id: uuid.UUID, body: FlowTriggerRequest, user: CurrentUser, db: DBSession
+) -> dict:
     flow = await _get_owned_flow(flow_id, user.id, db)
     if not flow.is_active:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Flow is not active")
 
     from app.services.flow.executor import start_run
+
     run = await start_run(
         flow=flow,
         db=db,
@@ -362,6 +378,7 @@ async def trigger_flow(flow_id: uuid.UUID, body: FlowTriggerRequest, user: Curre
 
 
 # ── Run history ────────────────────────────────────────────────────────────────
+
 
 @router.get("/api/v1/flows/{flow_id}/runs", response_model=dict)
 async def list_runs(
@@ -382,9 +399,11 @@ async def list_runs(
         .limit(limit)
     )
     runs = result.scalars().all()
-    total = (await db.execute(
-        select(func.count()).select_from(FlowRun).where(FlowRun.flow_id == flow.id)
-    )).scalar_one()
+    total = (
+        await db.execute(
+            select(func.count()).select_from(FlowRun).where(FlowRun.flow_id == flow.id)
+        )
+    ).scalar_one()
 
     return {
         "success": True,
@@ -408,16 +427,25 @@ async def list_runs(
 
 # ── Folder CRUD ───────────────────────────────────────────────────────────────
 
+
 @router.get("/api/v1/flows/folders", response_model=dict)
 async def list_folders(user: CurrentUser, db: DBSession) -> dict:
     result = await db.execute(
         select(FlowFolder).where(FlowFolder.user_id == user.id).order_by(FlowFolder.name)
     )
     folders = result.scalars().all()
-    return {"success": True, "data": [
-        {"id": str(f.id), "name": f.name, "colour": f.colour, "created_at": f.created_at.isoformat()}
-        for f in folders
-    ]}
+    return {
+        "success": True,
+        "data": [
+            {
+                "id": str(f.id),
+                "name": f.name,
+                "colour": f.colour,
+                "created_at": f.created_at.isoformat(),
+            }
+            for f in folders
+        ],
+    }
 
 
 @router.post("/api/v1/flows/folders", response_model=dict, status_code=status.HTTP_201_CREATED)
@@ -426,11 +454,16 @@ async def create_folder(body: FlowFolderCreate, user: CurrentUser, db: DBSession
     db.add(folder)
     await db.commit()
     await db.refresh(folder)
-    return {"success": True, "data": {"id": str(folder.id), "name": folder.name, "colour": folder.colour}}
+    return {
+        "success": True,
+        "data": {"id": str(folder.id), "name": folder.name, "colour": folder.colour},
+    }
 
 
 @router.patch("/api/v1/flows/folders/{folder_id}", response_model=dict)
-async def update_folder(folder_id: uuid.UUID, body: FlowFolderUpdate, user: CurrentUser, db: DBSession) -> dict:
+async def update_folder(
+    folder_id: uuid.UUID, body: FlowFolderUpdate, user: CurrentUser, db: DBSession
+) -> dict:
     folder = await db.get(FlowFolder, folder_id)
     if not folder or folder.user_id != user.id:
         raise HTTPException(status_code=404, detail="Folder not found")
@@ -440,7 +473,10 @@ async def update_folder(folder_id: uuid.UUID, body: FlowFolderUpdate, user: Curr
     if "colour" in data:
         folder.colour = data["colour"]
     await db.commit()
-    return {"success": True, "data": {"id": str(folder.id), "name": folder.name, "colour": folder.colour}}
+    return {
+        "success": True,
+        "data": {"id": str(folder.id), "name": folder.name, "colour": folder.colour},
+    }
 
 
 @router.delete("/api/v1/flows/folders/{folder_id}", response_model=dict)
@@ -456,6 +492,7 @@ async def delete_folder(folder_id: uuid.UUID, user: CurrentUser, db: DBSession) 
 
 # ── External webhook trigger ───────────────────────────────────────────────────
 
+
 @router.post("/webhooks/flow/{flow_id}/{webhook_secret}", response_model=dict)
 async def webhook_trigger(
     flow_id: uuid.UUID,
@@ -468,5 +505,6 @@ async def webhook_trigger(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Flow not found")
 
     from app.services.flow.executor import start_run
+
     run = await start_run(flow=flow, db=db, trigger_data=request_body)
     return {"success": True, "data": {"run_id": str(run.id), "status": run.status}}

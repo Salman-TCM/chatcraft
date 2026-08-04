@@ -28,9 +28,7 @@ class SubscriptionStatus(str, enum.Enum):
 class User(TimestampMixin, Base):
     __tablename__ = "users"
 
-    email: Mapped[str] = mapped_column(
-        String(320), unique=True, nullable=False, index=True
-    )
+    email: Mapped[str] = mapped_column(String(320), unique=True, nullable=False, index=True)
     password_hash: Mapped[str | None] = mapped_column(String(255), nullable=True)
     name: Mapped[str | None] = mapped_column(String(255), nullable=True)
     avatar_url: Mapped[str | None] = mapped_column(String(2048), nullable=True)
@@ -51,9 +49,7 @@ class User(TimestampMixin, Base):
     )
 
     # Password reset
-    password_reset_token: Mapped[str | None] = mapped_column(
-        String(255), nullable=True, index=True
-    )
+    password_reset_token: Mapped[str | None] = mapped_column(String(255), nullable=True, index=True)
     password_reset_expires_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
@@ -66,9 +62,7 @@ class User(TimestampMixin, Base):
         Enum(SubscriptionStatus, name="subscription_status"),
         nullable=True,
     )
-    trial_ends_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True
-    )
+    trial_ends_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     # Stripe Connect (creator payouts)
     stripe_connect_account_id: Mapped[str | None] = mapped_column(
@@ -85,7 +79,9 @@ class User(TimestampMixin, Base):
     google_oauth_tokens: Mapped[dict | None] = mapped_column(JSONB, nullable=True, default=None)
 
     # Suspension
-    is_suspended: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
+    is_suspended: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default="false"
+    )
     suspended_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     suspended_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
 

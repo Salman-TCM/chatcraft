@@ -4,9 +4,11 @@ Revision ID: 000000000048
 Revises: 000000000047
 Create Date: 2026-05-25
 """
-from alembic import op
+
 import sqlalchemy as sa
 from sqlalchemy.dialects.postgresql import JSONB
+
+from alembic import op
 
 revision = "000000000048"
 down_revision = "000000000047"
@@ -15,7 +17,9 @@ depends_on = None
 
 
 def upgrade() -> None:
-    op.add_column("users", sa.Column("is_suspended", sa.Boolean, nullable=False, server_default="false"))
+    op.add_column(
+        "users", sa.Column("is_suspended", sa.Boolean, nullable=False, server_default="false")
+    )
     op.add_column("users", sa.Column("suspended_at", sa.DateTime(timezone=True), nullable=True))
     op.add_column("users", sa.Column("suspended_reason", sa.Text, nullable=True))
 
@@ -23,7 +27,12 @@ def upgrade() -> None:
         "platform_settings",
         sa.Column("key", sa.String(128), primary_key=True),
         sa.Column("value", JSONB, nullable=False, server_default="null"),
-        sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False),
+        sa.Column(
+            "updated_at",
+            sa.DateTime(timezone=True),
+            server_default=sa.text("now()"),
+            nullable=False,
+        ),
     )
 
 

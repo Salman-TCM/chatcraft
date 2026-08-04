@@ -4,30 +4,42 @@ Revision ID: 000000000007
 Revises: 000000000006
 Create Date: 2026-05-11 00:00:07.000000
 """
-from typing import Sequence, Union
+
+from collections.abc import Sequence
 
 import sqlalchemy as sa
-from alembic import op
 from sqlalchemy.dialects import postgresql
 
-from app.models.base import set_updated_at_trigger, drop_updated_at_trigger
+from alembic import op
+from app.models.base import drop_updated_at_trigger, set_updated_at_trigger
 
 revision: str = "000000000007"
-down_revision: Union[str, None] = "000000000006"
-branch_labels: Union[str, Sequence[str], None] = None
-depends_on: Union[str, Sequence[str], None] = None
+down_revision: str | None = "000000000006"
+branch_labels: str | Sequence[str] | None = None
+depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:
     # ── chatbot_configs ──────────────────────────────────────────────────────
     op.create_table(
         "chatbot_configs",
-        sa.Column("id", postgresql.UUID(as_uuid=True), server_default=sa.text("gen_random_uuid()"), nullable=False),
-        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
-        sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
+        sa.Column(
+            "id",
+            postgresql.UUID(as_uuid=True),
+            server_default=sa.text("gen_random_uuid()"),
+            nullable=False,
+        ),
+        sa.Column(
+            "created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False
+        ),
+        sa.Column(
+            "updated_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False
+        ),
         sa.Column("user_id", postgresql.UUID(as_uuid=True), nullable=False),
         sa.Column("name", sa.String(255), nullable=False),
-        sa.Column("default_model", sa.String(100), server_default="claude-sonnet-4-6", nullable=False),
+        sa.Column(
+            "default_model", sa.String(100), server_default="claude-sonnet-4-6", nullable=False
+        ),
         sa.Column("fallback_model", sa.String(100), nullable=True),
         sa.Column("allow_model_switch", sa.Boolean(), server_default="false", nullable=False),
         sa.Column("published", sa.Boolean(), server_default="false", nullable=False),
@@ -41,9 +53,18 @@ def upgrade() -> None:
     # ── conversations ────────────────────────────────────────────────────────
     op.create_table(
         "conversations",
-        sa.Column("id", postgresql.UUID(as_uuid=True), server_default=sa.text("gen_random_uuid()"), nullable=False),
-        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
-        sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
+        sa.Column(
+            "id",
+            postgresql.UUID(as_uuid=True),
+            server_default=sa.text("gen_random_uuid()"),
+            nullable=False,
+        ),
+        sa.Column(
+            "created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False
+        ),
+        sa.Column(
+            "updated_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False
+        ),
         sa.Column("chatbot_id", postgresql.UUID(as_uuid=True), nullable=False),
         sa.Column("user_id", postgresql.UUID(as_uuid=True), nullable=True),
         sa.Column("guest_id", sa.String(255), nullable=True),
@@ -58,26 +79,49 @@ def upgrade() -> None:
     op.execute(set_updated_at_trigger("conversations"))
 
     # ── message_role enum ────────────────────────────────────────────────────
-    message_role_enum = postgresql.ENUM("system", "user", "assistant", name="message_role", create_type=False)
+    message_role_enum = postgresql.ENUM(
+        "system", "user", "assistant", name="message_role", create_type=False
+    )
     message_role_enum.create(op.get_bind(), checkfirst=True)
 
-    message_feedback_enum = postgresql.ENUM("thumbs_up", "thumbs_down", name="message_feedback", create_type=False)
+    message_feedback_enum = postgresql.ENUM(
+        "thumbs_up", "thumbs_down", name="message_feedback", create_type=False
+    )
     message_feedback_enum.create(op.get_bind(), checkfirst=True)
 
     # ── messages ─────────────────────────────────────────────────────────────
     op.create_table(
         "messages",
-        sa.Column("id", postgresql.UUID(as_uuid=True), server_default=sa.text("gen_random_uuid()"), nullable=False),
-        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
-        sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
+        sa.Column(
+            "id",
+            postgresql.UUID(as_uuid=True),
+            server_default=sa.text("gen_random_uuid()"),
+            nullable=False,
+        ),
+        sa.Column(
+            "created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False
+        ),
+        sa.Column(
+            "updated_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False
+        ),
         sa.Column("conversation_id", postgresql.UUID(as_uuid=True), nullable=False),
-        sa.Column("role", postgresql.ENUM("system", "user", "assistant", name="message_role", create_type=False), nullable=False),
+        sa.Column(
+            "role",
+            postgresql.ENUM("system", "user", "assistant", name="message_role", create_type=False),
+            nullable=False,
+        ),
         sa.Column("content", sa.Text(), nullable=False),
         sa.Column("model", sa.String(100), nullable=True),
         sa.Column("input_tokens", sa.Integer(), server_default="0", nullable=False),
         sa.Column("output_tokens", sa.Integer(), server_default="0", nullable=False),
-        sa.Column("cost_usd", sa.Numeric(precision=14, scale=8), server_default="0", nullable=False),
-        sa.Column("feedback", postgresql.ENUM("thumbs_up", "thumbs_down", name="message_feedback", create_type=False), nullable=True),
+        sa.Column(
+            "cost_usd", sa.Numeric(precision=14, scale=8), server_default="0", nullable=False
+        ),
+        sa.Column(
+            "feedback",
+            postgresql.ENUM("thumbs_up", "thumbs_down", name="message_feedback", create_type=False),
+            nullable=True,
+        ),
         sa.ForeignKeyConstraint(["conversation_id"], ["conversations.id"], ondelete="CASCADE"),
         sa.PrimaryKeyConstraint("id"),
     )

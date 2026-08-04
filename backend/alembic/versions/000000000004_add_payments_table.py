@@ -4,29 +4,43 @@ Revision ID: 000000000004
 Revises: 000000000003
 Create Date: 2026-05-07 00:00:04.000000
 """
-from typing import Sequence, Union
+
+from collections.abc import Sequence
 
 import sqlalchemy as sa
-from alembic import op
 from sqlalchemy.dialects import postgresql
 from sqlalchemy.dialects.postgresql import UUID
 
+from alembic import op
+
 revision: str = "000000000004"
-down_revision: Union[str, None] = "000000000003"
-branch_labels: Union[str, Sequence[str], None] = None
-depends_on: Union[str, Sequence[str], None] = None
+down_revision: str | None = "000000000003"
+branch_labels: str | Sequence[str] | None = None
+depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:
     postgresql.ENUM(
-        "requires_payment_method", "requires_confirmation", "requires_action",
-        "processing", "succeeded", "canceled", "failed",
-        name="payment_status", create_type=False,
+        "requires_payment_method",
+        "requires_confirmation",
+        "requires_action",
+        "processing",
+        "succeeded",
+        "canceled",
+        "failed",
+        name="payment_status",
+        create_type=False,
     ).create(op.get_bind(), checkfirst=True)
 
     op.create_table(
         "payments",
-        sa.Column("id", UUID(as_uuid=True), primary_key=True, server_default=sa.text("gen_random_uuid()"), nullable=False),
+        sa.Column(
+            "id",
+            UUID(as_uuid=True),
+            primary_key=True,
+            server_default=sa.text("gen_random_uuid()"),
+            nullable=False,
+        ),
         sa.Column("user_id", UUID(as_uuid=True), nullable=False),
         sa.Column("stripe_payment_intent_id", sa.String(255), unique=True, nullable=True),
         sa.Column("stripe_invoice_id", sa.String(255), nullable=True),
@@ -35,9 +49,15 @@ def upgrade() -> None:
         sa.Column(
             "status",
             postgresql.ENUM(
-                "requires_payment_method", "requires_confirmation", "requires_action",
-                "processing", "succeeded", "canceled", "failed",
-                name="payment_status", create_type=False,
+                "requires_payment_method",
+                "requires_confirmation",
+                "requires_action",
+                "processing",
+                "succeeded",
+                "canceled",
+                "failed",
+                name="payment_status",
+                create_type=False,
             ),
             nullable=False,
             server_default="processing",

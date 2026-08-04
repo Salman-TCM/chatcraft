@@ -2,8 +2,8 @@
 Generic OpenAI-compatible LLM provider.
 Used for DeepSeek, Groq, Perplexity, xAI Grok — all expose an OpenAI-compatible API.
 """
-from decimal import Decimal
-from typing import AsyncIterator
+
+from collections.abc import AsyncIterator
 
 from openai import AsyncOpenAI
 

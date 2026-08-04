@@ -10,6 +10,7 @@ from app.core.config import settings
 def _get_request_id() -> str:
     try:
         from app.core.request_id import get_request_id
+
         return get_request_id()
     except Exception:
         return ""
@@ -39,7 +40,6 @@ def _serialize(record: dict) -> str:
 def _axiom_sink(message):
     """Ship each log record to Axiom as a structured event."""
     try:
-        import axiom
         record = message.record
         client = _get_axiom_client()
         if client is None:
@@ -73,6 +73,7 @@ def _get_axiom_client():
         return None
     try:
         from axiom import Client
+
         _axiom_client = Client(settings.axiom_token)
         return _axiom_client
     except Exception:
@@ -105,7 +106,7 @@ def setup_logging() -> None:
             logger.add(
                 _axiom_sink,
                 level="INFO",
-                enqueue=True,   # async — does not block request handling
+                enqueue=True,  # async — does not block request handling
                 backtrace=False,
                 diagnose=False,
             )

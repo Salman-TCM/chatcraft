@@ -1,4 +1,5 @@
 """Unit tests for Pydantic schema validation edge cases."""
+
 import pytest
 from pydantic import ValidationError
 

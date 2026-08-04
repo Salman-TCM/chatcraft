@@ -4,6 +4,7 @@ Wallet push notification helpers.
 Apple Wallet passes use certificate-based APNs auth (not JWT).
 The push payload is empty {} to signal the device to fetch the updated pass.
 """
+
 import os
 import ssl
 import tempfile
@@ -19,8 +20,10 @@ async def send_wallet_apns(push_token: str, pass_type_id: str, cert_pem: str, ke
         return
     try:
         # Write PEM cert/key to temp files (ssl.SSLContext requires file paths)
-        with tempfile.NamedTemporaryFile(suffix=".pem", delete=False) as cf, \
-             tempfile.NamedTemporaryFile(suffix=".pem", delete=False) as kf:
+        with (
+            tempfile.NamedTemporaryFile(suffix=".pem", delete=False) as cf,
+            tempfile.NamedTemporaryFile(suffix=".pem", delete=False) as kf,
+        ):
             cf.write(cert_pem.encode())
             kf.write(key_pem.encode())
             cf_name, kf_name = cf.name, kf.name
@@ -49,6 +52,7 @@ async def send_alert_apns(push_token: str, message: str) -> None:
     try:
         import json
         import time
+
         import jwt as pyjwt
 
         headers_jwt = {
@@ -56,7 +60,9 @@ async def send_alert_apns(push_token: str, message: str) -> None:
             "kid": settings.apple_push_key_id,
         }
         claims = {"iss": settings.apple_team_identifier, "iat": int(time.time())}
-        token = pyjwt.encode(claims, settings.apple_push_key_pem, algorithm="ES256", headers=headers_jwt)
+        token = pyjwt.encode(
+            claims, settings.apple_push_key_pem, algorithm="ES256", headers=headers_jwt
+        )
 
         payload = json.dumps({"aps": {"alert": message, "sound": "default"}}).encode()
         async with httpx.AsyncClient(http2=True) as client:

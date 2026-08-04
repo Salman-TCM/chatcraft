@@ -10,6 +10,7 @@ from app.models.base import Base
 
 class AdminActionLog(Base):
     """Immutable audit record for every admin mutation (role changes, deletions, impersonation)."""
+
     __tablename__ = "admin_action_logs"
 
     id: Mapped[uuid.UUID] = mapped_column(

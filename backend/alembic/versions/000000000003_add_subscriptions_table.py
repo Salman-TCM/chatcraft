@@ -4,43 +4,67 @@ Revision ID: 000000000003
 Revises: 000000000002
 Create Date: 2026-05-07 00:00:03.000000
 """
-from typing import Sequence, Union
+
+from collections.abc import Sequence
 
 import sqlalchemy as sa
-from alembic import op
 from sqlalchemy.dialects import postgresql
 from sqlalchemy.dialects.postgresql import UUID
 
+from alembic import op
+
 revision: str = "000000000003"
-down_revision: Union[str, None] = "000000000002"
-branch_labels: Union[str, Sequence[str], None] = None
-depends_on: Union[str, Sequence[str], None] = None
+down_revision: str | None = "000000000002"
+branch_labels: str | Sequence[str] | None = None
+depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:
     # Create enum types idempotently before the table references them
     postgresql.ENUM(
-        "free", "trial", "starter", "pro", "enterprise",
-        name="subscription_plan", create_type=False,
+        "free",
+        "trial",
+        "starter",
+        "pro",
+        "enterprise",
+        name="subscription_plan",
+        create_type=False,
     ).create(op.get_bind(), checkfirst=True)
 
     postgresql.ENUM(
-        "active", "trialing", "past_due", "canceled",
-        "unpaid", "incomplete", "incomplete_expired",
-        name="subscription_state", create_type=False,
+        "active",
+        "trialing",
+        "past_due",
+        "canceled",
+        "unpaid",
+        "incomplete",
+        "incomplete_expired",
+        name="subscription_state",
+        create_type=False,
     ).create(op.get_bind(), checkfirst=True)
 
     op.create_table(
         "subscriptions",
-        sa.Column("id", UUID(as_uuid=True), primary_key=True, server_default=sa.text("gen_random_uuid()"), nullable=False),
+        sa.Column(
+            "id",
+            UUID(as_uuid=True),
+            primary_key=True,
+            server_default=sa.text("gen_random_uuid()"),
+            nullable=False,
+        ),
         sa.Column("user_id", UUID(as_uuid=True), nullable=False),
         sa.Column("stripe_subscription_id", sa.String(255), unique=True, nullable=True),
         sa.Column("stripe_price_id", sa.String(255), nullable=True),
         sa.Column(
             "plan",
             postgresql.ENUM(
-                "free", "trial", "starter", "pro", "enterprise",
-                name="subscription_plan", create_type=False,
+                "free",
+                "trial",
+                "starter",
+                "pro",
+                "enterprise",
+                name="subscription_plan",
+                create_type=False,
             ),
             nullable=False,
             server_default="free",
@@ -48,9 +72,15 @@ def upgrade() -> None:
         sa.Column(
             "status",
             postgresql.ENUM(
-                "active", "trialing", "past_due", "canceled",
-                "unpaid", "incomplete", "incomplete_expired",
-                name="subscription_state", create_type=False,
+                "active",
+                "trialing",
+                "past_due",
+                "canceled",
+                "unpaid",
+                "incomplete",
+                "incomplete_expired",
+                name="subscription_state",
+                create_type=False,
             ),
             nullable=False,
             server_default="active",

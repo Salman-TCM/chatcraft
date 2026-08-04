@@ -1,9 +1,9 @@
 """
 WalletService — reusable wallet card operations for flows and internal callers.
 """
+
 import logging
 import uuid
-from typing import Optional
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -77,7 +77,9 @@ def apply_action(action: str, value, state: dict, cfg: dict) -> dict:
             raise ValueError("value must be non-negative")
         state["points"] = max(0, state.get("points", 0) - v)
     elif action == "redeem_points_reward":
-        cost = _to_int(value, 0) if value is not None else _to_int(cfg.get("points_threshold", 0), 0)
+        cost = (
+            _to_int(value, 0) if value is not None else _to_int(cfg.get("points_threshold", 0), 0)
+        )
         if cost < 0:
             raise ValueError("value must be non-negative")
         state["points"] = max(0, state.get("points", 0) - cost)
@@ -139,7 +141,7 @@ class WalletService:
         value,
         user_id: uuid.UUID,
         source: str = "flow",
-        message: Optional[str] = None,
+        message: str | None = None,
         silent: bool = False,
     ) -> WalletCard:
         result = await self.db.execute(
@@ -188,17 +190,26 @@ class WalletService:
         for sub in subs_result.scalars().all():
             if sub.device_type == "apple":
                 from app.services.wallet.push import send_alert_apns
+
                 await send_alert_apns(sub.push_token, message)
             elif sub.device_type == "google" and card.google_pass_object_id:
                 try:
                     from app.services.wallet.google_wallet import push_update
+
                     push_update(card.google_pass_object_id, program.type)
                 except Exception as exc:
-                    logger.warning("Google Wallet push_update failed for card %s: %s", card.serial, exc)
+                    logger.warning(
+                        "Google Wallet push_update failed for card %s: %s", card.serial, exc
+                    )
 
     async def _dispatch_triggers(
-        self, action: str, card: WalletCard, program: WalletProgram,
-        new_state: dict, old_state: dict, user_id: uuid.UUID,
+        self,
+        action: str,
+        card: WalletCard,
+        program: WalletProgram,
+        new_state: dict,
+        old_state: dict,
+        user_id: uuid.UUID,
     ) -> None:
         from app.services.automation import dispatch
 
@@ -241,4 +252,9 @@ class WalletService:
             try:
                 await dispatch(trigger, user_id, self.db, context)
             except Exception as exc:
-                logger.warning("Wallet automation dispatch failed (trigger=%s, card=%s): %s", trigger, card.serial, exc)
+                logger.warning(
+                    "Wallet automation dispatch failed (trigger=%s, card=%s): %s",
+                    trigger,
+                    card.serial,
+                    exc,
+                )

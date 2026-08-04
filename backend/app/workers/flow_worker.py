@@ -1,4 +1,5 @@
 """Celery tasks for flow execution (delay nodes, scheduled resumes)."""
+
 import uuid
 
 from app.workers.celery_app import celery_app
@@ -10,10 +11,10 @@ def resume_flow_run(self, run_id: str) -> None:
     import asyncio
 
     async def _resume() -> None:
+
         from app.db.session import AsyncSessionLocal
         from app.models.flow import Flow, FlowRun
         from app.services.flow.executor import FlowExecutor
-        from sqlalchemy import select
 
         async with AsyncSessionLocal() as db:
             run = await db.get(FlowRun, uuid.UUID(run_id))
@@ -26,7 +27,6 @@ def resume_flow_run(self, run_id: str) -> None:
 
             executor = FlowExecutor(flow, run, db)
             # Advance past the delay node
-            from app.services.flow.executor import _MAX_STEPS
             next_id = executor._next_node_id(run.current_node_id or "", "default")
             if next_id:
                 run.current_node_id = next_id

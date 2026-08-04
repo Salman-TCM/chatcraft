@@ -8,14 +8,15 @@ Tests:
   - Conversation created and persisted
   - Message history accessible via inbox API
 """
+
 import pytest
 
-REGISTER_URL  = "/api/auth/register"
-LOGIN_URL     = "/api/auth/login"
-CHATBOTS_URL  = "/api/chatbots"
-WIDGET_URL    = "/api/widget/manage/{id}"
-CHAT_URL      = "/api/widget/{id}/chat"
-CFG_URL       = "/api/widget/{id}/config"
+REGISTER_URL = "/api/auth/register"
+LOGIN_URL = "/api/auth/login"
+CHATBOTS_URL = "/api/chatbots"
+WIDGET_URL = "/api/widget/manage/{id}"
+CHAT_URL = "/api/widget/{id}/chat"
+CFG_URL = "/api/widget/{id}/config"
 
 
 async def _create_published_bot(client) -> tuple[str, str, str]:
@@ -42,6 +43,7 @@ async def _create_published_bot(client) -> tuple[str, str, str]:
 
 
 # ── Config ────────────────────────────────────────────────────────────────────
+
 
 @pytest.mark.asyncio
 async def test_widget_config_returns_branding(client):
@@ -70,6 +72,7 @@ async def test_widget_config_unpublished_returns_404(client):
 
 
 # ── Chat ──────────────────────────────────────────────────────────────────────
+
 
 @pytest.mark.asyncio
 async def test_chat_without_token_rejected(client):
@@ -140,6 +143,7 @@ async def test_chat_ai_paused_returns_paused_response(client):
 
 # ── KB endpoints basic shape ──────────────────────────────────────────────────
 
+
 @pytest.mark.asyncio
 async def test_kb_list_requires_auth(client):
     res = await client.get("/api/kb/00000000-0000-0000-0000-000000000001/documents")
@@ -149,6 +153,7 @@ async def test_kb_list_requires_auth(client):
 @pytest.mark.asyncio
 async def test_kb_upload_requires_auth(client):
     import io
+
     fake_pdf = io.BytesIO(b"fake content")
     res = await client.post(
         "/api/kb/00000000-0000-0000-0000-000000000001/upload",

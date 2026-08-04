@@ -10,9 +10,9 @@ Routes:
   GET    /api/v1/forms/{id}/submissions
   POST   /api/public/forms/{public_id}/submit   ← no auth
 """
+
 import secrets
 import uuid
-from datetime import datetime, timezone
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
@@ -56,22 +56,31 @@ async def _get_owned_form(form_id: uuid.UUID, user_id: uuid.UUID, db) -> Form:
 
 # ── Authenticated CRUD ─────────────────────────────────────────────────────────
 
+
 @router.get("/api/v1/forms", response_model=dict)
 async def list_forms(
-    user: CurrentUser, db: DBSession,
+    user: CurrentUser,
+    db: DBSession,
     page: Annotated[int, Query(ge=1)] = 1,
     limit: Annotated[int, Query(ge=1, le=100)] = 30,
 ) -> dict:
     offset = (page - 1) * limit
     result = await db.execute(
-        select(Form).where(Form.user_id == user.id)
-        .order_by(Form.created_at.desc()).offset(offset).limit(limit)
+        select(Form)
+        .where(Form.user_id == user.id)
+        .order_by(Form.created_at.desc())
+        .offset(offset)
+        .limit(limit)
     )
     forms = result.scalars().all()
-    total = (await db.execute(
-        select(func.count()).select_from(Form).where(Form.user_id == user.id)
-    )).scalar_one()
-    return {"success": True, "data": [_form_dict(f, include_fields=False) for f in forms], "total": total}
+    total = (
+        await db.execute(select(func.count()).select_from(Form).where(Form.user_id == user.id))
+    ).scalar_one()
+    return {
+        "success": True,
+        "data": [_form_dict(f, include_fields=False) for f in forms],
+        "total": total,
+    }
 
 
 @router.post("/api/v1/forms", response_model=dict, status_code=status.HTTP_201_CREATED)
@@ -100,7 +109,9 @@ async def get_form(form_id: uuid.UUID, user: CurrentUser, db: DBSession) -> dict
 
 
 @router.patch("/api/v1/forms/{form_id}", response_model=dict)
-async def update_form(form_id: uuid.UUID, body: FormUpdateRequest, user: CurrentUser, db: DBSession) -> dict:
+async def update_form(
+    form_id: uuid.UUID, body: FormUpdateRequest, user: CurrentUser, db: DBSession
+) -> dict:
     form = await _get_owned_form(form_id, user.id, db)
     for field, value in body.model_dump(exclude_unset=True).items():
         setattr(form, field, value)
@@ -119,7 +130,9 @@ async def delete_form(form_id: uuid.UUID, user: CurrentUser, db: DBSession) -> d
 
 @router.get("/api/v1/forms/{form_id}/submissions", response_model=dict)
 async def list_submissions(
-    form_id: uuid.UUID, user: CurrentUser, db: DBSession,
+    form_id: uuid.UUID,
+    user: CurrentUser,
+    db: DBSession,
     page: Annotated[int, Query(ge=1)] = 1,
     limit: Annotated[int, Query(ge=1, le=100)] = 100,
 ) -> dict:
@@ -129,12 +142,17 @@ async def list_submissions(
         select(FormSubmission)
         .where(FormSubmission.form_id == form.id)
         .order_by(FormSubmission.submitted_at.desc())
-        .offset(offset).limit(limit)
+        .offset(offset)
+        .limit(limit)
     )
     subs = result.scalars().all()
-    total = (await db.execute(
-        select(func.count()).select_from(FormSubmission).where(FormSubmission.form_id == form.id)
-    )).scalar_one()
+    total = (
+        await db.execute(
+            select(func.count())
+            .select_from(FormSubmission)
+            .where(FormSubmission.form_id == form.id)
+        )
+    ).scalar_one()
     return {
         "success": True,
         "data": [
@@ -155,7 +173,10 @@ async def list_submissions(
 
 # ── Public submission (no auth) ────────────────────────────────────────────────
 
-@public_router.post("/api/public/forms/{public_id}/submit", response_model=dict, status_code=status.HTTP_201_CREATED)
+
+@public_router.post(
+    "/api/public/forms/{public_id}/submit", response_model=dict, status_code=status.HTTP_201_CREATED
+)
 async def public_submit(
     public_id: str,
     body: PublicFormSubmitRequest,
@@ -194,8 +215,10 @@ async def public_submit(
             phone = phone or str(val).strip()
 
     if email or phone:
-        from app.models.crm import Contact
         from sqlalchemy import or_
+
+        from app.models.crm import Contact
+
         filters = []
         if email:
             filters.append(Contact.email == email)
@@ -234,6 +257,7 @@ async def public_submit(
 
     # Fire automation trigger
     from app.services.automation import dispatch
+
     await dispatch(
         "form_submitted",
         form.user_id,

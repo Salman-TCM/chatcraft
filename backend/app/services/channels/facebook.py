@@ -11,7 +11,8 @@ Rich payload shapes supported in send_rich():
   buttons        — { "type": "buttons", "text": "...", "buttons": [{"type":"postback","title":"..","payload":".."}] }
   generic        — { "type": "generic", "elements": [{title,subtitle,image_url,buttons:[...]}] }
 """
-from datetime import datetime, timedelta, timezone
+
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import httpx
@@ -111,10 +112,10 @@ class FacebookSender(ChannelSender):
         """Return True if we're still within the 24-hour messaging window."""
         if last_user_message_at is None:
             return False
-        cutoff = datetime.now(timezone.utc) - timedelta(hours=_MESSAGING_WINDOW_HOURS)
+        cutoff = datetime.now(UTC) - timedelta(hours=_MESSAGING_WINDOW_HOURS)
         ts = last_user_message_at
         if ts.tzinfo is None:
-            ts = ts.replace(tzinfo=timezone.utc)
+            ts = ts.replace(tzinfo=UTC)
         return ts >= cutoff
 
     # ── Persistent menu ────────────────────────────────────────────────────────

@@ -3,6 +3,7 @@ Knowledge Base API
 Endpoints for uploading, listing, inspecting, deleting documents,
 and test-searching the vector store.
 """
+
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, status
@@ -15,11 +16,9 @@ from app.models.chatbot_config import ChatbotConfig
 from app.models.knowledge_base import (
     DocumentStatus,
     DocumentType,
-    KnowledgeBaseChunk,
     KnowledgeBaseDocument,
 )
 from app.schemas.kb import (
-    ChunkResponse,
     DocumentDetailResponse,
     DocumentResponse,
     SearchRequest,
@@ -36,10 +35,15 @@ from app.services.storage import (
 )
 from app.services.virus_scan import scan_bytes
 
-router = APIRouter(prefix="/api/kb", tags=["knowledge-base"], dependencies=[Depends(require_feature(KNOWLEDGE_BASE))])
+router = APIRouter(
+    prefix="/api/kb",
+    tags=["knowledge-base"],
+    dependencies=[Depends(require_feature(KNOWLEDGE_BASE))],
+)
 
 
 # ── Upload file ───────────────────────────────────────────────────────────────
+
 
 @router.post("/{chatbot_id}/upload", status_code=status.HTTP_201_CREATED)
 async def upload_document(
@@ -123,6 +127,7 @@ async def upload_document(
 
 # ── Ingest URL ────────────────────────────────────────────────────────────────
 
+
 @router.post("/{chatbot_id}/ingest-url", status_code=status.HTTP_201_CREATED)
 async def ingest_url(
     chatbot_id: uuid.UUID,
@@ -147,6 +152,7 @@ async def ingest_url(
 
 
 # ── Ingest raw text ───────────────────────────────────────────────────────────
+
 
 @router.post("/{chatbot_id}/ingest-text", status_code=status.HTTP_201_CREATED)
 async def ingest_text(
@@ -173,6 +179,7 @@ async def ingest_text(
 
 # ── List documents ────────────────────────────────────────────────────────────
 
+
 @router.get("/{chatbot_id}/documents")
 async def list_documents(
     chatbot_id: uuid.UUID,
@@ -194,6 +201,7 @@ async def list_documents(
 
 
 # ── Document detail + chunks ──────────────────────────────────────────────────
+
 
 @router.get("/{chatbot_id}/documents/{document_id}")
 async def get_document(
@@ -223,6 +231,7 @@ async def get_document(
 
 # ── Delete document ───────────────────────────────────────────────────────────
 
+
 @router.delete("/{chatbot_id}/documents/{document_id}")
 async def delete_document(
     chatbot_id: uuid.UUID,
@@ -251,6 +260,7 @@ async def delete_document(
 
 # ── Test search ───────────────────────────────────────────────────────────────
 
+
 @router.post("/{chatbot_id}/search")
 async def test_search(
     chatbot_id: uuid.UUID,
@@ -263,6 +273,7 @@ async def test_search(
     rag = RAGService(db)
     # Temporarily lower threshold to the value provided in the request
     import app.services.kb.rag as _rag_module
+
     orig = _rag_module.RELEVANCE_THRESHOLD
     _rag_module.RELEVANCE_THRESHOLD = body.threshold
     try:
@@ -292,9 +303,8 @@ async def test_search(
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
-async def _assert_owns_chatbot(
-    chatbot_id: uuid.UUID, user_id: uuid.UUID, db
-) -> ChatbotConfig:
+
+async def _assert_owns_chatbot(chatbot_id: uuid.UUID, user_id: uuid.UUID, db) -> ChatbotConfig:
     bot = await db.get(ChatbotConfig, chatbot_id)
     if not bot or bot.user_id != user_id:
         raise HTTPException(
@@ -308,7 +318,9 @@ def _dispatch_processing(document_id: str) -> None:
     """Fire-and-forget Celery task; swallows broker errors so upload still succeeds."""
     try:
         from app.workers.embedding_worker import process_document
+
         process_document.delay(document_id)
     except Exception as exc:
         from app.core.logging import logger
+
         logger.warning(f"Failed to enqueue process_document for {document_id}: {exc!r}")

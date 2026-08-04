@@ -52,8 +52,7 @@ async def verify_pgvector() -> bool:
             logger.info(f"pgvector installed and active: v{installed}")
             return True
         logger.warning(
-            "pgvector package exists but extension not created — "
-            "run: alembic upgrade head"
+            "pgvector package exists but extension not created — run: alembic upgrade head"
         )
         return False
     except Exception as exc:
@@ -68,6 +67,7 @@ async def verify_supabase() -> bool:
         return True
     try:
         from app.db.supabase import get_supabase_client
+
         client = get_supabase_client()
         # A lightweight call to confirm credentials are valid
         client.storage.list_buckets()
@@ -82,6 +82,7 @@ async def verify_sqlalchemy() -> bool:
     """Test the SQLAlchemy async engine and session factory."""
     try:
         from app.db.session import engine
+
         async with engine.connect() as conn:
             result = await conn.execute(text("SELECT current_database(), current_user"))
             row = result.fetchone()

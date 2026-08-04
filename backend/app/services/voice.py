@@ -13,21 +13,20 @@ Character / seconds tracking:
     stt_secs:{user_id}:{YYYY-MM}   (incremented by estimated seconds)
   Both expire at end of month + 1 day.
 """
+
 from __future__ import annotations
 
 import hashlib
 import io
-import uuid
 from calendar import monthrange
-from datetime import datetime, timezone
-from typing import AsyncIterator
+from collections.abc import AsyncIterator
+from datetime import UTC, datetime
 
 import redis.asyncio as aioredis
 from elevenlabs.client import AsyncElevenLabs
 from elevenlabs.types import VoiceSettings
 
 from app.core.config import settings
-from app.core.logging import logger
 
 DEFAULT_MODEL = "eleven_multilingual_v2"
 DEFAULT_VOICE = "21m00Tcm4TlvDq8ikWAM"  # ElevenLabs "Rachel"
@@ -44,6 +43,7 @@ def _get_client() -> AsyncElevenLabs:
 
 
 # ── TTS ───────────────────────────────────────────────────────────────────────
+
 
 def _cache_key(text: str, voice_id: str, model_id: str) -> str:
     digest = hashlib.sha256(f"{text}|{voice_id}|{model_id}".encode()).hexdigest()
@@ -104,6 +104,7 @@ async def collect_tts_bytes(
 async def upload_audio_to_storage(data: bytes, filename: str) -> str:
     """Upload MP3 bytes to S3/Supabase and return a public URL."""
     from app.services.storage import upload_file
+
     return await upload_file(
         data=data,
         filename=filename,
@@ -113,6 +114,7 @@ async def upload_audio_to_storage(data: bytes, filename: str) -> str:
 
 
 # ── STT ───────────────────────────────────────────────────────────────────────
+
 
 async def transcribe_audio(audio_bytes: bytes, content_type: str = "audio/webm") -> str:
     """
@@ -124,7 +126,7 @@ async def transcribe_audio(audio_bytes: bytes, content_type: str = "audio/webm")
     resp = await _get_client().speech_to_text.convert(
         model_id="scribe_v1",
         file=file_tuple,
-        language_code=None,   # auto-detect
+        language_code=None,  # auto-detect
         tag_audio_events=False,
     )
     return resp.text or ""
@@ -132,31 +134,35 @@ async def transcribe_audio(audio_bytes: bytes, content_type: str = "audio/webm")
 
 # ── Voices ────────────────────────────────────────────────────────────────────
 
+
 async def list_voices() -> list[dict]:
     """Return simplified voice list from ElevenLabs."""
     resp = await _get_client().voices.get_all()
     voices = []
     for v in resp.voices:
-        voices.append({
-            "voice_id": v.voice_id,
-            "name": v.name,
-            "category": v.category,
-            "labels": dict(v.labels) if v.labels else {},
-            "preview_url": v.preview_url,
-        })
+        voices.append(
+            {
+                "voice_id": v.voice_id,
+                "name": v.name,
+                "category": v.category,
+                "labels": dict(v.labels) if v.labels else {},
+                "preview_url": v.preview_url,
+            }
+        )
     return voices
 
 
 # ── Usage tracking ────────────────────────────────────────────────────────────
 
+
 def _month_ttl() -> int:
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     _, days = monthrange(now.year, now.month)
     return (days - now.day + 2) * 86400
 
 
 async def track_tts_chars(redis: aioredis.Redis, user_id: str, char_count: int) -> None:
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     key = f"tts_chars:{user_id}:{now.year}-{now.month:02d}"
     pipe = redis.pipeline()
     pipe.incrby(key, char_count)
@@ -165,7 +171,7 @@ async def track_tts_chars(redis: aioredis.Redis, user_id: str, char_count: int) 
 
 
 async def track_stt_seconds(redis: aioredis.Redis, user_id: str, seconds: float) -> None:
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     key = f"stt_secs:{user_id}:{now.year}-{now.month:02d}"
     pipe = redis.pipeline()
     pipe.incrbyfloat(key, round(seconds, 2))
@@ -174,7 +180,7 @@ async def track_stt_seconds(redis: aioredis.Redis, user_id: str, seconds: float)
 
 
 async def get_voice_usage(redis: aioredis.Redis, user_id: str) -> dict:
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     month = f"{now.year}-{now.month:02d}"
     tts_key = f"tts_chars:{user_id}:{month}"
     stt_key = f"stt_secs:{user_id}:{month}"

@@ -13,36 +13,35 @@ Call flow:
   3. Loop continues up to max_turns
   4. On hangup/status callback: transcript saved to conversation, AI summary saved to contact
 """
+
 import asyncio
-import json
 import uuid
-from datetime import datetime, timezone
-from typing import Any
 
 import httpx
-from fastapi import APIRouter, Form, HTTPException, Request, Response
+from fastapi import APIRouter, Form, HTTPException, Request
 from fastapi.responses import PlainTextResponse
 from pydantic import BaseModel
 from sqlalchemy import select
 
 from app.core.config import settings
 from app.core.dependencies import CurrentUser, DBSession
+from app.db.session import AsyncSessionLocal
 from app.models.chatbot_config import ChatbotConfig
-from app.models.crm import Contact
 from app.models.conversation import Conversation
+from app.models.crm import Contact
 from app.models.inbox import ConversationStatus
 from app.services.channels.processor import process_incoming
-from app.services.llm.router import LLMRouter
 from app.services.llm.base import ChatMessage
-from app.db.session import AsyncSessionLocal
+from app.services.llm.router import LLMRouter
 
 router = APIRouter(prefix="/webhooks/voice", tags=["voice_calls"])
 
-_TWIML_HEADER = 'application/xml'
+_TWIML_HEADER = "application/xml"
 _MAX_TURNS = 10
 
 
 # ─── Inbound call — entry point ───────────────────────────────────────────────
+
 
 @router.post("/{chatbot_id}", response_class=PlainTextResponse)
 async def inbound_call(
@@ -82,6 +81,7 @@ async def inbound_call(
 
 # ─── Gather — caller spoke ────────────────────────────────────────────────────
 
+
 @router.post("/{chatbot_id}/gather", response_class=PlainTextResponse)
 async def gather_response(
     chatbot_id: str,
@@ -116,13 +116,18 @@ async def gather_response(
         history = _call_history.get(CallSid, [])
         history.append({"role": "user", "content": caller_text})
 
-        system_prompt = bot.system_prompt or "You are a helpful phone assistant. Keep answers brief and conversational — under 3 sentences. Do not use markdown, bullet points, or any formatting."
+        system_prompt = (
+            bot.system_prompt
+            or "You are a helpful phone assistant. Keep answers brief and conversational — under 3 sentences. Do not use markdown, bullet points, or any formatting."
+        )
 
         messages = [ChatMessage(role="system", content=system_prompt)]
         for h in history[-8:]:  # keep last 8 turns
             messages.append(ChatMessage(role=h["role"], content=h["content"]))
 
-        llm = LLMRouter(model=bot.default_model or "claude-sonnet-4-6", fallback_model=bot.fallback_model)
+        llm = LLMRouter(
+            model=bot.default_model or "claude-sonnet-4-6", fallback_model=bot.fallback_model
+        )
         try:
             resp = await llm.complete(messages, max_tokens=256)
             reply = resp.content
@@ -152,6 +157,7 @@ async def gather_response(
 
 
 # ─── Status callback — call ended ────────────────────────────────────────────
+
 
 @router.post("/{chatbot_id}/status")
 async def call_status(
@@ -184,6 +190,7 @@ async def call_status(
 
 
 # ─── Outbound call trigger (ElevenLabs / Twilio) ─────────────────────────────
+
 
 class OutboundCallRequest(BaseModel):
     to_number: str
@@ -234,10 +241,14 @@ async def trigger_outbound_call(body: OutboundCallRequest, user: CurrentUser, db
         raise HTTPException(status_code=502, detail=f"Twilio error: {resp.text}")
 
     call_data = resp.json()
-    return {"success": True, "data": {"call_sid": call_data.get("sid"), "status": call_data.get("status")}}
+    return {
+        "success": True,
+        "data": {"call_sid": call_data.get("sid"), "status": call_data.get("status")},
+    }
 
 
 # ─── DTMF transfer ────────────────────────────────────────────────────────────
+
 
 @router.post("/{chatbot_id}/dtmf", response_class=PlainTextResponse)
 async def dtmf_menu(
@@ -252,9 +263,7 @@ async def dtmf_menu(
         return _twiml_hangup("Configuration error.")
 
     async with AsyncSessionLocal() as db:
-        result = await db.execute(
-            select(ChatbotConfig).where(ChatbotConfig.id == cid)
-        )
+        result = await db.execute(select(ChatbotConfig).where(ChatbotConfig.id == cid))
         bot = result.scalar_one_or_none()
 
     # Load DTMF destinations from bot config (stored as tools config or custom field)
@@ -286,6 +295,7 @@ _call_history: dict[str, list[dict]] = {}
 
 
 # ─── Helpers ──────────────────────────────────────────────────────────────────
+
 
 def _twiml_hangup(message: str) -> PlainTextResponse:
     twiml = f"""<?xml version="1.0" encoding="UTF-8"?>
@@ -324,10 +334,10 @@ def _twiml_transfer_or_hangup(chatbot_id: str) -> PlainTextResponse:
 def _xml_escape(text: str) -> str:
     return (
         text.replace("&", "&amp;")
-            .replace("<", "&lt;")
-            .replace(">", "&gt;")
-            .replace('"', "&quot;")
-            .replace("'", "&apos;")
+        .replace("<", "&lt;")
+        .replace(">", "&gt;")
+        .replace('"', "&quot;")
+        .replace("'", "&apos;")
     )
 
 
@@ -383,15 +393,19 @@ async def _finalise_call(
 
         # Save summary as an internal note on the latest phone conversation
         conv_result = await db.execute(
-            select(Conversation).where(
+            select(Conversation)
+            .where(
                 Conversation.chatbot_id == chatbot_id,
                 Conversation.guest_id == call_sid,
-            ).order_by(Conversation.created_at.desc()).limit(1)
+            )
+            .order_by(Conversation.created_at.desc())
+            .limit(1)
         )
         conv = conv_result.scalar_one_or_none()
         if not conv:
             return
         from app.models.inbox import InternalNote
+
         note = InternalNote(
             conversation_id=conv.id,
             author_id=bot.user_id,
@@ -404,15 +418,22 @@ async def _finalise_call(
         await db.commit()
 
 
-async def _generate_call_summary(bot: ChatbotConfig, transcript: str, duration: int, status: str) -> str:
+async def _generate_call_summary(
+    bot: ChatbotConfig, transcript: str, duration: int, status: str
+) -> str:
     """Use LLM to summarise the call transcript."""
-    llm = LLMRouter(model=bot.default_model or "claude-sonnet-4-6", fallback_model=bot.fallback_model)
+    llm = LLMRouter(
+        model=bot.default_model or "claude-sonnet-4-6", fallback_model=bot.fallback_model
+    )
     prompt = (
         f"Summarise this phone call transcript in 2-3 bullet points. "
         f"Call status: {status}, Duration: {duration} seconds.\n\n{transcript[:3000]}"
     )
     messages = [
-        ChatMessage(role="system", content="You are a helpful assistant that summarises phone call transcripts."),
+        ChatMessage(
+            role="system",
+            content="You are a helpful assistant that summarises phone call transcripts.",
+        ),
         ChatMessage(role="user", content=prompt),
     ]
     try:

@@ -3,6 +3,7 @@ Integration tests: full auth flow — register → login → refresh → logout.
 These hit the full FastAPI stack with an in-memory SQLite DB (no Redis).
 Redis-dependent steps (brute-force, refresh JTI) are marked skip.
 """
+
 import pytest
 
 REGISTER_URL = "/api/auth/register"
@@ -20,7 +21,9 @@ async def test_full_auth_flow(client):
     reg = await client.post(REGISTER_URL, json=creds)
     assert reg.status_code == 201
 
-    login = await client.post(LOGIN_URL, json={"email": creds["email"], "password": creds["password"]})
+    login = await client.post(
+        LOGIN_URL, json={"email": creds["email"], "password": creds["password"]}
+    )
     assert login.status_code == 200
     token = login.json()["data"]["access_token"]
 
@@ -40,13 +43,17 @@ async def test_me_requires_auth(client):
 
 @pytest.mark.asyncio
 async def test_register_validates_email(client):
-    res = await client.post(REGISTER_URL, json={"email": "not-an-email", "password": "Pass123!", "name": "X"})
+    res = await client.post(
+        REGISTER_URL, json={"email": "not-an-email", "password": "Pass123!", "name": "X"}
+    )
     assert res.status_code == 422
 
 
 @pytest.mark.asyncio
 async def test_register_validates_password_length(client):
-    res = await client.post(REGISTER_URL, json={"email": "short@example.com", "password": "abc", "name": "X"})
+    res = await client.post(
+        REGISTER_URL, json={"email": "short@example.com", "password": "abc", "name": "X"}
+    )
     assert res.status_code == 422
 
 

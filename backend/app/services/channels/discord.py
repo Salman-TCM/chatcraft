@@ -9,6 +9,7 @@ Rich payload shapes for send_rich():
   buttons — { "type": "buttons", "content": "...",
                "buttons": [{"label":"..","custom_id":"..","style":1}] }
 """
+
 import httpx
 
 from app.services.channels.base import ChannelSender

@@ -23,8 +23,9 @@ Routes:
   PATCH  /api/v1/comment-automations/{id}
   DELETE /api/v1/comment-automations/{id}
 """
+
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Annotated
 
 from fastapi import APIRouter, HTTPException, Query, status
@@ -47,6 +48,7 @@ router = APIRouter(tags=["broadcast", "social"])
 
 
 # ── Helpers ────────────────────────────────────────────────────────────────────
+
 
 def _campaign_dict(c: BroadcastCampaign) -> dict:
     return {
@@ -123,9 +125,11 @@ async def _get_campaign(campaign_id: uuid.UUID, user_id: uuid.UUID, db) -> Broad
 
 # ── Broadcast CRUD ─────────────────────────────────────────────────────────────
 
+
 @router.get("/api/v1/broadcasts", response_model=dict)
 async def list_campaigns(
-    user: CurrentUser, db: DBSession,
+    user: CurrentUser,
+    db: DBSession,
     channel: str | None = None,
     page: Annotated[int, Query(ge=1)] = 1,
     limit: Annotated[int, Query(ge=1, le=100)] = 30,
@@ -136,9 +140,13 @@ async def list_campaigns(
         q = q.where(BroadcastCampaign.channel == channel)
     q = q.order_by(BroadcastCampaign.created_at.desc()).offset(offset).limit(limit)
     campaigns = (await db.execute(q)).scalars().all()
-    total = (await db.execute(
-        select(func.count()).select_from(BroadcastCampaign).where(BroadcastCampaign.user_id == user.id)
-    )).scalar_one()
+    total = (
+        await db.execute(
+            select(func.count())
+            .select_from(BroadcastCampaign)
+            .where(BroadcastCampaign.user_id == user.id)
+        )
+    ).scalar_one()
     return {"success": True, "data": [_campaign_dict(c) for c in campaigns], "total": total}
 
 
@@ -167,10 +175,14 @@ async def get_campaign(campaign_id: uuid.UUID, user: CurrentUser, db: DBSession)
 
 
 @router.patch("/api/v1/broadcasts/{campaign_id}", response_model=dict)
-async def update_campaign(campaign_id: uuid.UUID, body: UpdateCampaignRequest, user: CurrentUser, db: DBSession) -> dict:
+async def update_campaign(
+    campaign_id: uuid.UUID, body: UpdateCampaignRequest, user: CurrentUser, db: DBSession
+) -> dict:
     campaign = await _get_campaign(campaign_id, user.id, db)
     if campaign.status == "sending":
-        raise HTTPException(status_code=409, detail="Cannot edit a campaign that is currently sending")
+        raise HTTPException(
+            status_code=409, detail="Cannot edit a campaign that is currently sending"
+        )
     updates = body.model_dump(exclude_unset=True)
     scheduled_at_set = "scheduled_at" in updates
     scheduled_at = updates.pop("scheduled_at", None)
@@ -198,23 +210,27 @@ async def send_campaign(campaign_id: uuid.UUID, user: CurrentUser, db: DBSession
         raise HTTPException(status_code=409, detail=f"Campaign already {campaign.status}")
 
     # Scheduled: mark scheduled
-    if campaign.scheduled_at and campaign.scheduled_at > datetime.now(timezone.utc):
+    if campaign.scheduled_at and campaign.scheduled_at > datetime.now(UTC):
         campaign.status = "scheduled"
         await db.commit()
-        return {"success": True, "data": {"status": "scheduled", "scheduled_at": campaign.scheduled_at.isoformat()}}
+        return {
+            "success": True,
+            "data": {"status": "scheduled", "scheduled_at": campaign.scheduled_at.isoformat()},
+        }
 
     # Send now
     campaign.status = "sending"
     await db.commit()
 
     from app.services.broadcast_sender import deliver
+
     try:
         sent, failed = await deliver(campaign, db)
         campaign.sent_count = sent
         campaign.failed_count = failed
         campaign.status = "sent"
-        campaign.sent_at = datetime.now(timezone.utc)
-    except Exception as exc:
+        campaign.sent_at = datetime.now(UTC)
+    except Exception:
         campaign.status = "failed"
         campaign.failed_count += 1
 
@@ -223,7 +239,9 @@ async def send_campaign(campaign_id: uuid.UUID, user: CurrentUser, db: DBSession
 
 
 @router.post("/api/v1/broadcasts/{campaign_id}/test", response_model=dict)
-async def test_campaign(campaign_id: uuid.UUID, body: TestCampaignRequest, user: CurrentUser, db: DBSession) -> dict:
+async def test_campaign(
+    campaign_id: uuid.UUID, body: TestCampaignRequest, user: CurrentUser, db: DBSession
+) -> dict:
     """Send a test message to a single address/phone/chat ID."""
     campaign = await _get_campaign(campaign_id, user.id, db)
     to: str = body.to.strip()
@@ -235,19 +253,25 @@ async def test_campaign(campaign_id: uuid.UUID, body: TestCampaignRequest, user:
 
     try:
         if campaign.channel == "email":
-            from app.services.channels.email_sender import EmailSender
-            from app.models.channel_integration import ChannelIntegration
             from sqlalchemy import select as sel
+
+            from app.models.channel_integration import ChannelIntegration
+            from app.services.channels.email_sender import EmailSender
+
             r = await db.execute(
                 sel(ChannelIntegration).where(
-                    ChannelIntegration.user_id == user.id if hasattr(ChannelIntegration, "user_id") else True,
+                    ChannelIntegration.user_id == user.id
+                    if hasattr(ChannelIntegration, "user_id")
+                    else True,
                     ChannelIntegration.channel == "email",
                     ChannelIntegration.is_active.is_(True),
                 )
             )
             integ = r.scalars().first()
             if not integ:
-                raise HTTPException(status_code=400, detail="No active email integration configured")
+                raise HTTPException(
+                    status_code=400, detail="No active email integration configured"
+                )
             sender = EmailSender(integ.config)
             html = campaign.html_content
             if html:
@@ -259,8 +283,10 @@ async def test_campaign(campaign_id: uuid.UUID, body: TestCampaignRequest, user:
                 body=html or msg,
             )
         elif campaign.channel == "sms":
-            from app.models.channel_integration import ChannelIntegration
             from sqlalchemy import select as sel
+
+            from app.models.channel_integration import ChannelIntegration
+
             r = await db.execute(
                 sel(ChannelIntegration).where(
                     ChannelIntegration.channel == "sms",
@@ -271,9 +297,12 @@ async def test_campaign(campaign_id: uuid.UUID, body: TestCampaignRequest, user:
             if not integ:
                 raise HTTPException(status_code=400, detail="No active SMS integration")
             from app.services.channels.sms import SMSSender
+
             await SMSSender(integ.config).send(to, msg)
         else:
-            raise HTTPException(status_code=422, detail=f"Test send not supported for {campaign.channel} channel")
+            raise HTTPException(
+                status_code=422, detail=f"Test send not supported for {campaign.channel} channel"
+            )
     except HTTPException:
         raise
     except Exception as exc:
@@ -301,10 +330,12 @@ async def campaign_stats(campaign_id: uuid.UUID, user: CurrentUser, db: DBSessio
 
 # ── Social accounts ────────────────────────────────────────────────────────────
 
+
 @router.get("/api/v1/social/accounts", response_model=dict)
 async def list_accounts(user: CurrentUser, db: DBSession) -> dict:
     result = await db.execute(
-        select(SocialAccount).where(SocialAccount.user_id == user.id)
+        select(SocialAccount)
+        .where(SocialAccount.user_id == user.id)
         .order_by(SocialAccount.created_at.desc())
     )
     return {"success": True, "data": [_account_dict(a) for a in result.scalars().all()]}
@@ -341,21 +372,28 @@ async def disconnect_account(account_id: uuid.UUID, user: CurrentUser, db: DBSes
 
 # ── Social posts ───────────────────────────────────────────────────────────────
 
+
 @router.get("/api/v1/social/posts", response_model=dict)
 async def list_posts(
-    user: CurrentUser, db: DBSession,
+    user: CurrentUser,
+    db: DBSession,
     page: Annotated[int, Query(ge=1)] = 1,
     limit: Annotated[int, Query(ge=1, le=100)] = 30,
 ) -> dict:
     offset = (page - 1) * limit
     result = await db.execute(
-        select(SocialPost).where(SocialPost.user_id == user.id)
-        .order_by(SocialPost.created_at.desc()).offset(offset).limit(limit)
+        select(SocialPost)
+        .where(SocialPost.user_id == user.id)
+        .order_by(SocialPost.created_at.desc())
+        .offset(offset)
+        .limit(limit)
     )
     posts = result.scalars().all()
-    total = (await db.execute(
-        select(func.count()).select_from(SocialPost).where(SocialPost.user_id == user.id)
-    )).scalar_one()
+    total = (
+        await db.execute(
+            select(func.count()).select_from(SocialPost).where(SocialPost.user_id == user.id)
+        )
+    ).scalar_one()
     return {"success": True, "data": [_post_dict(p) for p in posts], "total": total}
 
 
@@ -391,10 +429,10 @@ async def create_post(body: CreatePostRequest, user: CurrentUser, db: DBSession)
                 errors.append(str(e))
         post.platform_post_ids = platform_post_ids
         post.status = "published" if platform_post_ids else "failed"
-        post.published_at = datetime.now(timezone.utc) if platform_post_ids else None
+        post.published_at = datetime.now(UTC) if platform_post_ids else None
         if errors:
             post.error_log = "; ".join(errors)
-    elif scheduled_at and scheduled_at > datetime.now(timezone.utc):
+    elif scheduled_at and scheduled_at > datetime.now(UTC):
         post.status = "scheduled"
 
     await db.commit()
@@ -417,6 +455,7 @@ async def generate_caption(body: GenerateCaptionRequest, user: CurrentUser, db: 
     prompt = body.prompt.strip()
 
     from app.services.llm import ChatMessage, LLMRouter
+
     llm = LLMRouter(model=body.model)
     messages = [
         ChatMessage(
@@ -435,17 +474,23 @@ async def generate_caption(body: GenerateCaptionRequest, user: CurrentUser, db: 
 
 # ── Comment automations ────────────────────────────────────────────────────────
 
+
 @router.get("/api/v1/comment-automations", response_model=dict)
 async def list_comment_automations(user: CurrentUser, db: DBSession) -> dict:
     result = await db.execute(
-        select(CommentAutomation).where(CommentAutomation.user_id == user.id)
+        select(CommentAutomation)
+        .where(CommentAutomation.user_id == user.id)
         .order_by(CommentAutomation.created_at.desc())
     )
     return {"success": True, "data": [_ca_dict(ca) for ca in result.scalars().all()]}
 
 
-@router.post("/api/v1/comment-automations", response_model=dict, status_code=status.HTTP_201_CREATED)
-async def create_comment_automation(body: CreateCommentAutomationRequest, user: CurrentUser, db: DBSession) -> dict:
+@router.post(
+    "/api/v1/comment-automations", response_model=dict, status_code=status.HTTP_201_CREATED
+)
+async def create_comment_automation(
+    body: CreateCommentAutomationRequest, user: CurrentUser, db: DBSession
+) -> dict:
     ca = CommentAutomation(
         user_id=user.id,
         platform=body.platform,
@@ -467,7 +512,9 @@ async def create_comment_automation(body: CreateCommentAutomationRequest, user: 
 
 
 @router.patch("/api/v1/comment-automations/{ca_id}", response_model=dict)
-async def update_comment_automation(ca_id: uuid.UUID, body: UpdateCommentAutomationRequest, user: CurrentUser, db: DBSession) -> dict:
+async def update_comment_automation(
+    ca_id: uuid.UUID, body: UpdateCommentAutomationRequest, user: CurrentUser, db: DBSession
+) -> dict:
     ca = await db.get(CommentAutomation, ca_id)
     if not ca or ca.user_id != user.id:
         raise HTTPException(status_code=404, detail="Not found")
@@ -490,7 +537,10 @@ async def delete_comment_automation(ca_id: uuid.UUID, user: CurrentUser, db: DBS
 
 # ── Platform publish helpers ───────────────────────────────────────────────────
 
-async def _publish_to_platform(account: SocialAccount, content: str, image_url: str | None) -> str | None:
+
+async def _publish_to_platform(
+    account: SocialAccount, content: str, image_url: str | None
+) -> str | None:
     """Publish to the given social account and return the platform post ID."""
     import httpx
 
@@ -501,7 +551,9 @@ async def _publish_to_platform(account: SocialAccount, content: str, image_url: 
         if image_url:
             payload["link"] = image_url
         async with httpx.AsyncClient(timeout=15) as client:
-            resp = await client.post(f"https://graph.facebook.com/v19.0/{page_id}/feed", data=payload)
+            resp = await client.post(
+                f"https://graph.facebook.com/v19.0/{page_id}/feed", data=payload
+            )
         resp.raise_for_status()
         return resp.json().get("id")
 
@@ -527,8 +579,15 @@ async def _publish_to_platform(account: SocialAccount, content: str, image_url: 
             return r2.json().get("id")
 
     elif account.platform == "x":
-        import base64, hashlib, hmac, os, time, urllib.parse
+        import base64
+        import hashlib
+        import hmac
+        import os
+        import time
+        import urllib.parse
+
         from app.core.config import settings
+
         # OAuth 1.0a
         oauth_params = {
             "oauth_consumer_key": settings.x_api_key,
@@ -540,14 +599,23 @@ async def _publish_to_platform(account: SocialAccount, content: str, image_url: 
         }
         url = "https://api.twitter.com/2/tweets"
         base_params = {**oauth_params}
-        param_str = "&".join(f"{urllib.parse.quote(k)}={urllib.parse.quote(v)}" for k, v in sorted(base_params.items()))
+        param_str = "&".join(
+            f"{urllib.parse.quote(k)}={urllib.parse.quote(v)}"
+            for k, v in sorted(base_params.items())
+        )
         base_str = f"POST&{urllib.parse.quote(url)}&{urllib.parse.quote(param_str)}"
         signing_key = f"{urllib.parse.quote(settings.x_api_secret)}&{urllib.parse.quote(account.page_access_token or '')}"
-        sig = base64.b64encode(hmac.new(signing_key.encode(), base_str.encode(), hashlib.sha1).digest()).decode()
+        sig = base64.b64encode(
+            hmac.new(signing_key.encode(), base_str.encode(), hashlib.sha1).digest()
+        ).decode()
         oauth_params["oauth_signature"] = sig
-        auth_header = "OAuth " + ", ".join(f'{k}="{urllib.parse.quote(v)}"' for k, v in sorted(oauth_params.items()))
+        auth_header = "OAuth " + ", ".join(
+            f'{k}="{urllib.parse.quote(v)}"' for k, v in sorted(oauth_params.items())
+        )
         async with httpx.AsyncClient(timeout=15) as client:
-            resp = await client.post(url, json={"text": content}, headers={"Authorization": auth_header})
+            resp = await client.post(
+                url, json={"text": content}, headers={"Authorization": auth_header}
+            )
         resp.raise_for_status()
         return resp.json().get("data", {}).get("id")
 

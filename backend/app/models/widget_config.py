@@ -15,7 +15,7 @@ class WidgetConfig(TimestampMixin, Base):
         UUID(as_uuid=True),
         ForeignKey("chatbot_configs.id", ondelete="CASCADE"),
         nullable=False,
-        unique=True,   # one widget config per chatbot
+        unique=True,  # one widget config per chatbot
         index=True,
     )
 

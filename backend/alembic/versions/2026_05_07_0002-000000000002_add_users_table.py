@@ -6,10 +6,10 @@ Create Date: 2026-05-07 00:02:00.000000
 """
 
 import sqlalchemy as sa
-from alembic import op
 from sqlalchemy.dialects.postgresql import UUID
 
-from app.models.base import set_updated_at_trigger, drop_updated_at_trigger
+from alembic import op
+from app.models.base import drop_updated_at_trigger, set_updated_at_trigger
 
 revision: str = "000000000002"
 down_revision: str = "000000000001"
@@ -81,25 +81,19 @@ def upgrade() -> None:
 
     # Unique constraints
     op.create_unique_constraint("uq_users_email", "users", ["email"])
-    op.create_unique_constraint(
-        "uq_users_stripe_customer_id", "users", ["stripe_customer_id"]
-    )
+    op.create_unique_constraint("uq_users_stripe_customer_id", "users", ["stripe_customer_id"])
     op.create_unique_constraint("uq_users_google_id", "users", ["google_id"])
 
     # Indexes for frequent lookups
     op.create_index("ix_users_email", "users", ["email"])
-    op.create_index(
-        "ix_users_stripe_customer_id", "users", ["stripe_customer_id"]
-    )
+    op.create_index("ix_users_stripe_customer_id", "users", ["stripe_customer_id"])
     op.create_index("ix_users_google_id", "users", ["google_id"])
     op.create_index(
         "ix_users_email_verification_token",
         "users",
         ["email_verification_token"],
     )
-    op.create_index(
-        "ix_users_password_reset_token", "users", ["password_reset_token"]
-    )
+    op.create_index("ix_users_password_reset_token", "users", ["password_reset_token"])
 
     # Auto-update updated_at on every row change
     op.execute(set_updated_at_trigger("users"))

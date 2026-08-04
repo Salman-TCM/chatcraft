@@ -5,11 +5,8 @@ These tests cover the pure-Python BM25 and context-building logic only —
 no database or embedding calls. Async DB tests would require a live pgvector
 instance which is handled in integration tests.
 """
-import math
-import uuid
-from collections import Counter
 
-import pytest
+import uuid
 
 from app.services.kb.rag import (
     RELEVANCE_THRESHOLD,
@@ -19,8 +16,8 @@ from app.services.kb.rag import (
     _tokenise,
 )
 
-
 # ── _tokenise ─────────────────────────────────────────────────────────────────
+
 
 def test_tokenise_basic():
     tokens = _tokenise("Hello, World! This is a test.")
@@ -42,6 +39,7 @@ def test_tokenise_lowercases():
 
 
 # ── _bm25_rerank ──────────────────────────────────────────────────────────────
+
 
 def _make_chunk(content: str, similarity: float = 0.85) -> RetrievedChunk:
     return RetrievedChunk(
@@ -100,6 +98,7 @@ def test_bm25_idf_penalises_common_terms():
 
 # ── _build_context ────────────────────────────────────────────────────────────
 
+
 def test_build_context_single_chunk():
     chunk = _make_chunk("This is a document about AI.")
     ctx = _build_context([chunk])
@@ -145,6 +144,7 @@ def test_build_context_strips_whitespace():
 
 
 # ── Relevance threshold ───────────────────────────────────────────────────────
+
 
 def test_relevance_threshold_is_positive():
     assert 0 < RELEVANCE_THRESHOLD < 1

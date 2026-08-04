@@ -6,6 +6,7 @@ inside normal text by wrapping JSON in these delimiters. The parser splits the
 response into alternating text and rich-block segments so the frontend can render
 them appropriately.
 """
+
 import json
 import re
 
@@ -39,6 +40,7 @@ def embed_youtube_links(text: str) -> str:
     Wrap bare YouTube URLs so the frontend knows to render them as embeds.
     Replaces the URL with a <<<RICH>>> embed block inline.
     """
+
     def _replace(m: re.Match) -> str:
         url = m.group(1)
         block = json.dumps({"type": "youtube", "url": url})
@@ -61,6 +63,7 @@ def process_ai_response(text: str) -> dict:
 
 
 # ─── Rich block schema helpers ───────────────────────────────────────────────
+
 
 def make_carousel(cards: list[dict]) -> dict:
     """cards: [{title, subtitle, image_url, buttons: [{label, action, value}]}]"""

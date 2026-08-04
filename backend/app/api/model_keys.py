@@ -7,7 +7,6 @@ DELETE /api/settings/model-keys/{provider} — remove a provider key
 POST   /api/settings/model-keys/{provider}/test — verify key works
 GET    /api/settings/model-keys/providers  — list all supported providers + their models
 """
-import uuid
 
 from fastapi import APIRouter, HTTPException, status
 from pydantic import BaseModel
@@ -15,27 +14,50 @@ from sqlalchemy import select
 
 from app.core.dependencies import CurrentUser, DBSession
 from app.core.plan_limits import is_model_allowed
-from app.models.user_api_key import UserApiKey, PROVIDERS
-from app.services.llm.key_store import encrypt_key, decrypt_key
+from app.models.user_api_key import PROVIDERS, UserApiKey
+from app.services.llm.key_store import decrypt_key, encrypt_key
 
 router = APIRouter(prefix="/api/settings/model-keys", tags=["model-keys"])
 
 PROVIDER_META = {
     "anthropic": {
         "label": "Anthropic",
-        "models": ["claude-sonnet-5", "claude-opus-4-8", "claude-fable-5", "claude-sonnet-4-6", "claude-opus-4-7", "claude-haiku-4-5"],
+        "models": [
+            "claude-sonnet-5",
+            "claude-opus-4-8",
+            "claude-fable-5",
+            "claude-sonnet-4-6",
+            "claude-opus-4-7",
+            "claude-haiku-4-5",
+        ],
         "key_hint": "sk-ant-...",
         "docs_url": "https://console.anthropic.com/settings/keys",
     },
     "openai": {
         "label": "OpenAI",
-        "models": ["gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna", "gpt-4o", "gpt-4o-mini", "gpt-5", "gpt-5-mini"],
+        "models": [
+            "gpt-5.6-sol",
+            "gpt-5.6-terra",
+            "gpt-5.6-luna",
+            "gpt-4o",
+            "gpt-4o-mini",
+            "gpt-5",
+            "gpt-5-mini",
+        ],
         "key_hint": "sk-...",
         "docs_url": "https://platform.openai.com/api-keys",
     },
     "google": {
         "label": "Google AI (Gemini)",
-        "models": ["gemini-3.1-pro", "gemini-3.6-flash", "gemini-2.5-pro", "gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-pro", "gemini-1.5-flash"],
+        "models": [
+            "gemini-3.1-pro",
+            "gemini-3.6-flash",
+            "gemini-2.5-pro",
+            "gemini-2.5-flash",
+            "gemini-2.0-flash",
+            "gemini-1.5-pro",
+            "gemini-1.5-flash",
+        ],
         "key_hint": "AIza...",
         "docs_url": "https://aistudio.google.com/app/apikey",
     },
@@ -47,7 +69,13 @@ PROVIDER_META = {
     },
     "groq": {
         "label": "Groq",
-        "models": ["openai/gpt-oss-120b", "openai/gpt-oss-20b", "qwen/qwen3.6-27b", "llama-3.3-70b-versatile", "llama-3.1-8b-instant"],
+        "models": [
+            "openai/gpt-oss-120b",
+            "openai/gpt-oss-20b",
+            "qwen/qwen3.6-27b",
+            "llama-3.3-70b-versatile",
+            "llama-3.1-8b-instant",
+        ],
         "key_hint": "gsk_...",
         "docs_url": "https://console.groq.com/keys",
     },
@@ -59,7 +87,14 @@ PROVIDER_META = {
     },
     "xai": {
         "label": "xAI (Grok)",
-        "models": ["grok-4.5", "grok-4.3", "grok-3", "grok-3-fast", "grok-3-mini", "grok-3-mini-fast"],
+        "models": [
+            "grok-4.5",
+            "grok-4.3",
+            "grok-3",
+            "grok-3-fast",
+            "grok-3-mini",
+            "grok-3-mini-fast",
+        ],
         "key_hint": "xai-...",
         "docs_url": "https://console.x.ai/",
     },
@@ -88,9 +123,7 @@ async def list_providers(user: CurrentUser) -> dict:
 
 @router.get("")
 async def list_keys(user: CurrentUser, db: DBSession) -> dict:
-    result = await db.execute(
-        select(UserApiKey).where(UserApiKey.user_id == user.id)
-    )
+    result = await db.execute(select(UserApiKey).where(UserApiKey.user_id == user.id))
     rows = result.scalars().all()
     configured = {row.provider for row in rows}
     return {
@@ -111,7 +144,11 @@ async def upsert_key(body: UpsertKeyRequest, user: CurrentUser, db: DBSession) -
     if body.provider not in PROVIDERS:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail={"success": False, "error": f"Unknown provider '{body.provider}'", "code": "INVALID_PROVIDER"},
+            detail={
+                "success": False,
+                "error": f"Unknown provider '{body.provider}'",
+                "code": "INVALID_PROVIDER",
+            },
         )
     if not body.api_key.strip():
         raise HTTPException(
@@ -170,7 +207,11 @@ async def test_key(provider: str, user: CurrentUser, db: DBSession) -> dict:
     if not row:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail={"success": False, "error": "No key saved for this provider", "code": "NOT_FOUND"},
+            detail={
+                "success": False,
+                "error": "No key saved for this provider",
+                "code": "NOT_FOUND",
+            },
         )
 
     try:
@@ -181,17 +222,20 @@ async def test_key(provider: str, user: CurrentUser, db: DBSession) -> dict:
     try:
         if provider == "anthropic":
             import anthropic as _sdk
+
             client = _sdk.AsyncAnthropic(api_key=api_key)
             await client.models.list()
 
         elif provider == "openai":
             from openai import AsyncOpenAI
+
             client = AsyncOpenAI(api_key=api_key)
             await client.models.list()
 
         elif provider == "google":
             from google import genai as _genai
             from google.genai import types as _gtypes
+
             _client = _genai.Client(api_key=api_key)
             await _client.aio.models.generate_content(
                 model="gemini-1.5-flash",
@@ -207,6 +251,7 @@ async def test_key(provider: str, user: CurrentUser, db: DBSession) -> dict:
                 "xai": "https://api.x.ai/v1",
             }
             from openai import AsyncOpenAI
+
             client = AsyncOpenAI(api_key=api_key, base_url=base_urls[provider])
             await client.models.list()
 

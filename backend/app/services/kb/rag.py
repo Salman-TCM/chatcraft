@@ -13,6 +13,7 @@ Usage (inside the chat API):
     # context → injected into SystemPromptContext.knowledge_context
     # sources → optionally appended to the SSE done event for debug mode
 """
+
 from __future__ import annotations
 
 import math
@@ -26,7 +27,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.knowledge_base import (
     DocumentStatus,
-    KnowledgeBaseChunk,
     KnowledgeBaseDocument,
 )
 from app.services.kb.embedder import embed_texts
@@ -155,6 +155,7 @@ class RAGService:
 
 
 # ── BM25 helpers ──────────────────────────────────────────────────────────────
+
 
 def _tokenise(text: str) -> list[str]:
     return re.findall(r"\b\w+\b", text.lower())

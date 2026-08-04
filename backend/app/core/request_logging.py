@@ -13,9 +13,7 @@ _SKIP_PATHS = {"/health/live", "/health/ready"}
 class RequestLoggingMiddleware(BaseHTTPMiddleware):
     """Log every HTTP request with method, path, status, duration, and correlation ID."""
 
-    async def dispatch(
-        self, request: Request, call_next: RequestResponseEndpoint
-    ) -> Response:
+    async def dispatch(self, request: Request, call_next: RequestResponseEndpoint) -> Response:
         if request.url.path in _SKIP_PATHS:
             return await call_next(request)
 

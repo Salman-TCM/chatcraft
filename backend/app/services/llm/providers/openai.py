@@ -1,11 +1,11 @@
-from decimal import Decimal
-from typing import AsyncIterator
+from collections.abc import AsyncIterator
 
 from openai import AsyncOpenAI
 
 from app.core.config import settings
 from app.services.llm.base import ChatMessage, LLMProvider, LLMResponse, StreamChunk
 from app.services.llm.costs import calculate_cost
+
 
 def _to_oai(messages: list[ChatMessage]) -> list[dict]:
     return [{"role": m.role, "content": m.content} for m in messages]

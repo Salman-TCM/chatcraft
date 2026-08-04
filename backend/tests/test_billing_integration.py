@@ -7,15 +7,17 @@ Tests:
   - /billing/status returns current plan
   - /billing/portal requires auth
 """
+
 import json
+
 import pytest
 
 REGISTER_URL = "/api/auth/register"
-LOGIN_URL    = "/api/auth/login"
+LOGIN_URL = "/api/auth/login"
 CHECKOUT_URL = "/api/billing/checkout"
-PORTAL_URL   = "/api/billing/portal"
-STATUS_URL   = "/api/billing/status"
-WEBHOOK_URL  = "/api/billing/webhook"
+PORTAL_URL = "/api/billing/portal"
+STATUS_URL = "/api/billing/status"
+WEBHOOK_URL = "/api/billing/webhook"
 
 
 async def _auth_headers(client, email: str = "billing@example.com") -> dict:
@@ -27,6 +29,7 @@ async def _auth_headers(client, email: str = "billing@example.com") -> dict:
 
 
 # ── Auth guards ───────────────────────────────────────────────────────────────
+
 
 @pytest.mark.asyncio
 async def test_checkout_requires_auth(client):
@@ -48,6 +51,7 @@ async def test_status_requires_auth(client):
 
 # ── Status endpoint ───────────────────────────────────────────────────────────
 
+
 @pytest.mark.asyncio
 async def test_billing_status_new_user_is_free(client):
     headers = await _auth_headers(client, "billing_free@example.com")
@@ -61,6 +65,7 @@ async def test_billing_status_new_user_is_free(client):
 
 
 # ── Checkout validation ───────────────────────────────────────────────────────
+
 
 @pytest.mark.asyncio
 async def test_checkout_with_no_stripe_key_returns_error(client):
@@ -77,13 +82,16 @@ async def test_checkout_with_no_stripe_key_returns_error(client):
 
 # ── Webhook ───────────────────────────────────────────────────────────────────
 
+
 @pytest.mark.asyncio
 async def test_webhook_without_signature_header_rejected(client):
     """Stripe webhook without signature should be rejected with 400."""
-    event_payload = json.dumps({
-        "type": "customer.subscription.created",
-        "data": {"object": {}},
-    })
+    event_payload = json.dumps(
+        {
+            "type": "customer.subscription.created",
+            "data": {"object": {}},
+        }
+    )
     res = await client.post(
         WEBHOOK_URL,
         content=event_payload,
@@ -95,10 +103,12 @@ async def test_webhook_without_signature_header_rejected(client):
 @pytest.mark.asyncio
 async def test_webhook_with_invalid_signature_rejected(client):
     """Stripe webhook with wrong signature should be rejected."""
-    event_payload = json.dumps({
-        "type": "customer.subscription.updated",
-        "data": {"object": {}},
-    })
+    event_payload = json.dumps(
+        {
+            "type": "customer.subscription.updated",
+            "data": {"object": {}},
+        }
+    )
     res = await client.post(
         WEBHOOK_URL,
         content=event_payload,
@@ -111,6 +121,7 @@ async def test_webhook_with_invalid_signature_rejected(client):
 
 
 # ── Role after subscription ───────────────────────────────────────────────────
+
 
 @pytest.mark.asyncio
 async def test_free_user_has_free_role(client):

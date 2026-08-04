@@ -2,6 +2,7 @@
 CRM API — Contacts, Tags, Custom Fields, Pipelines.
 All routes are under /api/v1/ to match the API reference.
 """
+
 import uuid
 from typing import Annotated
 
@@ -47,6 +48,7 @@ router = APIRouter(prefix="/api/v1", tags=["crm"])
 
 # ── Helper ────────────────────────────────────────────────────────────────────
 
+
 async def _get_contact(contact_id: uuid.UUID, user_id: uuid.UUID, db: AsyncSession) -> Contact:
     result = await db.execute(
         select(Contact)
@@ -74,6 +76,7 @@ async def _get_pipeline(pipeline_id: uuid.UUID, user_id: uuid.UUID, db: AsyncSes
 # ══════════════════════════════════════════════════════════════════════════════
 # CONTACTS
 # ══════════════════════════════════════════════════════════════════════════════
+
 
 @router.get("/contacts", response_model=dict)
 async def list_contacts(
@@ -173,7 +176,9 @@ async def delete_contact(contact_id: uuid.UUID, user: CurrentUser, db: DBSession
     return {"success": True, "data": None}
 
 
-@router.post("/contacts/{contact_id}/tags", response_model=dict, status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/contacts/{contact_id}/tags", response_model=dict, status_code=status.HTTP_201_CREATED
+)
 async def add_tags_to_contact(
     contact_id: uuid.UUID,
     body: ContactTagsAdd,
@@ -188,12 +193,12 @@ async def add_tags_to_contact(
     for tag_id in tag_ids:
         if tag_id in existing_tag_ids:
             continue
-        tag_result = await db.execute(
-            select(Tag).where(Tag.id == tag_id, Tag.user_id == user.id)
-        )
+        tag_result = await db.execute(select(Tag).where(Tag.id == tag_id, Tag.user_id == user.id))
         tag = tag_result.scalar_one_or_none()
         if not tag:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Tag {tag_id} not found")
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND, detail=f"Tag {tag_id} not found"
+            )
         db.add(ContactTag(contact_id=contact_id, tag_id=tag_id))
 
     await db.commit()
@@ -281,11 +286,10 @@ async def update_contact_fields(
 # TAGS
 # ══════════════════════════════════════════════════════════════════════════════
 
+
 @router.get("/tags", response_model=dict)
 async def list_tags(user: CurrentUser, db: DBSession) -> dict:
-    result = await db.execute(
-        select(Tag).where(Tag.user_id == user.id).order_by(Tag.name)
-    )
+    result = await db.execute(select(Tag).where(Tag.user_id == user.id).order_by(Tag.name))
     tags = result.scalars().all()
     return {"success": True, "data": [TagResponse.model_validate(t) for t in tags]}
 
@@ -338,6 +342,7 @@ async def delete_tag(tag_id: uuid.UUID, user: CurrentUser, db: DBSession) -> dic
 # ══════════════════════════════════════════════════════════════════════════════
 # CUSTOM FIELDS
 # ══════════════════════════════════════════════════════════════════════════════
+
 
 @router.get("/custom-fields", response_model=dict)
 async def list_custom_fields(
@@ -434,7 +439,14 @@ async def create_pipeline(body: PipelineCreate, user: CurrentUser, db: DBSession
 
     if body.stages:
         for i, s in enumerate(body.stages):
-            db.add(PipelineStage(pipeline_id=pipeline.id, name=s.name, color=s.color, order=s.order if s.order else i))
+            db.add(
+                PipelineStage(
+                    pipeline_id=pipeline.id,
+                    name=s.name,
+                    color=s.color,
+                    order=s.order if s.order else i,
+                )
+            )
     else:
         for s in _DEFAULT_STAGES:
             db.add(PipelineStage(pipeline_id=pipeline.id, **s))
@@ -477,7 +489,11 @@ async def delete_pipeline(pipeline_id: uuid.UUID, user: CurrentUser, db: DBSessi
 async def list_pipeline_stages(pipeline_id: uuid.UUID, user: CurrentUser, db: DBSession) -> dict:
     pipeline = await _get_pipeline(pipeline_id, user.id, db)
     from app.schemas.crm import PipelineStageResponse
-    return {"success": True, "data": [PipelineStageResponse.model_validate(s) for s in pipeline.stages]}
+
+    return {
+        "success": True,
+        "data": [PipelineStageResponse.model_validate(s) for s in pipeline.stages],
+    }
 
 
 @router.get("/pipelines/{pipeline_id}/deals", response_model=dict)
@@ -501,7 +517,9 @@ async def list_pipeline_deals(
     return {"success": True, "data": [DealResponse.model_validate(d) for d in deals]}
 
 
-@router.post("/pipelines/{pipeline_id}/deals", response_model=dict, status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/pipelines/{pipeline_id}/deals", response_model=dict, status_code=status.HTTP_201_CREATED
+)
 async def add_deal(
     pipeline_id: uuid.UUID,
     body: DealCreate,
@@ -564,7 +582,9 @@ async def update_deal(
     if body.stage_id is not None:
         stage_ids = {s.id for s in pipeline.stages}
         if body.stage_id not in stage_ids:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Stage not in pipeline")
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST, detail="Stage not in pipeline"
+            )
         deal.stage_id = body.stage_id
 
     if body.notes is not None:
@@ -611,6 +631,7 @@ async def remove_deal(
 
 # ── Contact messaging ─────────────────────────────────────────────────────────
 
+
 @router.post("/contacts/{contact_id}/messages", response_model=dict, status_code=201)
 async def send_message_to_contact(
     contact_id: uuid.UUID,
@@ -627,7 +648,6 @@ async def send_message_to_contact(
 
     from app.models.conversation import Conversation
     from app.models.message import Message, MessageRole
-    from datetime import datetime, timezone
 
     # Find an existing conversation for this contact
     stmt = select(Conversation).where(Conversation.contact_id == contact_id)
@@ -640,6 +660,7 @@ async def send_message_to_contact(
     if not conv:
         # Create a new conversation
         from app.models.chatbot_config import ChatbotConfig
+
         if not chatbot_id:
             # Find any chatbot owned by user
             bot_result = await db.execute(
@@ -670,6 +691,7 @@ async def send_message_to_contact(
     try:
         from app.models.channel_integration import ChannelIntegration
         from app.services.channels import get_sender
+
         ci_result = await db.execute(
             select(ChannelIntegration).where(
                 ChannelIntegration.chatbot_id == conv.chatbot_id,

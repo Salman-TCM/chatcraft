@@ -1,3 +1,4 @@
+from datetime import UTC
 from typing import Annotated
 
 import redis.asyncio as aioredis
@@ -28,7 +29,9 @@ async def get_current_user(
 ):
     """Validate JWT (or API token) and return the authenticated User. 401 on any failure."""
     import hashlib
+
     from sqlalchemy import select
+
     from app.models.user import User
 
     exc = HTTPException(
@@ -41,21 +44,24 @@ async def get_current_user(
 
     # ── API token path (starts with "cc_") ──────────────────────────────────
     if token.startswith("cc_"):
-        from datetime import datetime, timezone
+        from datetime import datetime
+
         from app.models.api_token import ApiToken
 
         token_hash = hashlib.sha256(token.encode()).hexdigest()
-        result = await db.execute(
-            select(ApiToken).where(ApiToken.token_hash == token_hash)
-        )
+        result = await db.execute(select(ApiToken).where(ApiToken.token_hash == token_hash))
         api_token = result.scalar_one_or_none()
         if not api_token:
             raise exc
 
-        if api_token.expires_at and api_token.expires_at < datetime.now(timezone.utc):
+        if api_token.expires_at and api_token.expires_at < datetime.now(UTC):
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
-                detail={"success": False, "error": "API token has expired", "code": "TOKEN_EXPIRED"},
+                detail={
+                    "success": False,
+                    "error": "API token has expired",
+                    "code": "TOKEN_EXPIRED",
+                },
                 headers={"WWW-Authenticate": "Bearer"},
             )
 
@@ -65,7 +71,7 @@ async def get_current_user(
 
         # Update last_used_at asynchronously (best-effort; ignore failures)
         try:
-            api_token.last_used_at = datetime.now(timezone.utc)
+            api_token.last_used_at = datetime.now(UTC)
             await db.commit()
         except Exception:
             await db.rollback()
@@ -105,6 +111,7 @@ CurrentUser = Annotated["User", Depends(get_current_user)]  # type: ignore[name-
 # ---------------------------------------------------------------------------
 # Role-based access control
 # ---------------------------------------------------------------------------
+
 
 def require_role(*allowed_roles: str):
     """
@@ -147,6 +154,7 @@ RequireSuperAdmin = Depends(require_role("superadmin"))
 # Feature-level access control
 # ---------------------------------------------------------------------------
 
+
 def require_feature(feature: str):
     """
     Dependency factory — enforces that the authenticated user has access to a
@@ -182,7 +190,7 @@ def require_feature(feature: str):
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail={
                     "success": False,
-                    "error": f"Your account does not have access to this feature",
+                    "error": "Your account does not have access to this feature",
                     "code": "FEATURE_RESTRICTED",
                     "feature": feature,
                 },

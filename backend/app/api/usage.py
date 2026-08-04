@@ -4,12 +4,11 @@ Usage API
   GET /api/usage/history  — 30-day per-day breakdown
   GET /api/usage/cost     — cost breakdown by model/service
 """
-import uuid
-from datetime import date, datetime, timedelta, timezone
-from decimal import Decimal
 
-from fastapi import APIRouter, HTTPException, status
-from sqlalchemy import func, select, text
+from datetime import UTC, date, datetime, timedelta
+
+from fastapi import APIRouter
+from sqlalchemy import func, select
 
 from app.core.dependencies import CurrentUser, DBSession
 from app.models.usage_log import UsageLog
@@ -20,7 +19,7 @@ router = APIRouter(prefix="/api/usage", tags=["usage"])
 @router.get("/summary", response_model=dict)
 async def get_summary(user: CurrentUser, db: DBSession) -> dict:
     """Return current-month usage totals for the authenticated user."""
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
 
     result = await db.execute(
@@ -63,14 +62,18 @@ async def get_history(user: CurrentUser, db: DBSession) -> dict:
     result = await db.execute(
         select(
             func.date(UsageLog.created_at).label("day"),
-            func.coalesce(func.sum(UsageLog.input_tokens + UsageLog.output_tokens), 0).label("tokens"),
+            func.coalesce(func.sum(UsageLog.input_tokens + UsageLog.output_tokens), 0).label(
+                "tokens"
+            ),
             func.coalesce(func.sum(UsageLog.tts_chars), 0).label("tts_chars"),
             func.coalesce(func.sum(UsageLog.cost_usd), 0).label("cost_usd"),
             func.count(UsageLog.id).label("requests"),
-        ).where(
+        )
+        .where(
             UsageLog.user_id == user.id,
             func.date(UsageLog.created_at) >= since,
-        ).group_by(func.date(UsageLog.created_at))
+        )
+        .group_by(func.date(UsageLog.created_at))
         .order_by(func.date(UsageLog.created_at))
     )
     rows = result.all()
@@ -82,13 +85,15 @@ async def get_history(user: CurrentUser, db: DBSession) -> dict:
         day = since + timedelta(days=i)
         key = str(day)
         r = row_map.get(key)
-        history.append({
-            "date": key,
-            "tokens": int(r.tokens) if r else 0,
-            "tts_chars": int(r.tts_chars) if r else 0,
-            "cost_usd": str(r.cost_usd) if r else "0",
-            "requests": int(r.requests) if r else 0,
-        })
+        history.append(
+            {
+                "date": key,
+                "tokens": int(r.tokens) if r else 0,
+                "tts_chars": int(r.tts_chars) if r else 0,
+                "cost_usd": str(r.cost_usd) if r else "0",
+                "requests": int(r.requests) if r else 0,
+            }
+        )
 
     return {"success": True, "data": history}
 
@@ -96,7 +101,7 @@ async def get_history(user: CurrentUser, db: DBSession) -> dict:
 @router.get("/cost", response_model=dict)
 async def get_cost_breakdown(user: CurrentUser, db: DBSession) -> dict:
     """Return cost breakdown by model and service for the current month."""
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
 
     # By model
@@ -107,12 +112,14 @@ async def get_cost_breakdown(user: CurrentUser, db: DBSession) -> dict:
             func.coalesce(func.sum(UsageLog.output_tokens), 0).label("output_tokens"),
             func.coalesce(func.sum(UsageLog.cost_usd), 0).label("cost_usd"),
             func.count(UsageLog.id).label("requests"),
-        ).where(
+        )
+        .where(
             UsageLog.user_id == user.id,
             UsageLog.created_at >= month_start,
             UsageLog.model.isnot(None),
             UsageLog.input_tokens + UsageLog.output_tokens > 0,
-        ).group_by(UsageLog.model)
+        )
+        .group_by(UsageLog.model)
         .order_by(func.sum(UsageLog.cost_usd).desc())
     )
 

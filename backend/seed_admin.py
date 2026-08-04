@@ -29,11 +29,12 @@ from app.core.security import hash_password
 from app.db.session import AsyncSessionLocal
 from app.models.user import User, UserRole
 
-
 # ── Helpers ───────────────────────────────────────────────────────────────────
+
 
 def _prompt(label: str, secret: bool = False) -> str:
     import getpass
+
     fn = getpass.getpass if secret else input
     value = fn(f"{label}: ").strip()
     if not value:
@@ -57,16 +58,19 @@ def _validate_password(password: str) -> None:
 
 # ── Main ──────────────────────────────────────────────────────────────────────
 
+
 async def seed() -> None:
-    email    = os.environ.get("ADMIN_EMAIL")    or _prompt("Admin email")
+    email = os.environ.get("ADMIN_EMAIL") or _prompt("Admin email")
     password = os.environ.get("ADMIN_PASSWORD") or _prompt("Admin password", secret=True)
-    name     = os.environ.get("ADMIN_NAME", "Admin")
+    name = os.environ.get("ADMIN_NAME", "Admin")
     role_str = os.environ.get("ADMIN_ROLE", "superadmin")
 
     try:
         role = UserRole(role_str)
     except ValueError:
-        print(f"ERROR: Invalid ADMIN_ROLE '{role_str}'. Valid values: {[r.value for r in UserRole]}")
+        print(
+            f"ERROR: Invalid ADMIN_ROLE '{role_str}'. Valid values: {[r.value for r in UserRole]}"
+        )
         sys.exit(1)
 
     _validate_password(password)

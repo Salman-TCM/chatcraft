@@ -5,18 +5,17 @@ Tests the pure-Python helpers — cache key generation, month TTL,
 and usage tracking key format — without making real API calls or
 requiring a live Redis instance.
 """
-import asyncio
+
 import hashlib
-from calendar import monthrange
-from datetime import datetime, timezone
-from unittest.mock import AsyncMock, MagicMock, patch
+from datetime import UTC, datetime
+from unittest.mock import AsyncMock
 
 import pytest
 
 from app.services.voice import _cache_key, _month_ttl
 
-
 # ── _cache_key ────────────────────────────────────────────────────────────────
+
 
 class TestCacheKey:
     def test_returns_string_starting_with_prefix(self):
@@ -55,12 +54,13 @@ class TestCacheKey:
 
     def test_long_text_truncated_to_fixed_length(self):
         short_key = _cache_key("short", "v", "m")
-        long_key  = _cache_key("x" * 10000, "v", "m")
+        long_key = _cache_key("x" * 10000, "v", "m")
         # SHA-256 is always 64 hex chars — keys have same length regardless of input
         assert len(short_key) == len(long_key)
 
 
 # ── _month_ttl ────────────────────────────────────────────────────────────────
+
 
 class TestMonthTtl:
     def test_returns_positive_integer(self):
@@ -83,11 +83,12 @@ class TestMonthTtl:
 
 # ── Usage tracking key format ─────────────────────────────────────────────────
 
+
 class TestUsageKeyFormat:
     """Verify the Redis key patterns without hitting Redis."""
 
     def test_tts_key_contains_user_id_and_month(self):
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         month = f"{now.year}-{now.month:02d}"
         user_id = "user_123"
         expected_key = f"tts_chars:{user_id}:{month}"
@@ -96,7 +97,7 @@ class TestUsageKeyFormat:
         assert key == expected_key
 
     def test_stt_key_contains_user_id_and_month(self):
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         user_id = "user_456"
         key = f"stt_secs:{user_id}:{now.year}-{now.month:02d}"
         assert "stt_secs" in key
@@ -105,6 +106,7 @@ class TestUsageKeyFormat:
 
 
 # ── get_voice_usage (mocked Redis) ───────────────────────────────────────────
+
 
 @pytest.mark.asyncio
 async def test_get_voice_usage_returns_zeros_when_no_data():

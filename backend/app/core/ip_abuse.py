@@ -4,6 +4,7 @@ Tracks requests per IP per hour using Redis.
 Returns 429 when an IP exceeds 500 requests/hour.
 Health check paths are excluded.
 """
+
 import time
 
 from fastapi.responses import JSONResponse

@@ -6,28 +6,31 @@ Analytics API — creator dashboard data.
   GET /api/analytics/satisfaction      — thumbs-up/down ratio
   GET /api/analytics/conversations     — paginated conversation log
 """
+
 import uuid
-from datetime import date, datetime, timedelta, timezone
+from datetime import UTC, date, datetime, timedelta
 
 from fastapi import APIRouter, Depends, Query
-from sqlalchemy import Float, func, select
+from sqlalchemy import func, select
 from sqlalchemy.orm import selectinload
 
 from app.core.dependencies import CurrentUser, DBSession, require_feature
 from app.core.features import ANALYTICS
 from app.models.chatbot_config import ChatbotConfig
 from app.models.conversation import Conversation
-from app.models.message import Message, MessageFeedback, MessageRole
+from app.models.message import Message, MessageRole
 from app.models.usage_log import UsageLog
 from app.schemas.chat import ConversationResponse
 
-router = APIRouter(prefix="/api/analytics", tags=["analytics"], dependencies=[Depends(require_feature(ANALYTICS))])
+router = APIRouter(
+    prefix="/api/analytics", tags=["analytics"], dependencies=[Depends(require_feature(ANALYTICS))]
+)
 
 
 @router.get("/overview", response_model=dict)
 async def get_overview(user: CurrentUser, db: DBSession) -> dict:
     """High-level KPIs for all chatbots owned by the user."""
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
     prev_month_start = (month_start - timedelta(days=1)).replace(day=1)
 
@@ -42,7 +45,9 @@ async def get_overview(user: CurrentUser, db: DBSession) -> dict:
 
     # Total conversations this month
     conv_result = await db.execute(
-        select(func.count()).select_from(Conversation).where(
+        select(func.count())
+        .select_from(Conversation)
+        .where(
             Conversation.chatbot_id.in_(bot_ids),
             Conversation.created_at >= month_start,
         )
@@ -51,7 +56,8 @@ async def get_overview(user: CurrentUser, db: DBSession) -> dict:
 
     # Total messages this month
     msg_result = await db.execute(
-        select(func.count()).select_from(Message)
+        select(func.count())
+        .select_from(Message)
         .join(Conversation, Message.conversation_id == Conversation.id)
         .where(
             Conversation.chatbot_id.in_(bot_ids),
@@ -124,7 +130,10 @@ async def get_messages_per_day(
     row_map = {str(r.day): int(r.count) for r in result.all()}
 
     data = [
-        {"date": str(since + timedelta(days=i)), "count": row_map.get(str(since + timedelta(days=i)), 0)}
+        {
+            "date": str(since + timedelta(days=i)),
+            "count": row_map.get(str(since + timedelta(days=i)), 0),
+        }
         for i in range(days)
     ]
     return {"success": True, "data": data}
@@ -132,27 +141,36 @@ async def get_messages_per_day(
 
 @router.get("/model-breakdown", response_model=dict)
 async def get_model_breakdown(user: CurrentUser, db: DBSession) -> dict:
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
     bot_ids = await _owned_bot_ids(user.id, db)
 
     result = await db.execute(
         select(
             UsageLog.model,
-            func.coalesce(func.sum(UsageLog.input_tokens + UsageLog.output_tokens), 0).label("tokens"),
+            func.coalesce(func.sum(UsageLog.input_tokens + UsageLog.output_tokens), 0).label(
+                "tokens"
+            ),
             func.coalesce(func.sum(UsageLog.cost_usd), 0).label("cost_usd"),
             func.count().label("requests"),
-        ).where(
+        )
+        .where(
             UsageLog.chatbot_id.in_(bot_ids) if bot_ids else UsageLog.chatbot_id.is_(None),
             UsageLog.created_at >= month_start,
             UsageLog.model.isnot(None),
-        ).group_by(UsageLog.model)
+        )
+        .group_by(UsageLog.model)
         .order_by(func.sum(UsageLog.cost_usd).desc())
     )
     return {
         "success": True,
         "data": [
-            {"model": r.model, "tokens": int(r.tokens), "cost_usd": str(r.cost_usd), "requests": int(r.requests)}
+            {
+                "model": r.model,
+                "tokens": int(r.tokens),
+                "cost_usd": str(r.cost_usd),
+                "requests": int(r.requests),
+            }
             for r in result.all()
         ],
     }
@@ -180,7 +198,10 @@ async def get_satisfaction(user: CurrentUser, db: DBSession) -> dict:
     total = up + down
     rate = round(up / total * 100, 1) if total > 0 else None
 
-    return {"success": True, "data": {"thumbs_up": up, "thumbs_down": down, "satisfaction_rate": rate}}
+    return {
+        "success": True,
+        "data": {"thumbs_up": up, "thumbs_down": down, "satisfaction_rate": rate},
+    }
 
 
 @router.get("/conversations", response_model=dict)
@@ -227,10 +248,9 @@ async def get_conversations(
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
+
 async def _owned_bot_ids(user_id: uuid.UUID, db) -> list[uuid.UUID]:
-    result = await db.execute(
-        select(ChatbotConfig.id).where(ChatbotConfig.user_id == user_id)
-    )
+    result = await db.execute(select(ChatbotConfig.id).where(ChatbotConfig.user_id == user_id))
     return [r[0] for r in result.all()]
 
 

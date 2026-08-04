@@ -4,11 +4,12 @@ Revision ID: 000000000014
 Revises: 000000000013
 Create Date: 2026-05-17
 """
-from alembic import op
+
 import sqlalchemy as sa
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 
-from app.models.base import set_updated_at_trigger, drop_updated_at_trigger
+from alembic import op
+from app.models.base import drop_updated_at_trigger, set_updated_at_trigger
 
 revision = "000000000014"
 down_revision = "000000000013"
@@ -19,11 +20,27 @@ depends_on = None
 def upgrade() -> None:
     op.create_table(
         "flows",
-        sa.Column("id", UUID(as_uuid=True), primary_key=True, server_default=sa.text("gen_random_uuid()")),
-        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
-        sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
-        sa.Column("user_id", UUID(as_uuid=True), sa.ForeignKey("users.id", ondelete="CASCADE"), nullable=False),
-        sa.Column("chatbot_id", UUID(as_uuid=True), sa.ForeignKey("chatbot_configs.id", ondelete="SET NULL"), nullable=True),
+        sa.Column(
+            "id", UUID(as_uuid=True), primary_key=True, server_default=sa.text("gen_random_uuid()")
+        ),
+        sa.Column(
+            "created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False
+        ),
+        sa.Column(
+            "updated_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False
+        ),
+        sa.Column(
+            "user_id",
+            UUID(as_uuid=True),
+            sa.ForeignKey("users.id", ondelete="CASCADE"),
+            nullable=False,
+        ),
+        sa.Column(
+            "chatbot_id",
+            UUID(as_uuid=True),
+            sa.ForeignKey("chatbot_configs.id", ondelete="SET NULL"),
+            nullable=True,
+        ),
         sa.Column("name", sa.String(255), nullable=False),
         sa.Column("description", sa.Text, nullable=True),
         sa.Column("is_active", sa.Boolean, nullable=False, server_default="false"),
@@ -39,14 +56,33 @@ def upgrade() -> None:
 
     op.create_table(
         "flow_runs",
-        sa.Column("id", UUID(as_uuid=True), primary_key=True, server_default=sa.text("gen_random_uuid()")),
-        sa.Column("flow_id", UUID(as_uuid=True), sa.ForeignKey("flows.id", ondelete="CASCADE"), nullable=False),
-        sa.Column("contact_id", UUID(as_uuid=True), sa.ForeignKey("contacts.id", ondelete="SET NULL"), nullable=True),
-        sa.Column("conversation_id", UUID(as_uuid=True), sa.ForeignKey("conversations.id", ondelete="SET NULL"), nullable=True),
+        sa.Column(
+            "id", UUID(as_uuid=True), primary_key=True, server_default=sa.text("gen_random_uuid()")
+        ),
+        sa.Column(
+            "flow_id",
+            UUID(as_uuid=True),
+            sa.ForeignKey("flows.id", ondelete="CASCADE"),
+            nullable=False,
+        ),
+        sa.Column(
+            "contact_id",
+            UUID(as_uuid=True),
+            sa.ForeignKey("contacts.id", ondelete="SET NULL"),
+            nullable=True,
+        ),
+        sa.Column(
+            "conversation_id",
+            UUID(as_uuid=True),
+            sa.ForeignKey("conversations.id", ondelete="SET NULL"),
+            nullable=True,
+        ),
         sa.Column("status", sa.String(20), nullable=False, server_default="running"),
         sa.Column("current_node_id", sa.String(100), nullable=True),
         sa.Column("context", JSONB, nullable=False, server_default="{}"),
-        sa.Column("started_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
+        sa.Column(
+            "started_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False
+        ),
         sa.Column("completed_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column("resumed_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column("error", sa.Text, nullable=True),

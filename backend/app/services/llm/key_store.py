@@ -2,6 +2,7 @@
 Encrypted user API key store.
 Keys are encrypted with Fernet (AES-128-CBC) using a key derived from SECRET_KEY.
 """
+
 import base64
 import hashlib
 import uuid
@@ -15,6 +16,7 @@ from app.models.user_api_key import UserApiKey
 
 def _fernet() -> Fernet:
     from app.core.config import settings
+
     raw = hashlib.sha256(settings.secret_key.encode()).digest()
     return Fernet(base64.urlsafe_b64encode(raw))
 
@@ -29,9 +31,7 @@ def decrypt_key(encrypted: str) -> str:
 
 async def get_all_keys(user_id: uuid.UUID, db: AsyncSession) -> dict[str, str]:
     """Return {provider: plaintext_key} for every key this user has saved."""
-    result = await db.execute(
-        select(UserApiKey).where(UserApiKey.user_id == user_id)
-    )
+    result = await db.execute(select(UserApiKey).where(UserApiKey.user_id == user_id))
     out: dict[str, str] = {}
     for row in result.scalars().all():
         try:

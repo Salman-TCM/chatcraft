@@ -6,8 +6,8 @@ from pydantic import BaseModel, Field, model_validator
 
 from app.models.crm import CustomFieldType
 
-
 # ── Tags ──────────────────────────────────────────────────────────────────────
+
 
 class TagCreate(BaseModel):
     name: str = Field(..., min_length=1, max_length=100)
@@ -29,6 +29,7 @@ class TagResponse(BaseModel):
 
 
 # ── Custom Fields ─────────────────────────────────────────────────────────────
+
 
 class CustomFieldCreate(BaseModel):
     name: str = Field(..., min_length=1, max_length=255)
@@ -64,6 +65,7 @@ class CustomFieldResponse(BaseModel):
 
 
 # ── Contacts ──────────────────────────────────────────────────────────────────
+
 
 class ContactCreate(BaseModel):
     first_name: str | None = Field(None, max_length=255)
@@ -121,8 +123,17 @@ class ContactTagsAdd(BaseModel):
 # Channel values mirror the `conversation_channel` DB enum
 # (see app/models/conversation.py: Conversation.channel).
 ConversationChannel = Literal[
-    "web", "facebook", "instagram", "whatsapp", "telegram", "discord",
-    "sms", "phone", "twitter", "tiktok", "email",
+    "web",
+    "facebook",
+    "instagram",
+    "whatsapp",
+    "telegram",
+    "discord",
+    "sms",
+    "phone",
+    "twitter",
+    "tiktok",
+    "email",
 ]
 
 
@@ -142,6 +153,7 @@ class ContactMessageSend(BaseModel):
 
 
 # ── Pipelines ─────────────────────────────────────────────────────────────────
+
 
 class PipelineStageCreate(BaseModel):
     name: str = Field(..., min_length=1, max_length=255)

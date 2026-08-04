@@ -5,7 +5,9 @@ Requires environment variables:
   GOOGLE_WALLET_ISSUER_ID        — numeric issuer ID from Google Pay & Wallet Console
   GOOGLE_WALLET_SERVICE_ACCOUNT  — JSON of service account credentials
 """
+
 import json
+from datetime import UTC
 from typing import Any
 
 from app.core.config import settings
@@ -14,6 +16,7 @@ from app.core.config import settings
 def _credentials():
     try:
         from google.oauth2 import service_account
+
         sa_info = json.loads(settings.google_wallet_service_account)
         return service_account.Credentials.from_service_account_info(
             sa_info,
@@ -25,6 +28,7 @@ def _credentials():
 
 def _client():
     from googleapiclient.discovery import build
+
     return build("walletobjects", "v1", credentials=_credentials(), cache_discovery=False)
 
 
@@ -65,7 +69,9 @@ def create_or_update_class(program: Any) -> str:
 
     if pt == "loyaltyObject":
         body["programName"] = program.name
-        body["programLogo"] = {"sourceUri": {"uri": brand.get("logo_url", "")}} if brand.get("logo_url") else {}
+        body["programLogo"] = (
+            {"sourceUri": {"uri": brand.get("logo_url", "")}} if brand.get("logo_url") else {}
+        )
         body["rewardsTier"] = cfg.get("default_tier", "Standard")
         body["rewardsTierLabel"] = "Tier"
         body["accountIdLabel"] = "Card #"
@@ -73,7 +79,9 @@ def create_or_update_class(program: Any) -> str:
     elif pt == "giftCardObject":
         body["merchantName"] = program.name
     elif pt == "eventTicketObject":
-        body["eventName"] = {"defaultValue": {"language": "en-US", "value": cfg.get("event_name", program.name)}}
+        body["eventName"] = {
+            "defaultValue": {"language": "en-US", "value": cfg.get("event_name", program.name)}
+        }
 
     resource = f"{pt[:-6]}Class" if pt != "genericObject" else "genericClass"
     # e.g. loyaltyClass, giftCardClass, eventTicketClass, offerClass, genericClass
@@ -133,7 +141,10 @@ def issue_pass(program: Any, card: Any) -> str:
             }
     elif pt == "giftCardObject":
         balance = state.get("balance", cfg.get("initial_balance", 0))
-        body["balance"] = {"micros": str(int(float(balance) * 1_000_000)), "currencyCode": cfg.get("currency", "USD")}
+        body["balance"] = {
+            "micros": str(int(float(balance) * 1_000_000)),
+            "currencyCode": cfg.get("currency", "USD"),
+        }
         body["cardNumber"] = card.serial
 
     resource_map = {
@@ -177,9 +188,10 @@ def push_update(object_id: str, program_type: str) -> None:
 def add_pass_save_link(object_id: str) -> str:
     """Generate a 'Add to Google Wallet' JWT link."""
     try:
-        import jwt as pyjwt
         import json
-        from datetime import datetime, timezone
+        from datetime import datetime
+
+        import jwt as pyjwt
 
         sa_info = json.loads(settings.google_wallet_service_account)
         claims = {
@@ -188,7 +200,7 @@ def add_pass_save_link(object_id: str) -> str:
             "origins": [],
             "typ": "savetowallet",
             "payload": {"genericObjects": [{"id": object_id}]},
-            "iat": int(datetime.now(timezone.utc).timestamp()),
+            "iat": int(datetime.now(UTC).timestamp()),
         }
         token = pyjwt.encode(claims, sa_info["private_key"], algorithm="RS256")
         return f"https://pay.google.com/gp/v/save/{token}"

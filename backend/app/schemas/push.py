@@ -1,4 +1,5 @@
 """Pydantic schemas for the Web Push Notification API (VAPID)."""
+
 from pydantic import BaseModel, Field
 
 

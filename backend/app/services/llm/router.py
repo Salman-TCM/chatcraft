@@ -2,7 +2,8 @@
 LLM router — selects provider by model id, runs fallback on failure,
 and exposes a uniform complete/stream interface used by the chat API.
 """
-from typing import AsyncIterator
+
+from collections.abc import AsyncIterator
 
 from app.core.config import settings
 from app.core.logging import logger
@@ -72,13 +73,13 @@ DEFAULT_MODEL = "claude-sonnet-4-6"
 DEFAULT_FALLBACK = "gpt-4o-mini"
 
 _PROVIDER_MAP: dict[str, str] = (
-    {m: "anthropic" for m in _ANTHROPIC_MODELS}
-    | {m: "openai" for m in _OPENAI_MODELS}
-    | {m: "google" for m in _GEMINI_MODELS}
-    | {m: "deepseek" for m in _DEEPSEEK_MODELS}
-    | {m: "groq" for m in _GROQ_MODELS}
-    | {m: "perplexity" for m in _PERPLEXITY_MODELS}
-    | {m: "xai" for m in _XAI_MODELS}
+    dict.fromkeys(_ANTHROPIC_MODELS, "anthropic")
+    | dict.fromkeys(_OPENAI_MODELS, "openai")
+    | dict.fromkeys(_GEMINI_MODELS, "google")
+    | dict.fromkeys(_DEEPSEEK_MODELS, "deepseek")
+    | dict.fromkeys(_GROQ_MODELS, "groq")
+    | dict.fromkeys(_PERPLEXITY_MODELS, "perplexity")
+    | dict.fromkeys(_XAI_MODELS, "xai")
 )
 
 

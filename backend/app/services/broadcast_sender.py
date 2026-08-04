@@ -4,8 +4,8 @@ Broadcast delivery engine.
 Resolves recipients from target_filter, renders message_template with
 personalization variables, and delivers via the appropriate channel.
 """
+
 import re
-from datetime import datetime, timezone
 from typing import Any
 
 from sqlalchemy import select
@@ -14,15 +14,17 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 def _render(template: str, ctx: dict) -> str:
     """Replace {{key}} placeholders with context values."""
+
     def _replace(m: re.Match) -> str:
         return str(ctx.get(m.group(1).strip(), ""))
+
     return re.sub(r"\{\{(.+?)\}\}", _replace, template)
 
 
 async def _resolve_recipients(campaign: Any, db: AsyncSession) -> list[dict]:
     """Return list of {email, phone, name, telegram_id, ...} dicts."""
+
     from app.models.crm import Contact, ContactTag, Tag
-    from sqlalchemy import or_
 
     filt = campaign.target_filter or {}
     segment = filt.get("segment", "all")
@@ -65,6 +67,7 @@ async def _send_email(campaign: Any, recipients: list[dict]) -> tuple[int, int]:
     """AWS SES bulk send."""
     try:
         import boto3
+
         from app.core.config import settings
 
         ses = boto3.client(
@@ -104,6 +107,7 @@ async def _send_sms(campaign: Any, recipients: list[dict]) -> tuple[int, int]:
     """Twilio bulk SMS."""
     try:
         from twilio.rest import Client
+
         from app.core.config import settings
 
         client = Client(settings.twilio_account_sid, settings.twilio_auth_token)
@@ -130,10 +134,10 @@ async def _send_telegram(campaign: Any, db: AsyncSession) -> tuple[int, int]:
     """Send to all Telegram subscribers (active conversations on Telegram channel)."""
     try:
         import httpx
-        from app.models.conversation import Conversation
+
         from app.models.channel_integration import ChannelIntegration
+        from app.models.conversation import Conversation
         from app.models.inbox import ConversationChannel, ConversationStatus
-        from sqlalchemy import and_
 
         # Find all active telegram conversations for this user
         convs_result = await db.execute(
@@ -147,10 +151,12 @@ async def _send_telegram(campaign: Any, db: AsyncSession) -> tuple[int, int]:
 
         # Get bot token from any telegram integration
         integ_result = await db.execute(
-            select(ChannelIntegration).where(
+            select(ChannelIntegration)
+            .where(
                 ChannelIntegration.user_id == campaign.user_id,
                 ChannelIntegration.channel == "telegram",
-            ).limit(1)
+            )
+            .limit(1)
         )
         integ = integ_result.scalar_one_or_none()
         if not integ:
@@ -165,7 +171,8 @@ async def _send_telegram(campaign: Any, db: AsyncSession) -> tuple[int, int]:
                 if not conv.contact or not conv.contact.contact_id:
                     continue
                 ctx = {
-                    "name": f"{conv.contact.first_name or ''} {conv.contact.last_name or ''}".strip() or "Friend",
+                    "name": f"{conv.contact.first_name or ''} {conv.contact.last_name or ''}".strip()
+                    or "Friend",
                     "first_name": conv.contact.first_name or "",
                     "last_name": conv.contact.last_name or "",
                     "email": conv.contact.email or "",
@@ -193,8 +200,8 @@ async def _send_whatsapp(campaign: Any, recipients: list[dict]) -> tuple[int, in
     """Meta WhatsApp template messages."""
     try:
         import httpx
+
         from app.core.config import settings
-        from app.models.channel_integration import ChannelIntegration
 
         sent = failed = 0
         template_name = campaign.target_filter.get("whatsapp_template", "")
@@ -231,9 +238,10 @@ async def _send_push(campaign: Any, db: AsyncSession) -> tuple[int, int]:
     """Send push notification to all web chat subscribers of the campaign's chatbot."""
     try:
         import json as _json
+
         from pywebpush import webpush
+
         from app.core.config import settings
-        from app.db.session import AsyncSessionLocal
         from app.models.conversation import Conversation
 
         vapid_private = getattr(settings, "vapid_private_key", None)
@@ -262,6 +270,7 @@ async def _send_push(campaign: Any, db: AsyncSession) -> tuple[int, int]:
         convs = convs_result.scalars().all()
 
         from app.db.redis import get_async_redis
+
         title = campaign.name
         body_tmpl = campaign.message_template or title
         url = campaign.target_filter.get("url", "/") if campaign.target_filter else "/"
@@ -281,7 +290,10 @@ async def _send_push(campaign: Any, db: AsyncSession) -> tuple[int, int]:
                 "phone": "",
             }
             if conv.contact:
-                ctx["name"] = f"{conv.contact.first_name or ''} {conv.contact.last_name or ''}".strip() or "Friend"
+                ctx["name"] = (
+                    f"{conv.contact.first_name or ''} {conv.contact.last_name or ''}".strip()
+                    or "Friend"
+                )
                 ctx["first_name"] = conv.contact.first_name or ""
                 ctx["last_name"] = conv.contact.last_name or ""
                 ctx["email"] = conv.contact.email or ""
@@ -309,8 +321,9 @@ async def _send_messenger(campaign: Any, db: AsyncSession) -> tuple[int, int]:
     """Facebook Messenger broadcast — sends to all active Messenger conversations."""
     try:
         import httpx
-        from app.models.conversation import Conversation
+
         from app.models.channel_integration import ChannelIntegration
+        from app.models.conversation import Conversation
 
         convs_result = await db.execute(
             select(Conversation).where(
@@ -322,11 +335,13 @@ async def _send_messenger(campaign: Any, db: AsyncSession) -> tuple[int, int]:
         convs = convs_result.scalars().all()
 
         integ_result = await db.execute(
-            select(ChannelIntegration).where(
+            select(ChannelIntegration)
+            .where(
                 ChannelIntegration.user_id == campaign.user_id,
                 ChannelIntegration.channel == "facebook",
                 ChannelIntegration.is_active.is_(True),
-            ).limit(1)
+            )
+            .limit(1)
         )
         integ = integ_result.scalar_one_or_none()
         if not integ:
@@ -339,7 +354,9 @@ async def _send_messenger(campaign: Any, db: AsyncSession) -> tuple[int, int]:
                 if not conv.guest_id:
                     continue
                 ctx = {
-                    "name": f"{conv.contact.first_name or ''} {conv.contact.last_name or ''}".strip() if conv.contact else "Friend",
+                    "name": f"{conv.contact.first_name or ''} {conv.contact.last_name or ''}".strip()
+                    if conv.contact
+                    else "Friend",
                     "first_name": (conv.contact.first_name or "") if conv.contact else "",
                     "email": (conv.contact.email or "") if conv.contact else "",
                     "phone": (conv.contact.phone or "") if conv.contact else "",
@@ -366,6 +383,7 @@ async def _send_phone(campaign: Any, recipients: list[dict]) -> tuple[int, int]:
     """Phone broadcast — initiate outbound Twilio calls to all contacts with a phone number."""
     try:
         from twilio.rest import Client
+
         from app.core.config import settings
 
         if not settings.twilio_account_sid or not settings.twilio_phone_number:
@@ -374,7 +392,9 @@ async def _send_phone(campaign: Any, recipients: list[dict]) -> tuple[int, int]:
         client = Client(settings.twilio_account_sid, settings.twilio_auth_token)
         webhook_url = getattr(settings, "api_base_url", "")
         chatbot_id = str(getattr(campaign, "chatbot_id", ""))
-        twiml_url = f"{webhook_url}/webhooks/voice/{chatbot_id}" if chatbot_id and webhook_url else None
+        twiml_url = (
+            f"{webhook_url}/webhooks/voice/{chatbot_id}" if chatbot_id and webhook_url else None
+        )
 
         # Use TwiML message if no chatbot, else route through chatbot voice flow
         message_text = campaign.message_template or "Hello, this is a broadcast message."

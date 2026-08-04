@@ -4,28 +4,43 @@ Revision ID: 000000000011
 Revises: 000000000010
 Create Date: 2026-05-13 00:00:11.000000
 """
-from typing import Sequence, Union
+
+from collections.abc import Sequence
 
 import sqlalchemy as sa
-from alembic import op
 from sqlalchemy.dialects import postgresql
 
+from alembic import op
 from app.models.base import drop_updated_at_trigger, set_updated_at_trigger
 
 revision: str = "000000000011"
-down_revision: Union[str, None] = "000000000010"
-branch_labels: Union[str, Sequence[str], None] = None
-depends_on: Union[str, Sequence[str], None] = None
+down_revision: str | None = "000000000010"
+branch_labels: str | Sequence[str] | None = None
+depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:
     # ── contacts ──────────────────────────────────────────────────────────────
     op.create_table(
         "contacts",
-        sa.Column("id", postgresql.UUID(as_uuid=True), server_default=sa.text("gen_random_uuid()"), nullable=False),
-        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
-        sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
-        sa.Column("user_id", postgresql.UUID(as_uuid=True), sa.ForeignKey("users.id", ondelete="CASCADE"), nullable=False),
+        sa.Column(
+            "id",
+            postgresql.UUID(as_uuid=True),
+            server_default=sa.text("gen_random_uuid()"),
+            nullable=False,
+        ),
+        sa.Column(
+            "created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False
+        ),
+        sa.Column(
+            "updated_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False
+        ),
+        sa.Column(
+            "user_id",
+            postgresql.UUID(as_uuid=True),
+            sa.ForeignKey("users.id", ondelete="CASCADE"),
+            nullable=False,
+        ),
         sa.Column("public_id", sa.String(255), nullable=True),
         sa.Column("contact_id", sa.String(255), nullable=True),
         sa.Column("first_name", sa.String(255), nullable=True),
@@ -46,10 +61,24 @@ def upgrade() -> None:
     # ── tags ─────────────────────────────────────────────────────────────────
     op.create_table(
         "tags",
-        sa.Column("id", postgresql.UUID(as_uuid=True), server_default=sa.text("gen_random_uuid()"), nullable=False),
-        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
-        sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
-        sa.Column("user_id", postgresql.UUID(as_uuid=True), sa.ForeignKey("users.id", ondelete="CASCADE"), nullable=False),
+        sa.Column(
+            "id",
+            postgresql.UUID(as_uuid=True),
+            server_default=sa.text("gen_random_uuid()"),
+            nullable=False,
+        ),
+        sa.Column(
+            "created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False
+        ),
+        sa.Column(
+            "updated_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False
+        ),
+        sa.Column(
+            "user_id",
+            postgresql.UUID(as_uuid=True),
+            sa.ForeignKey("users.id", ondelete="CASCADE"),
+            nullable=False,
+        ),
         sa.Column("name", sa.String(100), nullable=False),
         sa.Column("color", sa.String(7), nullable=False, server_default="#6366f1"),
         sa.PrimaryKeyConstraint("id"),
@@ -61,25 +90,66 @@ def upgrade() -> None:
     # ── contact_tags ──────────────────────────────────────────────────────────
     op.create_table(
         "contact_tags",
-        sa.Column("contact_id", postgresql.UUID(as_uuid=True), sa.ForeignKey("contacts.id", ondelete="CASCADE"), nullable=False),
-        sa.Column("tag_id", postgresql.UUID(as_uuid=True), sa.ForeignKey("tags.id", ondelete="CASCADE"), nullable=False),
+        sa.Column(
+            "contact_id",
+            postgresql.UUID(as_uuid=True),
+            sa.ForeignKey("contacts.id", ondelete="CASCADE"),
+            nullable=False,
+        ),
+        sa.Column(
+            "tag_id",
+            postgresql.UUID(as_uuid=True),
+            sa.ForeignKey("tags.id", ondelete="CASCADE"),
+            nullable=False,
+        ),
         sa.PrimaryKeyConstraint("contact_id", "tag_id"),
     )
 
     # ── custom_fields ─────────────────────────────────────────────────────────
     op.create_table(
         "custom_fields",
-        sa.Column("id", postgresql.UUID(as_uuid=True), server_default=sa.text("gen_random_uuid()"), nullable=False),
-        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
-        sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
-        sa.Column("user_id", postgresql.UUID(as_uuid=True), sa.ForeignKey("users.id", ondelete="CASCADE"), nullable=False),
-        sa.Column("chatbot_id", postgresql.UUID(as_uuid=True), sa.ForeignKey("chatbot_configs.id", ondelete="SET NULL"), nullable=True),
+        sa.Column(
+            "id",
+            postgresql.UUID(as_uuid=True),
+            server_default=sa.text("gen_random_uuid()"),
+            nullable=False,
+        ),
+        sa.Column(
+            "created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False
+        ),
+        sa.Column(
+            "updated_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False
+        ),
+        sa.Column(
+            "user_id",
+            postgresql.UUID(as_uuid=True),
+            sa.ForeignKey("users.id", ondelete="CASCADE"),
+            nullable=False,
+        ),
+        sa.Column(
+            "chatbot_id",
+            postgresql.UUID(as_uuid=True),
+            sa.ForeignKey("chatbot_configs.id", ondelete="SET NULL"),
+            nullable=True,
+        ),
         sa.Column("name", sa.String(255), nullable=False),
         sa.Column("field_key", sa.String(100), nullable=False),
-        sa.Column("field_type", sa.Enum(
-            "text", "number", "date", "email", "phone", "url", "textarea", "select", "checkbox",
-            name="custom_field_type",
-        ), nullable=False),
+        sa.Column(
+            "field_type",
+            sa.Enum(
+                "text",
+                "number",
+                "date",
+                "email",
+                "phone",
+                "url",
+                "textarea",
+                "select",
+                "checkbox",
+                name="custom_field_type",
+            ),
+            nullable=False,
+        ),
         sa.Column("options", postgresql.JSONB(astext_type=sa.Text()), nullable=True),
         sa.Column("is_required", sa.Boolean(), nullable=False, server_default="false"),
         sa.Column("default_value", sa.Text(), nullable=True),
@@ -94,9 +164,24 @@ def upgrade() -> None:
     # ── contact_field_values ──────────────────────────────────────────────────
     op.create_table(
         "contact_field_values",
-        sa.Column("id", postgresql.UUID(as_uuid=True), server_default=sa.text("gen_random_uuid()"), nullable=False),
-        sa.Column("contact_id", postgresql.UUID(as_uuid=True), sa.ForeignKey("contacts.id", ondelete="CASCADE"), nullable=False),
-        sa.Column("field_id", postgresql.UUID(as_uuid=True), sa.ForeignKey("custom_fields.id", ondelete="CASCADE"), nullable=False),
+        sa.Column(
+            "id",
+            postgresql.UUID(as_uuid=True),
+            server_default=sa.text("gen_random_uuid()"),
+            nullable=False,
+        ),
+        sa.Column(
+            "contact_id",
+            postgresql.UUID(as_uuid=True),
+            sa.ForeignKey("contacts.id", ondelete="CASCADE"),
+            nullable=False,
+        ),
+        sa.Column(
+            "field_id",
+            postgresql.UUID(as_uuid=True),
+            sa.ForeignKey("custom_fields.id", ondelete="CASCADE"),
+            nullable=False,
+        ),
         sa.Column("value", sa.Text(), nullable=True),
         sa.PrimaryKeyConstraint("id"),
         sa.UniqueConstraint("contact_id", "field_id", name="uq_contact_field"),
@@ -107,11 +192,30 @@ def upgrade() -> None:
     # ── pipelines ─────────────────────────────────────────────────────────────
     op.create_table(
         "pipelines",
-        sa.Column("id", postgresql.UUID(as_uuid=True), server_default=sa.text("gen_random_uuid()"), nullable=False),
-        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
-        sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
-        sa.Column("user_id", postgresql.UUID(as_uuid=True), sa.ForeignKey("users.id", ondelete="CASCADE"), nullable=False),
-        sa.Column("chatbot_id", postgresql.UUID(as_uuid=True), sa.ForeignKey("chatbot_configs.id", ondelete="SET NULL"), nullable=True),
+        sa.Column(
+            "id",
+            postgresql.UUID(as_uuid=True),
+            server_default=sa.text("gen_random_uuid()"),
+            nullable=False,
+        ),
+        sa.Column(
+            "created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False
+        ),
+        sa.Column(
+            "updated_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False
+        ),
+        sa.Column(
+            "user_id",
+            postgresql.UUID(as_uuid=True),
+            sa.ForeignKey("users.id", ondelete="CASCADE"),
+            nullable=False,
+        ),
+        sa.Column(
+            "chatbot_id",
+            postgresql.UUID(as_uuid=True),
+            sa.ForeignKey("chatbot_configs.id", ondelete="SET NULL"),
+            nullable=True,
+        ),
         sa.Column("name", sa.String(255), nullable=False),
         sa.Column("description", sa.Text(), nullable=True),
         sa.Column("color", sa.String(7), nullable=False, server_default="#6366f1"),
@@ -124,10 +228,24 @@ def upgrade() -> None:
     # ── pipeline_stages ────────────────────────────────────────────────────────
     op.create_table(
         "pipeline_stages",
-        sa.Column("id", postgresql.UUID(as_uuid=True), server_default=sa.text("gen_random_uuid()"), nullable=False),
-        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
-        sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
-        sa.Column("pipeline_id", postgresql.UUID(as_uuid=True), sa.ForeignKey("pipelines.id", ondelete="CASCADE"), nullable=False),
+        sa.Column(
+            "id",
+            postgresql.UUID(as_uuid=True),
+            server_default=sa.text("gen_random_uuid()"),
+            nullable=False,
+        ),
+        sa.Column(
+            "created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False
+        ),
+        sa.Column(
+            "updated_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False
+        ),
+        sa.Column(
+            "pipeline_id",
+            postgresql.UUID(as_uuid=True),
+            sa.ForeignKey("pipelines.id", ondelete="CASCADE"),
+            nullable=False,
+        ),
         sa.Column("name", sa.String(255), nullable=False),
         sa.Column("color", sa.String(7), nullable=False, server_default="#6366f1"),
         sa.Column("order", sa.Integer(), nullable=False, server_default="0"),
@@ -139,12 +257,36 @@ def upgrade() -> None:
     # ── pipeline_deals ────────────────────────────────────────────────────────
     op.create_table(
         "pipeline_deals",
-        sa.Column("id", postgresql.UUID(as_uuid=True), server_default=sa.text("gen_random_uuid()"), nullable=False),
-        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
-        sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
-        sa.Column("pipeline_id", postgresql.UUID(as_uuid=True), sa.ForeignKey("pipelines.id", ondelete="CASCADE"), nullable=False),
-        sa.Column("stage_id", postgresql.UUID(as_uuid=True), sa.ForeignKey("pipeline_stages.id", ondelete="CASCADE"), nullable=False),
-        sa.Column("contact_id", postgresql.UUID(as_uuid=True), sa.ForeignKey("contacts.id", ondelete="CASCADE"), nullable=False),
+        sa.Column(
+            "id",
+            postgresql.UUID(as_uuid=True),
+            server_default=sa.text("gen_random_uuid()"),
+            nullable=False,
+        ),
+        sa.Column(
+            "created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False
+        ),
+        sa.Column(
+            "updated_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False
+        ),
+        sa.Column(
+            "pipeline_id",
+            postgresql.UUID(as_uuid=True),
+            sa.ForeignKey("pipelines.id", ondelete="CASCADE"),
+            nullable=False,
+        ),
+        sa.Column(
+            "stage_id",
+            postgresql.UUID(as_uuid=True),
+            sa.ForeignKey("pipeline_stages.id", ondelete="CASCADE"),
+            nullable=False,
+        ),
+        sa.Column(
+            "contact_id",
+            postgresql.UUID(as_uuid=True),
+            sa.ForeignKey("contacts.id", ondelete="CASCADE"),
+            nullable=False,
+        ),
         sa.Column("notes", sa.Text(), nullable=True),
         sa.Column("deal_value", sa.Float(), nullable=True),
         sa.Column("order", sa.Integer(), nullable=False, server_default="0"),

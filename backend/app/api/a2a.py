@@ -11,6 +11,7 @@ Authentication:
   Where <token> is one of the keys in `a2a_allowed_tokens` (JSONB list).
   Typically, callers use their Google AI API key.
 """
+
 import uuid
 
 from fastapi import APIRouter, HTTPException, Request
@@ -20,8 +21,8 @@ from sqlalchemy import select
 from app.core.config import settings
 from app.core.dependencies import DBSession
 from app.models.chatbot_config import ChatbotConfig
-from app.services.llm.router import LLMRouter
 from app.services.llm.base import ChatMessage
+from app.services.llm.router import LLMRouter
 
 router = APIRouter(prefix="/a2a", tags=["a2a"])
 
@@ -40,7 +41,8 @@ async def agent_card(widget_id: str, db: DBSession):
 
     card = {
         "name": chatbot.name,
-        "description": getattr(chatbot, "description", None) or f"{chatbot.name} powered by ChatCraft AI",
+        "description": getattr(chatbot, "description", None)
+        or f"{chatbot.name} powered by ChatCraft AI",
         "url": f"{base}/a2a/widgets/{widget_id}",
         "version": "1.0.0",
         "provider": {
@@ -94,9 +96,7 @@ async def a2a_message(widget_id: str, request: Request, db: DBSession):
     params = body.get("params", {})
     message = params.get("message", {})
     parts = message.get("parts", [])
-    user_text = " ".join(
-        p.get("text", "") for p in parts if p.get("type") == "text"
-    ).strip()
+    user_text = " ".join(p.get("text", "") for p in parts if p.get("type") == "text").strip()
 
     if not user_text:
         return _rpc_error(rpc_id, -32602, "Invalid params — no text parts found")
@@ -124,32 +124,33 @@ async def a2a_message(widget_id: str, request: Request, db: DBSession):
     ]
     response = await llm.complete(messages, max_tokens=1024)
 
-    return JSONResponse(content={
-        "jsonrpc": "2.0",
-        "id": rpc_id,
-        "result": {
-            "id": str(uuid.uuid4()),
-            "status": {"state": "completed"},
-            "artifacts": [
-                {
-                    "parts": [{"type": "text", "text": response.content}],
-                    "index": 0,
-                }
-            ],
-        },
-    })
+    return JSONResponse(
+        content={
+            "jsonrpc": "2.0",
+            "id": rpc_id,
+            "result": {
+                "id": str(uuid.uuid4()),
+                "status": {"state": "completed"},
+                "artifacts": [
+                    {
+                        "parts": [{"type": "text", "text": response.content}],
+                        "index": 0,
+                    }
+                ],
+            },
+        }
+    )
 
 
 # ─── Helpers ──────────────────────────────────────────────────────────────────
+
 
 async def _get_chatbot(widget_id: str, db: DBSession) -> ChatbotConfig:
     try:
         cid = uuid.UUID(widget_id)
     except ValueError:
         raise HTTPException(status_code=404, detail="Widget not found")
-    result = await db.execute(
-        select(ChatbotConfig).where(ChatbotConfig.id == cid)
-    )
+    result = await db.execute(select(ChatbotConfig).where(ChatbotConfig.id == cid))
     chatbot = result.scalar_one_or_none()
     if not chatbot:
         raise HTTPException(status_code=404, detail="Widget not found")

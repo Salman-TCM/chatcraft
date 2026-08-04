@@ -6,6 +6,7 @@ Config fields:
   access_token, access_secret — User-context OAuth 1.0a tokens
   bearer_token              — App-only Bearer token (for read operations)
 """
+
 import base64
 import hashlib
 import hmac
@@ -48,12 +49,16 @@ def _oauth1_header(
         f"{urllib.parse.quote(k, safe='')}={urllib.parse.quote(str(v), safe='')}"
         for k, v in sorted(all_params.items())
     )
-    base_string = "&".join([
-        method.upper(),
-        urllib.parse.quote(url, safe=""),
-        urllib.parse.quote(sorted_params, safe=""),
-    ])
-    signing_key = f"{urllib.parse.quote(api_secret, safe='')}&{urllib.parse.quote(access_secret, safe='')}"
+    base_string = "&".join(
+        [
+            method.upper(),
+            urllib.parse.quote(url, safe=""),
+            urllib.parse.quote(sorted_params, safe=""),
+        ]
+    )
+    signing_key = (
+        f"{urllib.parse.quote(api_secret, safe='')}&{urllib.parse.quote(access_secret, safe='')}"
+    )
     signature = base64.b64encode(
         hmac.new(signing_key.encode(), base_string.encode(), hashlib.sha1).digest()
     ).decode()
@@ -74,7 +79,9 @@ class TwitterSender(ChannelSender):
         access_token = self.config.get("access_token", "")
         access_secret = self.config.get("access_secret", "")
         return {
-            "Authorization": _oauth1_header(method, url, api_key, api_secret, access_token, access_secret),
+            "Authorization": _oauth1_header(
+                method, url, api_key, api_secret, access_token, access_secret
+            ),
             "Content-Type": "application/json",
         }
 
