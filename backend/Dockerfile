@@ -1,6 +1,10 @@
+# syntax=docker/dockerfile:1.7
 # =============================================================================
 # ChatCraft AI — FastAPI Backend
 # Alpine-based multi-stage build (musl libc — required for kernel 7.x hosts)
+#
+# BuildKit is required (default in Docker 23+). Enable in older Docker with:
+#   DOCKER_BUILDKIT=1 docker build ...
 # =============================================================================
 
 # -----------------------------------------------------------------------------
@@ -19,46 +23,12 @@ RUN apk add --no-cache \
     musl-dev \
     curl
 
-# Install deps in small independent layers to keep peak memory low.
+# Install from requirements.txt with a persistent pip cache mount — the tarball
+# cache survives across builds, so an unchanged requirements.txt takes seconds
+# to reinstall and a single new dep only downloads that one wheel.
 COPY requirements.txt .
-
-RUN pip install --prefix=/install --no-cache-dir \
-        fastapi==0.136.1 "uvicorn[standard]==0.38.0" gunicorn==26.0.0 \
-        "pydantic[email]==2.12.5" pydantic-settings==2.14.0 python-multipart==0.0.20
-
-RUN pip install --prefix=/install --no-cache-dir \
-        sqlalchemy==2.0.49 alembic==1.18.4 asyncpg==0.31.0 \
-        psycopg2-binary==2.9.12 pgvector==0.4.2
-
-RUN pip install --prefix=/install --no-cache-dir \
-        redis==6.4.0 "celery[redis]==5.6.3"
-
-RUN pip install --prefix=/install --no-cache-dir \
-        "python-jose[cryptography]==3.5.0" "bcrypt>=4.0.0" httpx==0.28.1
-
-RUN pip install --prefix=/install --no-cache-dir \
-        anthropic==0.100.0 openai==2.30.0 google-genai==1.14.0 tiktoken==0.12.0
-
-RUN pip install --prefix=/install --no-cache-dir \
-        litellm==1.83.7
-
-RUN pip install --prefix=/install --no-cache-dir \
-        langchain==1.2.17 langchain-openai==1.2.1 langchain-community==0.4.1
-
-RUN pip install --prefix=/install --no-cache-dir \
-        stripe==15.1.0 elevenlabs==2.45.0 boto3==1.43.5 supabase==2.30.0 resend==2.30.0
-
-RUN pip install --prefix=/install --no-cache-dir \
-        "sentry-sdk[fastapi]==2.59.0" loguru==0.7.3 axiom-py==0.10.0 slowapi==0.1.9
-
-RUN pip install --prefix=/install --no-cache-dir \
-        pdfplumber==0.11.9 pymupdf==1.27.2.3 python-docx==1.2.0 \
-        beautifulsoup4==4.14.3 lxml==6.0.2 cryptography==46.0.5
-
-RUN pip install --prefix=/install --no-cache-dir \
-        websockets==14.2 python-dotenv==1.0.1 pywebpush==2.0.0 \
-        duckduckgo-search==6.3.7 "qrcode[pil]==8.1.0" \
-        pytest==9.0.3 pytest-asyncio==1.3.0
+RUN --mount=type=cache,target=/root/.cache/pip \
+    pip install --prefix=/install -r requirements.txt
 
 
 # -----------------------------------------------------------------------------
