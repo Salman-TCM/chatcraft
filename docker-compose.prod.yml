@@ -1,0 +1,256 @@
+# =============================================================================
+# ChatCraft — Production stack (Ubuntu server, self-hosted GitHub Actions
+# runner, no inbound SSH). Nginx terminates public TLS traffic directly;
+# backend and frontend each run as a blue/green pair so
+# scripts/deploy/deploy.sh can cut traffic over with zero client-visible
+# downtime and roll back by simply not cutting over.
+#
+# Usage:
+#   docker compose -f docker-compose.yml -f docker-compose.prod.yml \
+#     up -d --no-deps <service>
+#
+# Network layout (least privilege):
+#   edge — nginx, frontend_*, backend_*         (public-facing + proxy hop)
+#   data — backend_*, celery_*, postgres, redis, clamav
+#   Frontend and nginx are NEVER on `data` — they cannot reach the database
+#   or Redis directly even if compromised.
+# =============================================================================
+
+services:
+
+  # ---------------------------------------------------------------------------
+  # Nginx — the only container with published ports. TLS termination,
+  # security headers, and the blue/green upstream switch (see nginx/conf.d).
+  # ---------------------------------------------------------------------------
+  nginx:
+    image: nginx:1.27-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/conf.d:/etc/nginx/conf.d:rw   # deploy.sh rewrites upstream-*.conf here
+      - ./nginx/snippets:/etc/nginx/snippets:ro
+      - /etc/letsencrypt:/etc/letsencrypt:ro
+      - certbot_webroot:/var/www/certbot:ro
+    networks: [edge]
+    # No depends_on here: either frontend_blue or frontend_green may be the
+    # active slot at any time, and nginx must stay resilient regardless —
+    # deploy.sh guarantees a slot is healthy *before* pointing the upstream
+    # at it, so nginx never actually starts against a cold backend/frontend.
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost/nginx-health"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 128M
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+
+  # ---------------------------------------------------------------------------
+  # Postgres + Redis — singletons. No blue/green: they're stateful, and
+  # migrations already run against a single database under a deploy lock
+  # (see scripts/deploy/migrate.sh). Not on the edge network.
+  # ---------------------------------------------------------------------------
+  postgres:
+    ports: !reset []
+    networks: [data]
+    environment:
+      ENVIRONMENT: production
+    deploy:
+      resources:
+        limits:
+          cpus: "1"
+          memory: 1G
+    logging:
+      driver: json-file
+      options: { max-size: "10m", max-file: "5" }
+
+  redis:
+    ports: !reset []
+    networks: [data]
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 256M
+    logging:
+      driver: json-file
+      options: { max-size: "10m", max-file: "5" }
+
+  # clamav needs `edge` too — freshclam pulls virus-signature updates from
+  # the internet, and this network is the only one with a default route out.
+  clamav:
+    ports: !reset []
+    networks: [edge, data]
+    deploy:
+      resources:
+        limits:
+          cpus: "1"
+          memory: 1G
+
+  # celery_worker/beat need `edge` too — they call Anthropic/OpenAI/Stripe/
+  # Resend directly (see docker-compose.yml env vars), all internet-bound.
+  celery_worker:
+    volumes: !reset []
+    networks: [edge, data]
+    environment:
+      ENVIRONMENT: production
+      DEBUG: "false"
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 512M
+    logging:
+      driver: json-file
+      options: { max-size: "10m", max-file: "5" }
+
+  celery_beat:
+    volumes: !reset []
+    networks: [edge, data]
+    environment:
+      ENVIRONMENT: production
+      DEBUG: "false"
+    deploy:
+      resources:
+        limits:
+          cpus: "0.25"
+          memory: 256M
+
+  # ---------------------------------------------------------------------------
+  # Backend — blue/green pair. Both defined statically (compose requires
+  # this); steady-state only the active slot is running — deploy.sh starts
+  # the idle slot, health-checks it, swaps nginx's internal upstream
+  # (nginx/conf.d/upstream-backend.conf), drains, then stops the old slot.
+  # ---------------------------------------------------------------------------
+  backend_blue: &backend_common
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    image: chatcraft-backend:${BACKEND_IMAGE_TAG:-latest}
+    restart: unless-stopped
+    volumes: !reset []
+    ports: !reset []
+    networks: [edge, data]
+    environment:
+      ENVIRONMENT: production
+      DEBUG: "false"
+      PYTHONUNBUFFERED: "1"
+      PYTHONDONTWRITEBYTECODE: "1"
+      SECRET_KEY: ${SECRET_KEY}
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-chatcraft}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-chatcraft}
+      REDIS_URL: redis://redis:6379/0
+      CORS_ORIGINS: '["https://tiertech.com.bd"]'
+      FRONTEND_URL: https://tiertech.com.bd
+      API_BASE_URL: https://tiertech.com.bd
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY:-}
+      STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET:-}
+      SUPABASE_URL: ${SUPABASE_URL:-}
+      SUPABASE_KEY: ${SUPABASE_KEY:-}
+      RESEND_API_KEY: ${RESEND_API_KEY:-}
+      SENTRY_DSN: ${SENTRY_DSN:-}
+      SLACK_ALERT_WEBHOOK_URL: ${SLACK_ALERT_WEBHOOK_URL:-}
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-}
+      AWS_S3_BUCKET: ${AWS_S3_BUCKET:-chatcraft-uploads}
+      CLAMAV_HOST: clamav
+      CLAMAV_PORT: "3310"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health/live"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    deploy:
+      resources:
+        limits:
+          cpus: "1"
+          memory: 1G
+    logging:
+      driver: json-file
+      options: { max-size: "10m", max-file: "5" }
+
+  backend_green:
+    <<: *backend_common
+
+  # ---------------------------------------------------------------------------
+  # Frontend — blue/green pair, same pattern as backend. BACKEND_URL points
+  # at nginx's internal listener (8081), not at a backend container name, so
+  # a backend swap never requires touching the frontend.
+  # ---------------------------------------------------------------------------
+  frontend_blue: &frontend_common
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile
+      # "final" (standalone) stage has a known file-tracing bug — see
+      # docker-compose.staging.yml. Running from "builder" until fixed.
+      target: builder
+      args:
+        NEXT_PUBLIC_API_URL: https://tiertech.com.bd
+        NEXT_PUBLIC_APP_URL: https://tiertech.com.bd
+        NEXT_PUBLIC_APP_NAME: ${NEXT_PUBLIC_APP_NAME:-Tiertech}
+        NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY: ${STRIPE_PUBLISHABLE_KEY:-}
+        NEXT_PUBLIC_SENTRY_DSN: ${NEXT_PUBLIC_SENTRY_DSN:-}
+    image: chatcraft-frontend:${FRONTEND_IMAGE_TAG:-latest}
+    restart: unless-stopped
+    volumes: !reset []
+    ports: !reset []
+    networks: [edge]
+    command: npm run start   # builder stage's WORKDIR is already /app/frontend
+    environment:
+      NODE_ENV: production
+      NEXTAUTH_URL: https://tiertech.com.bd
+      NEXTAUTH_SECRET: ${NEXTAUTH_SECRET}
+      AUTH_SECRET: ${NEXTAUTH_SECRET}
+      AUTH_URL: https://tiertech.com.bd
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
+      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
+      NEXT_PUBLIC_API_URL: https://tiertech.com.bd
+      BACKEND_URL: http://nginx:8081   # internal listener -> backend_upstream (swappable)
+      NEXT_PUBLIC_APP_URL: https://tiertech.com.bd
+      SENTRY_DSN: ${NEXT_PUBLIC_SENTRY_DSN:-}
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('http').get('http://localhost:3000/', r => process.exit(r.statusCode < 500 ? 0 : 1)).on('error', () => process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 512M
+    logging:
+      driver: json-file
+      options: { max-size: "10m", max-file: "5" }
+
+  frontend_green:
+    <<: *frontend_common
+
+
+networks:
+  edge:
+    driver: bridge
+  data:
+    driver: bridge
+    internal: true   # no route to the outside world — DB/Redis/queue live here only
+
+volumes:
+  certbot_webroot:

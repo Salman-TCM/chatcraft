@@ -154,3 +154,13 @@ temp/
 *.tmp
 *.orig
 .cache/
+
+# -----------------------------------------------------------------------------
+# DEPLOYMENT — live runtime state on the server, never committed.
+# The repo checkout on the server gets `git reset --hard` on every deploy;
+# these files must survive that untouched. See nginx/conf.d/*.template.
+# -----------------------------------------------------------------------------
+/nginx/conf.d/upstream-backend.conf
+/nginx/conf.d/upstream-frontend.conf
+/.deploy/
+/backups/
