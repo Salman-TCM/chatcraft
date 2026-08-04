@@ -67,7 +67,13 @@ wait_healthy() {
       local deep_out deep_code deep_start deep_ms
       deep_start=$(date +%s%N)
       deep_code=0
-      deep_out="$(docker exec "$container" curl -s -o /tmp/wait_healthy_body -w '%{http_code}' --max-time 8 "http://localhost:${port}${deep_path}" 2>&1)" || deep_code=$?
+      if docker exec "$container" sh -c 'command -v curl' >/dev/null 2>&1; then
+        deep_out="$(docker exec "$container" curl -s -o /dev/null -w '%{http_code}' --max-time 8 "http://localhost:${port}${deep_path}" 2>&1)" || deep_code=$?
+      else
+        # Alpine images ship wget but not curl — exit 0 means 2xx
+        docker exec "$container" wget -qO /dev/null --timeout=8 "http://localhost:${port}${deep_path}" >/dev/null 2>&1 || deep_code=$?
+        [[ "$deep_code" == "0" ]] && deep_out="200" || deep_out="000"
+      fi
       deep_ms=$(( ($(date +%s%N) - deep_start) / 1000000 ))
       log "wait_healthy[${elapsed}s]: docker_status=healthy deep_curl_exit=${deep_code} deep_http=${deep_out} deep_ms=${deep_ms}"
       if [[ "$deep_code" == "0" && "$deep_out" == 2* ]]; then
