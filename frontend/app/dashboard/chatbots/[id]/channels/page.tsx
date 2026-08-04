@@ -18,6 +18,16 @@ import {
   WifiOff,
   X,
 } from "lucide-react";
+import {
+  SiTelegram,
+  SiWhatsapp,
+  SiMessenger,
+  SiInstagram,
+  SiDiscord,
+  SiX,
+  SiTiktok,
+} from "react-icons/si";
+import { FaCommentSms, FaPhone } from "react-icons/fa6";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -40,7 +50,7 @@ interface Integration {
 interface ChannelDef {
   key: string;
   label: string;
-  icon: string;
+  icon: React.ReactNode;
   color: string;
   description: string;
   fields: { key: string; label: string; placeholder: string; secret?: boolean }[];
@@ -52,7 +62,7 @@ const CHANNELS: ChannelDef[] = [
   {
     key: "telegram",
     label: "Telegram",
-    icon: "✈️",
+    icon: <SiTelegram size={24} color="#26A5E4" />,
     color: "bg-sky-50 border-sky-200",
     description: "Connect a Telegram bot to handle messages via Bot API.",
     fields: [
@@ -64,7 +74,7 @@ const CHANNELS: ChannelDef[] = [
   {
     key: "whatsapp",
     label: "WhatsApp",
-    icon: "💬",
+    icon: <SiWhatsapp size={24} color="#25D366" />,
     color: "bg-green-50 border-green-200",
     description: "Connect via WhatsApp Business Cloud API (Meta).",
     fields: [
@@ -77,7 +87,7 @@ const CHANNELS: ChannelDef[] = [
   {
     key: "facebook",
     label: "Facebook Messenger",
-    icon: "📘",
+    icon: <SiMessenger size={24} color="#0099FF" />,
     color: "bg-blue-50 border-blue-200",
     description: "Connect a Facebook Page to receive and reply to Messenger messages.",
     fields: [
@@ -90,7 +100,7 @@ const CHANNELS: ChannelDef[] = [
   {
     key: "instagram",
     label: "Instagram DM",
-    icon: "📸",
+    icon: <SiInstagram size={24} color="#E4405F" />,
     color: "bg-pink-50 border-pink-200",
     description: "Receive and reply to Instagram Direct Messages via the Instagram Graph API.",
     fields: [
@@ -102,7 +112,7 @@ const CHANNELS: ChannelDef[] = [
   {
     key: "sms",
     label: "SMS (Twilio)",
-    icon: "📱",
+    icon: <FaCommentSms size={24} color="#F22F46" />,
     color: "bg-red-50 border-red-200",
     description: "Send and receive SMS messages via your Twilio account.",
     fields: [
@@ -115,7 +125,7 @@ const CHANNELS: ChannelDef[] = [
   {
     key: "phone",
     label: "Phone Calls (Twilio)",
-    icon: "☎️",
+    icon: <FaPhone size={24} color="#F22F46" />,
     color: "bg-orange-50 border-orange-200",
     description: "Handle inbound PSTN calls — AI answers, speaks, and routes to your team.",
     fields: [
@@ -129,7 +139,7 @@ const CHANNELS: ChannelDef[] = [
   {
     key: "discord",
     label: "Discord",
-    icon: "🎮",
+    icon: <SiDiscord size={24} color="#5865F2" />,
     color: "bg-indigo-50 border-indigo-200",
     description: "Connect a Discord bot to reply to messages in your server channels.",
     fields: [
@@ -142,7 +152,7 @@ const CHANNELS: ChannelDef[] = [
   {
     key: "twitter",
     label: "X (Twitter)",
-    icon: "🐦",
+    icon: <SiX size={24} color="#000000" />,
     color: "bg-slate-50 border-slate-200",
     description: "Auto-reply to @mentions using AI. Requires a Twitter Developer App with Account Activity API access.",
     fields: [
@@ -159,7 +169,7 @@ const CHANNELS: ChannelDef[] = [
   {
     key: "tiktok",
     label: "TikTok DM",
-    icon: "🎵",
+    icon: <SiTiktok size={24} color="#000000" />,
     color: "bg-pink-50 border-pink-200",
     description: "Receive and reply to TikTok Direct Messages via TikTok Business API.",
     fields: [
@@ -332,7 +342,7 @@ export default function ChannelsPage() {
               onClick={() => setExpanded(isExpanded ? null : ch.key)}
             >
               <div className="flex items-center gap-3">
-                <span className="text-2xl">{ch.icon}</span>
+                <span className="flex h-8 w-8 items-center justify-center">{ch.icon}</span>
                 <div>
                   <div className="flex items-center gap-2">
                     <span className="font-medium">{ch.label}</span>
