@@ -1,5 +1,9 @@
 # Bootstrap template ONLY — see upstream-backend.conf.template for why the
 # live upstream-frontend.conf must stay untracked and gitignored.
-upstream frontend_upstream {
-  server frontend_blue:3000;
+#
+# map-based variable so nginx resolves the container name at request time
+# (via resolver 127.0.0.11) rather than at startup — prevents "host not
+# found in upstream" on a fresh server before the slot container exists.
+map $host $frontend_upstream {
+  default "frontend_blue:3000";
 }

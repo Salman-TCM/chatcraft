@@ -40,8 +40,9 @@ swap_upstream() {
 
   cat > "$tmp" <<EOF
 # Live runtime state — see upstream-${service}.conf.template. Do not edit by hand.
-upstream ${service}_upstream {
-  server ${service}_${slot}:${port};
+# map variable so nginx resolves the container name at request time via resolver 127.0.0.11.
+map \$host \$${service}_upstream {
+  default "${service}_${slot}:${port}";
 }
 EOF
   mv "$tmp" "$live"
