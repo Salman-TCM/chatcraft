@@ -64,13 +64,24 @@ wait_healthy() {
     local status
     status="$(docker inspect --format='{{.State.Health.Status}}' "$container" 2>/dev/null || echo "unknown")"
     if [[ "$status" == "healthy" ]]; then
-      if docker exec "$container" curl -sf --max-time 8 "http://localhost:${port}${deep_path}" > /dev/null; then
+      local deep_out deep_code deep_start deep_ms
+      deep_start=$(date +%s%N)
+      deep_code=0
+      deep_out="$(docker exec "$container" curl -s -o /tmp/wait_healthy_body -w '%{http_code}' --max-time 8 "http://localhost:${port}${deep_path}" 2>&1)" || deep_code=$?
+      deep_ms=$(( ($(date +%s%N) - deep_start) / 1000000 ))
+      log "wait_healthy[${elapsed}s]: docker_status=healthy deep_curl_exit=${deep_code} deep_http=${deep_out} deep_ms=${deep_ms}"
+      if [[ "$deep_code" == "0" && "$deep_out" == 2* ]]; then
         return 0
       fi
+    else
+      log "wait_healthy[${elapsed}s]: docker_status=${status}"
     fi
     sleep 3
     elapsed=$((elapsed + 3))
   done
+  log "wait_healthy: gave up after ${timeout}s — final docker health log:"
+  docker inspect --format='{{json .State.Health}}' "$container" 2>&1 | head -c 4000
+  echo
   return 1
 }
 
