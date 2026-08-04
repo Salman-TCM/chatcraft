@@ -18,6 +18,15 @@ export const apiClient: AxiosInstance = axios.create({
   },
 });
 
+// For multipart uploads, let the browser set Content-Type (includes the boundary).
+// The instance default "application/json" would otherwise override it in axios 1.x.
+apiClient.interceptors.request.use((config) => {
+  if (config.data instanceof FormData) {
+    delete config.headers["Content-Type"];
+  }
+  return config;
+});
+
 // Attach the backend JWT on every request — prefer an active impersonation token
 apiClient.interceptors.request.use(async (config) => {
   if (typeof window !== "undefined") {
