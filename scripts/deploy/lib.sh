@@ -37,6 +37,37 @@ EOF
   fi
 }
 
+# On a fresh server the Let's Encrypt cert won't exist yet, and nginx refuses
+# to start with a missing ssl_certificate. Generate a self-signed placeholder
+# so nginx can boot; an operator (or a certbot init container) can then run
+# `certbot --nginx` to get a real cert, and nginx reload picks it up.
+#
+# Runs an alpine/openssl container as root so it can write to the host's
+# /etc/letsencrypt via bind mount (the runner user typically can't).
+ensure_ssl_cert() {
+  local domain="${1:-tiertech.com.bd}"
+  local cert_dir="/etc/letsencrypt/live/${domain}"
+
+  if [[ -f "${cert_dir}/fullchain.pem" && -f "${cert_dir}/privkey.pem" ]]; then
+    return 0
+  fi
+
+  log "SSL cert missing for ${domain} — generating self-signed placeholder so nginx can boot"
+  log "  (run 'certbot certonly --webroot -w /var/www/certbot -d ${domain}' to get a real cert)"
+
+  docker run --rm \
+    -v /etc/letsencrypt:/etc/letsencrypt \
+    alpine:3.20 \
+    sh -c "apk add --no-cache openssl >/dev/null && \
+           mkdir -p '${cert_dir}' && \
+           openssl req -x509 -nodes -newkey rsa:2048 -days 30 \
+             -keyout '${cert_dir}/privkey.pem' \
+             -out '${cert_dir}/fullchain.pem' \
+             -subj '/CN=${domain}' \
+             -addext 'subjectAltName=DNS:${domain},DNS:www.${domain}' \
+             >/dev/null 2>&1"
+}
+
 # Which slot (blue|green) is currently wired into nginx for $1 (backend|frontend).
 active_slot() {
   local service="$1"
@@ -72,6 +103,10 @@ EOF
   local other
   [[ "$service" == "backend" ]] && other="frontend" || other="backend"
   ensure_upstream_conf "$other"
+
+  # Same story for the SSL cert — nginx refuses to start without it. Generate
+  # a self-signed placeholder on fresh servers so nginx can boot.
+  ensure_ssl_cert
 
   # Ensure nginx is running AND stable before we try to reload it.
   local nginx_running=0
