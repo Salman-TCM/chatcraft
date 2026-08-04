@@ -64,7 +64,7 @@ wait_healthy() {
     local status
     status="$(docker inspect --format='{{.State.Health.Status}}' "$container" 2>/dev/null || echo "unknown")"
     if [[ "$status" == "healthy" ]]; then
-      if docker exec "$container" curl -sf "http://localhost:${port}${deep_path}" > /dev/null; then
+      if docker exec "$container" curl -sf --max-time 8 "http://localhost:${port}${deep_path}" > /dev/null; then
         return 0
       fi
     fi
