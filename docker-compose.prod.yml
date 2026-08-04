@@ -208,6 +208,9 @@ services:
         NEXT_PUBLIC_APP_NAME: ${NEXT_PUBLIC_APP_NAME:-Tiertech}
         NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY: ${STRIPE_PUBLISHABLE_KEY:-}
         NEXT_PUBLIC_SENTRY_DSN: ${NEXT_PUBLIC_SENTRY_DSN:-}
+        # Baked into routes-manifest.json at build time by next.config.mjs rewrites().
+        # Runtime env vars are too late — the manifest is already frozen.
+        BACKEND_URL: http://nginx:8081
     image: chatcraft-frontend:${FRONTEND_IMAGE_TAG:-latest}
     restart: unless-stopped
     volumes: !reset []
