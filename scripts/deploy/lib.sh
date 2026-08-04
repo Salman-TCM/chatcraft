@@ -46,6 +46,17 @@ upstream ${service}_upstream {
 EOF
   mv "$tmp" "$live"
 
+  # Ensure nginx is running before we try to exec into it.
+  if ! compose exec -T nginx true >/dev/null 2>&1; then
+    log "nginx is not running — starting it now..."
+    compose up -d --no-deps nginx
+    local waited=0
+    until compose exec -T nginx true >/dev/null 2>&1; do
+      sleep 2; waited=$((waited + 2))
+      (( waited > 30 )) && { log "nginx failed to start within 30s"; return 1; }
+    done
+  fi
+
   compose exec -T nginx nginx -t
   compose exec -T nginx nginx -s reload
   log "nginx ${service}_upstream -> ${service}_${slot}"
