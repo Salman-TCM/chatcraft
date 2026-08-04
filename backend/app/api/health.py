@@ -1,24 +1,25 @@
+import asyncio
 import time
 from typing import Any
 
 from fastapi import APIRouter
 from fastapi.responses import JSONResponse
 from sqlalchemy import text
-from sqlalchemy.ext.asyncio import create_async_engine
 
-from app.core.config import settings
 from app.db.redis import get_async_redis
+from app.db.session import engine
 
 router = APIRouter(tags=["health"])
+
+_CHECK_TIMEOUT = 5  # seconds — fail fast rather than hang the deploy health check
 
 
 async def _check_postgres() -> dict[str, Any]:
     start = time.monotonic()
     try:
-        engine = create_async_engine(settings.database_url, pool_pre_ping=True)
-        async with engine.connect() as conn:
-            await conn.execute(text("SELECT 1"))
-        await engine.dispose()
+        async with asyncio.timeout(_CHECK_TIMEOUT):
+            async with engine.connect() as conn:
+                await conn.execute(text("SELECT 1"))
         return {"status": "healthy", "latency_ms": round((time.monotonic() - start) * 1000, 2)}
     except Exception as exc:
         return {"status": "unhealthy", "error": str(exc)}
@@ -27,8 +28,9 @@ async def _check_postgres() -> dict[str, Any]:
 async def _check_redis() -> dict[str, Any]:
     start = time.monotonic()
     try:
-        client = get_async_redis()
-        await client.ping()
+        async with asyncio.timeout(_CHECK_TIMEOUT):
+            client = get_async_redis()
+            await client.ping()
         return {"status": "healthy", "latency_ms": round((time.monotonic() - start) * 1000, 2)}
     except Exception as exc:
         return {"status": "unhealthy", "error": str(exc)}

@@ -80,7 +80,7 @@ compose build "$IDLE_NAME"
 log "Starting ${IDLE_NAME}..."
 compose up -d --no-deps "$IDLE_NAME"
 
-if ! wait_healthy "$IDLE_NAME" "$DEEP_PATH" "$PORT" 120; then
+if ! wait_healthy "$IDLE_NAME" "$DEEP_PATH" "$PORT" 180; then
   compose stop "$IDLE_NAME" || true
   fail "${IDLE_NAME} never became healthy — old slot (${ACTIVE_NAME}) is still serving traffic, nothing was cut over"
 fi
