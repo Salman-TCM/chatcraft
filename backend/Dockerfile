@@ -108,6 +108,6 @@ CMD ["gunicorn", "app.main:app", \
      "--worker-class", "uvicorn.workers.UvicornWorker", \
      "--bind", "0.0.0.0:8000", \
      "--timeout", "120", \
-     "--keepalive", "5", \
+     "--keep-alive", "5", \
      "--access-logfile", "-", \
      "--error-logfile", "-"]
