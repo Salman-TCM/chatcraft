@@ -55,7 +55,7 @@ def process_document(self: EmbeddingTask, document_id: str) -> dict:
 
 
 async def _run_pipeline(document_id: str) -> None:
-    from app.db.session import AsyncSessionLocal
+    from app.db.session import AsyncSessionLocal, engine
     from app.models.knowledge_base import (
         DocumentStatus,
         KnowledgeBaseChunk,
@@ -65,6 +65,12 @@ async def _run_pipeline(document_id: str) -> None:
     from app.services.kb.cleaner import clean
     from app.services.kb.embedder import embed_texts
     from app.services.kb.extractor import extract_text_for_document
+
+    # Celery pre-forks workers. The module-level async engine's pool was created
+    # in the parent process and holds connection refs bound to a different event
+    # loop, causing "Future attached to a different loop" errors. Dispose so this
+    # task's asyncio.run() gets a fresh pool bound to its own loop.
+    await engine.dispose()
 
     doc_uuid = uuid.UUID(document_id)
 
@@ -138,9 +144,10 @@ async def _run_pipeline(document_id: str) -> None:
 
 
 async def _mark_error(document_id: str, message: str) -> None:
-    from app.db.session import AsyncSessionLocal
+    from app.db.session import AsyncSessionLocal, engine
     from app.models.knowledge_base import DocumentStatus, KnowledgeBaseDocument
 
+    await engine.dispose()
     async with AsyncSessionLocal() as db:
         doc = await db.get(KnowledgeBaseDocument, uuid.UUID(document_id))
         if doc:
@@ -181,13 +188,15 @@ def process_agent_document(self: EmbeddingTask, document_id: str) -> dict:
 async def _run_agent_pipeline(document_id: str) -> None:
     from sqlalchemy import delete
 
-    from app.db.session import AsyncSessionLocal
+    from app.db.session import AsyncSessionLocal, engine
     from app.models.agent_knowledge_base import AgentKnowledgeChunk, AgentKnowledgeDocument
     from app.models.knowledge_base import DocumentStatus
     from app.services.kb.chunker import chunk_text
     from app.services.kb.cleaner import clean
     from app.services.kb.embedder import embed_texts
     from app.services.kb.extractor import extract_text_for_document
+
+    await engine.dispose()  # See note in _run_pipeline about celery+asyncio pool
 
     doc_uuid = uuid.UUID(document_id)
 
@@ -249,10 +258,11 @@ async def _run_agent_pipeline(document_id: str) -> None:
 
 
 async def _mark_agent_error(document_id: str, message: str) -> None:
-    from app.db.session import AsyncSessionLocal
+    from app.db.session import AsyncSessionLocal, engine
     from app.models.agent_knowledge_base import AgentKnowledgeDocument
     from app.models.knowledge_base import DocumentStatus
 
+    await engine.dispose()
     async with AsyncSessionLocal() as db:
         doc = await db.get(AgentKnowledgeDocument, uuid.UUID(document_id))
         if doc:
