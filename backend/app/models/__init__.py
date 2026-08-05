@@ -1,6 +1,12 @@
 # Import all models here so Base.metadata is fully populated when
 # Alembic reads it in env.py. Add each new model file as it is created.
 from app.models.admin_log import AdminActionLog  # noqa: F401
+from app.models.agent import Agent  # noqa: F401
+from app.models.agent_conversation import AgentConversation  # noqa: F401
+from app.models.agent_knowledge_base import (  # noqa: F401
+    AgentKnowledgeChunk,
+    AgentKnowledgeDocument,
+)
 from app.models.analytics_daily import AnalyticsDaily  # noqa: F401
 from app.models.api_token import ApiToken  # noqa: F401
 from app.models.automation import (  # noqa: F401

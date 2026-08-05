@@ -147,3 +147,115 @@ async def _mark_error(document_id: str, message: str) -> None:
             doc.status = DocumentStatus.error
             doc.error_message = message[:1000]
             await db.commit()
+
+
+# ── Agent knowledge base pipeline ─────────────────────────────────────────────
+
+
+@celery_app.task(
+    name="workers.process_agent_document",
+    bind=True,
+    base=EmbeddingTask,
+    max_retries=3,
+    default_retry_delay=30,
+    queue="embeddings",
+    acks_late=True,
+)
+def process_agent_document(self: EmbeddingTask, document_id: str) -> dict:
+    """Same pipeline as process_document but for AgentKnowledgeDocument rows."""
+    try:
+        asyncio.run(_run_agent_pipeline(document_id))
+        return {"document_id": document_id, "status": "ready"}
+    except Exception as exc:
+        logger.exception(f"process_agent_document failed for {document_id}: {exc}")
+        try:
+            asyncio.run(_mark_agent_error(document_id, str(exc)))
+        except Exception:
+            pass
+
+        if self.request.retries < self.max_retries:
+            raise self.retry(exc=exc, countdown=30 * (2**self.request.retries))
+        return {"document_id": document_id, "status": "error", "error": str(exc)}
+
+
+async def _run_agent_pipeline(document_id: str) -> None:
+    from sqlalchemy import delete
+
+    from app.db.session import AsyncSessionLocal
+    from app.models.agent_knowledge_base import AgentKnowledgeChunk, AgentKnowledgeDocument
+    from app.models.knowledge_base import DocumentStatus
+    from app.services.kb.chunker import chunk_text
+    from app.services.kb.cleaner import clean
+    from app.services.kb.embedder import embed_texts
+    from app.services.kb.extractor import extract_text_for_document
+
+    doc_uuid = uuid.UUID(document_id)
+
+    async with AsyncSessionLocal() as db:
+        doc: AgentKnowledgeDocument | None = await db.get(AgentKnowledgeDocument, doc_uuid)
+        if not doc:
+            raise ValueError(f"Agent document {document_id} not found")
+
+        doc.status = DocumentStatus.processing
+        doc.error_message = None
+        await db.commit()
+
+        logger.info(f"[AgentKB] Processing document {document_id} type={doc.type.value}")
+
+        raw_text = await extract_text_for_document(
+            doc_type=doc.type.value,
+            file_url=doc.file_url,
+            source_url=doc.source_url,
+            raw_content=doc.raw_content,
+        )
+        if not raw_text.strip():
+            raise ValueError("No text could be extracted from the document")
+
+        cleaned = clean(raw_text)
+        chunks = chunk_text(cleaned)
+        if not chunks:
+            raise ValueError("Document produced no chunks after cleaning")
+
+        logger.info(f"[AgentKB] Document {document_id} → {len(chunks)} chunks")
+
+        texts = [c.content for c in chunks]
+        vectors = await embed_texts(texts)
+
+        await db.execute(
+            delete(AgentKnowledgeChunk).where(AgentKnowledgeChunk.document_id == doc_uuid)
+        )
+
+        total_tokens = 0
+        for chunk, vector in zip(chunks, vectors):
+            db.add(
+                AgentKnowledgeChunk(
+                    document_id=doc_uuid,
+                    chunk_index=chunk.index,
+                    content=chunk.content,
+                    token_count=chunk.token_count,
+                    embedding=vector,
+                )
+            )
+            total_tokens += chunk.token_count
+
+        doc.chunk_count = len(chunks)
+        doc.token_count = total_tokens
+        doc.status = DocumentStatus.ready
+        doc.error_message = None
+        await db.commit()
+        logger.info(
+            f"[AgentKB] Document {document_id} ready — {len(chunks)} chunks, {total_tokens} tokens"
+        )
+
+
+async def _mark_agent_error(document_id: str, message: str) -> None:
+    from app.db.session import AsyncSessionLocal
+    from app.models.agent_knowledge_base import AgentKnowledgeDocument
+    from app.models.knowledge_base import DocumentStatus
+
+    async with AsyncSessionLocal() as db:
+        doc = await db.get(AgentKnowledgeDocument, uuid.UUID(document_id))
+        if doc:
+            doc.status = DocumentStatus.error
+            doc.error_message = message[:1000]
+            await db.commit()

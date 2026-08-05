@@ -35,6 +35,8 @@ from app.core.features import AGENT_BUILDER
 from app.core.rate_limit import limiter
 from app.models.agent import Agent
 from app.models.agent_conversation import AgentConversation
+from app.models.agent_knowledge_base import AgentKnowledgeDocument
+from app.models.knowledge_base import DocumentStatus
 from app.models.chatbot_config import ChatbotConfig
 from app.models.mcp import MCPServerConfig
 from app.models.usage_log import UsageLog
@@ -1174,6 +1176,33 @@ def _build_builtin_tools(tools_config: dict) -> list[dict]:
             }
         )
 
+    if tools_config.get("search_kb"):
+        defs.append(
+            {
+                "name": "search_kb",
+                "description": (
+                    "Search this agent's private knowledge base for relevant passages. "
+                    "Use this whenever the answer might live in an uploaded document, URL, "
+                    "or pasted text the user has attached to the agent. Returns the top "
+                    "matching chunks with their source document names."
+                ),
+                "input_schema": {
+                    "type": "object",
+                    "properties": {
+                        "query": {
+                            "type": "string",
+                            "description": "Natural-language query describing what you're looking for",
+                        },
+                        "top_k": {
+                            "type": "integer",
+                            "description": "Maximum number of chunks to return (default 5, max 10)",
+                        },
+                    },
+                    "required": ["query"],
+                },
+            }
+        )
+
     return defs
 
 
@@ -1210,6 +1239,8 @@ async def _execute_tool(name: str, inputs: dict, mcp_map: dict, ctx: dict | None
             return await _tool_list_available_models(ctx or {})
         elif name == "create_agent":
             return await _tool_create_agent(inputs, ctx or {})
+        elif name == "search_kb":
+            return await _tool_search_kb(inputs, ctx or {})
         return f"Unknown tool: {name}"
     except Exception as exc:
         return f"Tool error: {exc}"
@@ -1874,6 +1905,51 @@ async def _tool_create_agent(inputs: dict, ctx: dict) -> str:
         return f"Error creating agent: {exc}"
 
 
+async def _tool_search_kb(inputs: dict, ctx: dict) -> str:
+    """Search this agent's private knowledge base (per-agent RAG)."""
+    query = (inputs.get("query") or "").strip()
+    if not query:
+        return "Error: query is required"
+
+    agent_id_str = ctx.get("agent_id")
+    if not agent_id_str:
+        return "Error: no agent context available for KB search"
+
+    try:
+        top_k = int(inputs.get("top_k") or 5)
+    except (TypeError, ValueError):
+        top_k = 5
+    top_k = max(1, min(10, top_k))
+
+    from app.db.session import AsyncSessionLocal
+    from app.services.kb.agent_rag import AgentRAGService
+
+    try:
+        agent_uuid = uuid.UUID(agent_id_str)
+    except ValueError:
+        return "Error: malformed agent_id"
+
+    async with AsyncSessionLocal() as db:
+        rag = AgentRAGService(db)
+        _, chunks = await rag.query(
+            agent_id=agent_uuid,
+            user_message=query,
+            top_k=top_k,
+            threshold=0.3,
+            debug=True,
+        )
+
+    if not chunks:
+        return "No relevant passages found in the knowledge base."
+
+    parts = []
+    for i, c in enumerate(chunks, 1):
+        parts.append(
+            f"[{i}] {c.document_name} (similarity {c.similarity:.2f})\n{c.content.strip()}"
+        )
+    return "\n\n---\n\n".join(parts)
+
+
 # ─── System prompt builder ────────────────────────────────────────────────────
 
 
@@ -1897,6 +1973,26 @@ async def _build_system_prompt(
         parts.append(
             "You are a helpful AI agent. Use the available tools to complete tasks thoroughly and accurately."
         )
+
+    # If the agent has ready KB documents AND the search_kb tool is enabled,
+    # tell the model the KB exists so it knows to search it.
+    agent_tools_cfg = agent.tools or {}
+    if agent_tools_cfg.get("search_kb"):
+        kb_result = await db.execute(
+            select(func.count(AgentKnowledgeDocument.id)).where(
+                AgentKnowledgeDocument.agent_id == agent.id,
+                AgentKnowledgeDocument.status == DocumentStatus.ready,
+            )
+        )
+        kb_doc_count = kb_result.scalar_one() or 0
+        if kb_doc_count > 0:
+            parts.append(
+                f"You have access to a private knowledge base containing {kb_doc_count} "
+                f"indexed document{'s' if kb_doc_count != 1 else ''}. When the user's request "
+                f"could plausibly be answered from those documents (facts, policies, product "
+                f"details, prior context), call the search_kb tool BEFORE relying on your own "
+                f"general knowledge. Cite the source document name when you use retrieved content."
+            )
 
     # Agent Builder mode: prepend strict tool-use instructions so the model
     # doesn't hallucinate steps or generate code instead of calling tools.
