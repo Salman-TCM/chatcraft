@@ -11,7 +11,6 @@ Each agent has:
 """
 
 import asyncio
-import ipaddress
 import json
 import re as _re
 import secrets
@@ -19,14 +18,13 @@ import uuid
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime
 from typing import Any
-from urllib.parse import urlparse
 
 import anthropic
 import httpx
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import StreamingResponse
 from openai import AsyncOpenAI
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 
 from app.core.config import settings
@@ -61,7 +59,7 @@ async def list_agents(user: CurrentUser, db: DBSession):
     return {"success": True, "data": [AgentResponse.model_validate(a) for a in agents]}
 
 
-@router.post("")
+@router.post("", status_code=status.HTTP_201_CREATED)
 async def create_agent(body: AgentCreateRequest, user: CurrentUser, db: DBSession):
     if body.chatbot_id:
         await _get_owned_chatbot(body.chatbot_id, user.id, db)
@@ -75,6 +73,8 @@ async def create_agent(body: AgentCreateRequest, user: CurrentUser, db: DBSessio
         tools=body.tools.model_dump(),
         memory_enabled=body.memory_enabled,
         max_steps=body.max_steps,
+        is_active=body.is_active,
+        webhook_url=body.webhook_url,
     )
     db.add(agent)
     await db.commit()
@@ -167,8 +167,8 @@ async def get_public_agent(share_token: str, db: DBSession):
 
 
 class PublicChatRequest(BaseModel):
-    message: str
-    conversation_history: list[dict] = []
+    message: str = Field(..., min_length=1, max_length=100_000)
+    conversation_history: list[dict] = Field(default_factory=list, max_length=200)
 
 
 @public_router.post("/{share_token}/chat")
@@ -178,6 +178,15 @@ async def public_agent_chat(
 ):
     """Stream a public agent response. No authentication required."""
     agent = await _get_shared_agent(share_token, db)
+    if not agent.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={
+                "success": False,
+                "error": "Agent is inactive",
+                "code": "AGENT_INACTIVE",
+            },
+        )
     system_prompt = await _build_system_prompt(
         agent, db
     )  # no user_id — never inject token for public
@@ -330,8 +339,10 @@ async def get_agent_analytics(agent_id: uuid.UUID, user: CurrentUser, db: DBSess
 
 
 class AgentChatRequest(BaseModel):
-    message: str
-    conversation_history: list[dict] = []
+    # 100k chars caps a single-turn payload well below any provider's context
+    # window while blocking DoS-scale bodies and runaway token bills.
+    message: str = Field(..., min_length=1, max_length=100_000)
+    conversation_history: list[dict] = Field(default_factory=list, max_length=200)
 
 
 @router.post("/{agent_id}/chat")
@@ -345,6 +356,15 @@ async def agent_chat(
 ):
     """Stream an agent response with tool use, showing thinking steps as SSE events."""
     agent = await _get_owned_agent(agent_id, user.id, db)
+    if not agent.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={
+                "success": False,
+                "error": "Agent is inactive. Enable it in Configure to run.",
+                "code": "AGENT_INACTIVE",
+            },
+        )
     system_prompt = await _build_system_prompt(agent, db, user_id=user.id)
     tools, mcp_map = await _build_tools_with_mcp(agent, user.id, db)
     _, api_key = await _resolve_api_key(user.id, agent.model or "claude-sonnet-4-6", db)
@@ -1436,40 +1456,7 @@ async def _tool_web_search(query: str, ctx: dict | None = None) -> str:
     return "No search results found. Add a search API key in Settings → Search Integrations for better results (Tavily is free at app.tavily.com)."
 
 
-_PRIVATE_NETS = [
-    ipaddress.ip_network("10.0.0.0/8"),
-    ipaddress.ip_network("172.16.0.0/12"),
-    ipaddress.ip_network("192.168.0.0/16"),
-    ipaddress.ip_network("127.0.0.0/8"),
-    ipaddress.ip_network("169.254.0.0/16"),  # link-local / cloud metadata
-    ipaddress.ip_network("::1/128"),
-    ipaddress.ip_network("fc00::/7"),
-]
-
-_BLOCKED_HOSTNAMES = {"localhost", "metadata.google.internal", "metadata.internal"}
-
-
-def _is_ssrf_safe(url: str) -> bool:
-    """Return True only if the URL does not target a private/internal address."""
-    try:
-        parsed = urlparse(url)
-        if parsed.scheme not in ("http", "https"):
-            return False
-        host = (parsed.hostname or "").lower().rstrip(".")
-        if not host:
-            return False
-        if host in _BLOCKED_HOSTNAMES:
-            return False
-        if host.endswith(".local") or host.endswith(".internal") or host.endswith(".localhost"):
-            return False
-        try:
-            ip = ipaddress.ip_address(host)
-            return not any(ip in net for net in _PRIVATE_NETS)
-        except ValueError:
-            pass  # not an IP literal — hostname checks above are sufficient
-        return True
-    except Exception:
-        return False
+from app.services.net_security import is_ssrf_safe as _is_ssrf_safe  # noqa: E402
 
 
 async def _tool_http(inputs: dict) -> str:
