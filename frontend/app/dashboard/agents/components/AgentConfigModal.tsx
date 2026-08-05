@@ -52,6 +52,13 @@ interface MCPTool {
   description?: string;
 }
 
+interface ProviderModels {
+  provider: string;
+  label: string;
+  available: boolean;
+  models: { id: string; name: string; allowed?: boolean }[];
+}
+
 interface AgentConfigModalProps {
   agent: Agent;
   open: boolean;
@@ -79,14 +86,6 @@ const TOOLS: ToolConfig[] = [
   { key: "sms",          label: "SMS",            description: "Send text messages via Twilio",               icon: Smartphone,  category: "communication" },
   { key: "verification", label: "Verification",   description: "Send and verify OTP codes",                   icon: ShieldCheck, category: "communication" },
   { key: "agent_builder",label: "Agent Builder",  description: "Create and manage other agents",              icon: Bot,         category: "meta" },
-];
-
-const MODELS = [
-  { value: "claude-sonnet-4-6",         label: "Claude Sonnet 4.6",  note: "Recommended" },
-  { value: "claude-opus-4-7",           label: "Claude Opus 4.7",    note: "Most powerful" },
-  { value: "claude-haiku-4-5-20251001", label: "Claude Haiku 4.5",   note: "Fastest" },
-  { value: "gpt-4o",                    label: "GPT-4o",             note: null },
-  { value: "gpt-4o-mini",              label: "GPT-4o Mini",        note: null },
 ];
 
 const CATEGORY_LABELS: Record<string, string> = {
@@ -192,11 +191,23 @@ export function AgentConfigModal({ agent, open, onClose, onUpdate }: AgentConfig
   const [mcpTools, setMcpTools]             = useState<Record<string, MCPTool[]>>({});
   const [loadingMcpId, setLoadingMcpId]     = useState<string | null>(null);
 
+  const [providers, setProviders]           = useState<ProviderModels[]>([]);
+  const [modelsLoading, setModelsLoading]   = useState(true);
+
   const loadMcp = useCallback(async () => {
     try {
       const res = await apiClient.get("/api/v1/mcp-servers");
       setMcpServers(res.data.data || []);
     } catch {}
+  }, []);
+
+  const loadModels = useCallback(async () => {
+    setModelsLoading(true);
+    try {
+      const res = await apiClient.get("/api/v1/models");
+      setProviders(res.data.data || []);
+    } catch {}
+    setModelsLoading(false);
   }, []);
 
   useEffect(() => {
@@ -215,8 +226,9 @@ export function AgentConfigModal({ agent, open, onClose, onUpdate }: AgentConfig
       setErrors({});
       setActiveTab("basic");
       loadMcp();
+      loadModels();
     }
-  }, [agent, open, loadMcp]);
+  }, [agent, open, loadMcp, loadModels]);
 
   const set = (field: string, value: unknown) => {
     setForm((p) => ({ ...p, [field]: value }));
@@ -371,45 +383,117 @@ export function AgentConfigModal({ agent, open, onClose, onUpdate }: AgentConfig
             <TabsContent value="model" className="mt-0 space-y-4">
               <div className="space-y-1.5">
                 <Label className="text-xs">AI Model</Label>
-                <Select value={form.model} onValueChange={(v) => set("model", v)}>
-                  <SelectTrigger className="text-sm">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {MODELS.map((m) => (
-                      <SelectItem key={m.value} value={m.value} className="text-sm">
-                        {m.label}
-                        {m.note && <Badge variant="outline" className="ml-2 text-[10px] px-1 py-0">{m.note}</Badge>}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                {modelsLoading ? (
+                  <div className="flex items-center gap-2 rounded-lg border px-3 py-2.5 text-xs text-muted-foreground">
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                    Loading available models…
+                  </div>
+                ) : providers.filter((p) => p.available).length === 0 ? (
+                  <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 flex items-start gap-2 dark:border-amber-900 dark:bg-amber-950/20">
+                    <AlertCircle className="h-4 w-4 shrink-0 text-amber-600 mt-0.5" />
+                    <div className="flex-1 min-w-0">
+                      <p className="text-xs font-medium text-amber-900 dark:text-amber-400">
+                        No providers configured
+                      </p>
+                      <p className="text-[11px] text-amber-800 dark:text-amber-500 mt-0.5">
+                        Add an API key in{" "}
+                        <Link href="/dashboard/settings/integrations" onClick={onClose} className="underline">
+                          Integrations
+                        </Link>{" "}
+                        to enable model selection.
+                      </p>
+                    </div>
+                  </div>
+                ) : (
+                  <Select value={form.model} onValueChange={(v) => set("model", v)}>
+                    <SelectTrigger className="text-sm">
+                      <SelectValue placeholder="Select a model" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {providers
+                        .filter((p) => p.available)
+                        .map((p) => (
+                          <div key={p.provider}>
+                            <div className="px-2 py-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                              {p.label}
+                            </div>
+                            {p.models.map((m) => (
+                              <SelectItem
+                                key={m.id}
+                                value={m.id}
+                                disabled={m.allowed === false}
+                                className="text-sm"
+                              >
+                                {m.name}
+                                {m.allowed === false && (
+                                  <Badge variant="outline" className="ml-2 text-[10px] px-1 py-0">
+                                    Upgrade
+                                  </Badge>
+                                )}
+                              </SelectItem>
+                            ))}
+                          </div>
+                        ))}
+                    </SelectContent>
+                  </Select>
+                )}
               </div>
 
-              <div className="space-y-2">
-                {MODELS.map((m) => (
-                  <button
-                    key={m.value}
-                    type="button"
-                    onClick={() => set("model", m.value)}
-                    className={`w-full flex items-center justify-between rounded-xl border px-4 py-3 text-left transition-colors ${
-                      form.model === m.value ? "border-primary bg-primary/5" : "hover:bg-muted/40"
-                    }`}
-                  >
-                    <div>
-                      <p className={`text-sm font-medium ${form.model === m.value ? "text-primary" : ""}`}>{m.label}</p>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      {m.note && <Badge variant="outline" className="text-[10px] px-1.5">{m.note}</Badge>}
-                      <div className={`h-4 w-4 rounded-full border-2 flex items-center justify-center ${
-                        form.model === m.value ? "border-primary bg-primary" : "border-muted-foreground/30"
-                      }`}>
-                        {form.model === m.value && <Check className="h-2.5 w-2.5 text-white" />}
+              {!modelsLoading && providers.filter((p) => p.available).length > 0 && (
+                <div className="space-y-4">
+                  {providers
+                    .filter((p) => p.available)
+                    .map((p) => (
+                      <div key={p.provider}>
+                        <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-2">
+                          {p.label}
+                        </p>
+                        <div className="space-y-2">
+                          {p.models.map((m) => {
+                            const disabled = m.allowed === false;
+                            const selected = form.model === m.id;
+                            return (
+                              <button
+                                key={m.id}
+                                type="button"
+                                disabled={disabled}
+                                onClick={() => set("model", m.id)}
+                                className={`w-full flex items-center justify-between rounded-xl border px-4 py-3 text-left transition-colors ${
+                                  disabled
+                                    ? "opacity-50 cursor-not-allowed"
+                                    : selected
+                                    ? "border-primary bg-primary/5"
+                                    : "hover:bg-muted/40"
+                                }`}
+                              >
+                                <div className="min-w-0">
+                                  <p className={`text-sm font-medium truncate ${selected ? "text-primary" : ""}`}>
+                                    {m.name}
+                                  </p>
+                                  <p className="text-[10px] text-muted-foreground font-mono truncate">
+                                    {m.id}
+                                  </p>
+                                </div>
+                                <div className="flex items-center gap-2 shrink-0">
+                                  {disabled && (
+                                    <Badge variant="outline" className="text-[10px] px-1.5">
+                                      Upgrade
+                                    </Badge>
+                                  )}
+                                  <div className={`h-4 w-4 rounded-full border-2 flex items-center justify-center ${
+                                    selected ? "border-primary bg-primary" : "border-muted-foreground/30"
+                                  }`}>
+                                    {selected && <Check className="h-2.5 w-2.5 text-white" />}
+                                  </div>
+                                </div>
+                              </button>
+                            );
+                          })}
+                        </div>
                       </div>
-                    </div>
-                  </button>
-                ))}
-              </div>
+                    ))}
+                </div>
+              )}
 
               <div className="flex items-center justify-between rounded-xl border p-3.5">
                 <div>
