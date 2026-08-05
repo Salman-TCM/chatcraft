@@ -98,7 +98,7 @@ export function AgentListItem({ agent, onDelete }: AgentListItemProps) {
             <span>•</span>
             <span className="flex items-center gap-1">
               <Zap className="h-3 w-3" />
-              {agent.max_steps} steps
+              {agent.max_steps} turns
             </span>
             {enabledToolsCount > 0 && (
               <>

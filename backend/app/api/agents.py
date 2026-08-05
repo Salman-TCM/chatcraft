@@ -171,6 +171,12 @@ class PublicChatRequest(BaseModel):
     conversation_history: list[dict] = Field(default_factory=list, max_length=200)
 
 
+# Safety cap: no matter what the model requests, execute at most this many tool
+# calls per LLM turn. Prevents "single-turn burst" cost surprises (e.g. Llama
+# emitting 50 parallel `browse_url` blocks) even when max_steps is high.
+_MAX_TOOL_CALLS_PER_TURN = 10
+
+
 # Tools an anonymous visitor to a shared agent may invoke. Everything not in this
 # set — send_email, send_sms, http_request, google_sheets, create_agent,
 # list_available_models, verification tools, run_code, and all MCP tools — runs
@@ -562,6 +568,10 @@ async def _run_agent_anthropic(
             if not tool_uses or response.stop_reason == "end_turn":
                 break
 
+            # Cap per-turn burst so a runaway model can't fire 50 tool calls
+            # in one iteration.
+            tool_uses = tool_uses[:_MAX_TOOL_CALLS_PER_TURN]
+
             tool_results: list[dict] = []
             for tu in tool_uses:
                 yield _sse({"type": "tool_call", "tool": tu.name, "input": tu.input})
@@ -734,6 +744,9 @@ async def _run_agent_openai_compat(
             if text_tool_mode:
                 tool_calls = _extract_text_tool_calls(text)
                 if tool_calls:
+                    # Cap per-turn burst — weak models (Llama in text-mode)
+                    # sometimes emit huge batches of parallel tool calls.
+                    tool_calls = tool_calls[:_MAX_TOOL_CALLS_PER_TURN]
                     # Strip the ```tool_call blocks from what the user sees
                     display = _TOOL_CALL_BLOCK_RE.sub("", text).strip()
                     if display:
@@ -765,6 +778,10 @@ async def _run_agent_openai_compat(
                 if not msg.tool_calls or choice.finish_reason == "stop":
                     break
 
+                # Cap per-turn burst so the model can't fire 50 tool calls in
+                # one iteration. We slice the OpenAI native tool_calls list.
+                capped_tool_calls = list(msg.tool_calls)[:_MAX_TOOL_CALLS_PER_TURN]
+
                 messages.append(
                     {
                         "role": "assistant",
@@ -778,12 +795,12 @@ async def _run_agent_openai_compat(
                                     "arguments": tc.function.arguments,
                                 },
                             }
-                            for tc in msg.tool_calls
+                            for tc in capped_tool_calls
                         ],
                     }
                 )
 
-                for tc in msg.tool_calls:
+                for tc in capped_tool_calls:
                     name = tc.function.name.strip()
                     try:
                         inputs = json.loads(tc.function.arguments or "{}")
@@ -902,6 +919,9 @@ async def _run_agent_gemini(
 
             if not function_calls:
                 break
+
+            # Cap per-turn burst — same reason as the other runners.
+            function_calls = function_calls[:_MAX_TOOL_CALLS_PER_TURN]
 
             # Append model turn to contents
             contents.append(response.candidates[0].content)
@@ -1607,6 +1627,17 @@ def _tool_run_code_impl(code: str) -> str:
             return "Error: code execution timed out (10s limit)"
 
 
+_SPA_TELLS = (
+    "you need to enable javascript",
+    "please enable javascript",
+    "javascript is disabled",
+    "javascript required",
+    "we're sorry but",  # common create-react-app placeholder
+    "this app requires javascript",
+    "enable js to continue",
+)
+
+
 async def _tool_browse(url: str) -> str:
     from bs4 import BeautifulSoup
 
@@ -1620,7 +1651,24 @@ async def _tool_browse(url: str) -> str:
     for tag in soup(["script", "style", "nav", "footer", "header"]):
         tag.decompose()
     text = " ".join(soup.stripped_strings)[:4000]
-    return text or "Could not extract content."
+
+    # Many modern sites are client-rendered SPAs — the raw HTML contains only
+    # a placeholder like "You need to enable JavaScript to run this app." and
+    # returning that to the LLM makes it look like the real page content, which
+    # invites hallucination. Detect the pattern and be explicit about it.
+    lowered = text.lower().strip()
+    if not lowered:
+        return f"Could not extract any content from {url}. The response body was empty."
+    if len(lowered) < 300 and any(tell in lowered for tell in _SPA_TELLS):
+        return (
+            f"The page at {url} is a client-side JavaScript application whose "
+            f"content isn't in the raw HTML. Only a placeholder message was "
+            f"returned: {text!r}. This tool cannot render JavaScript. "
+            f"Do NOT invent facts about the site — tell the user the page needs "
+            f"a JavaScript-capable browser to read, or suggest an alternative "
+            f"source (their sitemap, RSS, or a documented API)."
+        )
+    return text
 
 
 async def _tool_sheets(inputs: dict) -> str:
@@ -1998,13 +2046,37 @@ async def _tool_search_kb(inputs: dict, ctx: dict) -> str:
 
     async with AsyncSessionLocal() as db:
         rag = AgentRAGService(db)
-        _, chunks = await rag.query(
-            agent_id=agent_uuid,
-            user_message=query,
-            top_k=top_k,
-            threshold=0.3,
-            debug=True,
-        )
+        try:
+            _, chunks = await rag.query(
+                agent_id=agent_uuid,
+                user_message=query,
+                top_k=top_k,
+                threshold=0.3,
+                debug=True,
+            )
+        except Exception as exc:
+            # Most common failure is the OpenAI embed call (no key / rate limit).
+            # Return a clean, model-actionable message instead of the raw
+            # provider SDK stack, and log the real error for operators.
+            from app.core.logging import logger as _logger
+
+            msg = str(exc)
+            _logger.warning(f"search_kb query failed for agent {agent_uuid}: {exc!r}")
+            if "api_key" in msg.lower() or "401" in msg or "authentication" in msg.lower():
+                return (
+                    "Knowledge base is unavailable: the embedding service is not "
+                    "configured on this deployment. Fall back to your general knowledge "
+                    "and tell the user the KB search couldn't run."
+                )
+            if "rate" in msg.lower() and "limit" in msg.lower():
+                return (
+                    "Knowledge base is temporarily rate-limited by the embedding "
+                    "service. Try again in a moment or fall back to general knowledge."
+                )
+            return (
+                "Knowledge base search failed. Fall back to your general knowledge "
+                "and let the user know retrieval didn't run this time."
+            )
 
     if not chunks:
         return "No relevant passages found in the knowledge base."
@@ -2041,9 +2113,28 @@ async def _build_system_prompt(
             "You are a helpful AI agent. Use the available tools to complete tasks thoroughly and accurately."
         )
 
+    # Global anti-hallucination stanza — appended to EVERY agent's prompt when
+    # any tool is enabled. Weak models (Llama 8B especially) will fabricate
+    # plausible-sounding emails, prices, phone numbers, and quotes when a tool
+    # returns "no results" or a JavaScript-app placeholder. Tell them not to.
+    agent_tools_cfg = agent.tools or {}
+    if any(agent_tools_cfg.values()):
+        parts.append(
+            "GROUNDING RULES:\n"
+            "1. When a tool returns 'no results', an error, or an unhelpful "
+            "placeholder (like 'You need to enable JavaScript'), say so plainly. "
+            "Do NOT fill the gap with plausible-sounding invented facts.\n"
+            "2. NEVER fabricate specific facts you didn't retrieve: email "
+            "addresses, phone numbers, prices, dates, URLs, product names, "
+            "quoted text. If you don't have it, say you don't have it.\n"
+            "3. Prefer 'I couldn't find that — here's what I tried' over "
+            "'here's my best guess'.\n"
+            "4. When citing information from a tool, quote the source (URL, "
+            "document name, or tool name) so the user can verify."
+        )
+
     # If the agent has ready KB documents AND the search_kb tool is enabled,
     # tell the model the KB exists so it knows to search it.
-    agent_tools_cfg = agent.tools or {}
     if agent_tools_cfg.get("search_kb"):
         kb_result = await db.execute(
             select(func.count(AgentKnowledgeDocument.id)).where(

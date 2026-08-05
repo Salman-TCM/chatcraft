@@ -311,7 +311,7 @@ export function AgentRunModal({
                 {modelShortName(agent.model)}
               </Badge>
               <Badge variant="outline">
-                {agent.max_steps} steps max
+                {agent.max_steps} turns max
               </Badge>
             </div>
           </DialogTitle>

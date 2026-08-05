@@ -835,7 +835,7 @@ Always prefer primary sources over aggregator sites.`}
           {activeTab === "advanced" && (
             <div className="space-y-5">
               <div className="space-y-1.5">
-                <Label className="text-xs">Max Steps (agentic loop limit)</Label>
+                <Label className="text-xs">Max Reasoning Turns (each turn = 1 LLM call + N tool calls)</Label>
                 <div className="flex items-center gap-3">
                   <Input
                     type="number"

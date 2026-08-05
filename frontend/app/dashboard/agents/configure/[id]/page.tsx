@@ -7,8 +7,9 @@ import {
   ArrowLeft, Save, Loader2, Check, Settings,
   Brain, Zap, Terminal, Webhook, Plug, ChevronDown,
   ChevronUp, RefreshCw, Trash2, Plus, ExternalLink,
-  AlertCircle, Globe, Wrench, Sparkles, BookOpen,
+  AlertCircle, Globe, Wrench, Sparkles, BookOpen, MessageSquare,
 } from "lucide-react";
+import { TestChatDrawer } from "./TestChatDrawer";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -221,6 +222,7 @@ export default function ConfigureAgentPage() {
   const [saving, setSaving]       = useState(false);
   const [saved, setSaved]         = useState(false);
   const [error, setError]         = useState<string | null>(null);
+  const [testChatOpen, setTestChatOpen] = useState(false);
 
   const [mcpServers, setMcpServers]       = useState<MCPServer[]>([]);
   const [mcpTools, setMcpTools]           = useState<Record<string, MCPTool[]>>({});
@@ -368,6 +370,14 @@ export default function ConfigureAgentPage() {
           >
             <BookOpen className="h-3.5 w-3.5 mr-1.5" />
             Knowledge
+          </Button>
+          <Button
+            variant="outline" size="sm"
+            onClick={() => setTestChatOpen(true)}
+            className="hidden sm:flex"
+          >
+            <MessageSquare className="h-3.5 w-3.5 mr-1.5" />
+            Test Chat
           </Button>
           <Button
             variant="outline" size="sm"
@@ -555,7 +565,7 @@ export default function ConfigureAgentPage() {
               </div>
 
               <div className="space-y-1.5">
-                <Label>Max Steps</Label>
+                <Label>Max Reasoning Turns</Label>
                 <div className="flex items-center gap-3">
                   <Input
                     type="number" min={1} max={30}
@@ -564,7 +574,7 @@ export default function ConfigureAgentPage() {
                     className="w-28 text-sm"
                   />
                   <p className="text-xs text-muted-foreground">
-                    Maximum tool-use iterations per run (1–30). Higher values allow deeper reasoning but cost more.
+                    How many times the model can think + call tools before finishing (1–30). Each turn is one LLM call and may fire multiple tools. Higher = deeper reasoning + higher cost.
                   </p>
                 </div>
               </div>
@@ -734,6 +744,13 @@ export default function ConfigureAgentPage() {
           {saved ? "Saved!" : "Save"}
         </Button>
       </div>
+
+      <TestChatDrawer
+        agentId={id}
+        agentName={form.name || "Agent"}
+        open={testChatOpen}
+        onClose={() => setTestChatOpen(false)}
+      />
     </div>
   );
 }
