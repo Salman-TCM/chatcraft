@@ -31,6 +31,10 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     var position = opts.position || "bottom-right";
     var isRight  = position.indexOf("right") > -1;
     var isBottom = position.indexOf("bottom") > -1;
+    // opts.kind === "agent" → iframe /agent/{token}   (agent share)
+    // opts.kind === "chatbot" or unset → iframe /widgets/{token} (chatbot widget)
+    var kind = (opts.kind === "agent") ? "agent" : "chatbot";
+    var iframePath = (kind === "agent") ? "/agent/" : "/widgets/";
 
     // ── Bubble button ──────────────────────────────────────────────────────
     var btn = document.createElement("button");
@@ -76,7 +80,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     ].join(";");
 
     var iframe = document.createElement("iframe");
-    iframe.src = CHATCRAFT_BASE + "/widgets/" + token;
+    iframe.src = CHATCRAFT_BASE + iframePath + token;
     iframe.title = AGENCY_NAME + " chat";
     iframe.setAttribute("aria-label", AGENCY_NAME + " chat window");
     iframe.setAttribute("allow", "microphone *");
@@ -102,11 +106,15 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     var scripts = document.getElementsByTagName("script");
     return scripts[scripts.length - 1];
   })();
-  var token    = script && script.getAttribute("data-token");
-  var position = script && script.getAttribute("data-position");
-  if (token) initWidget(token, { position: position });
+  var agentToken   = script && script.getAttribute("data-agent-token");
+  var chatbotToken = script && script.getAttribute("data-token");
+  var token        = agentToken || chatbotToken;
+  var kind         = agentToken ? "agent" : "chatbot";
+  var position     = script && script.getAttribute("data-position");
+  if (token) initWidget(token, { position: position, kind: kind });
 
   // ── Global API ────────────────────────────────────────────────────────────
+  // ChatCraft.init(token, { position, kind })  where kind = "agent" | "chatbot"
   window.ChatCraft = { init: initWidget };
 })();
 `;

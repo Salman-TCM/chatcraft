@@ -39,6 +39,11 @@ const nextConfig = {
   // /api/widget-js (Next.js route handlers).
   async rewrites() {
     return [
+      // Public embed shortcut — customers paste
+      //   <script src="https://your-host/widget.js" data-agent-token="…">
+      // and this rewrite serves the JS from the /api/widget-js route handler.
+      // /api/widget-js still works too; /widget.js is the tidier public URL.
+      { source: "/widget.js",          destination: "/api/widget-js" },
       // Backend versioned API
       { source: "/api/v1/:path*",      destination: `${BACKEND_URL}/api/v1/:path*` },
       // Backend unversioned namespaces
