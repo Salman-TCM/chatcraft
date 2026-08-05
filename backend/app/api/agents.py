@@ -527,7 +527,13 @@ async def _run_agent_anthropic(
 
     step = 0
     max_steps = agent.max_steps or 10
-    ctx = {"agent_id": str(agent.id), "user_id": str(agent.user_id)}
+    ctx = {
+        "agent_id": str(agent.id),
+        "user_id": str(agent.user_id),
+        # Cap what _execute_tool will dispatch to whatever we actually declared
+        # to the model — stops hallucinated / re-injected tool calls dead.
+        "allowed_tools": {t["name"] for t in tools} | set(mcp_map.keys()),
+    }
 
     try:
         while step < max_steps:
@@ -677,7 +683,13 @@ async def _run_agent_openai_compat(
 
     step = 0
     max_steps = agent.max_steps or 10
-    ctx = {"agent_id": str(agent.id), "user_id": str(agent.user_id)}
+    ctx = {
+        "agent_id": str(agent.id),
+        "user_id": str(agent.user_id),
+        # Cap what _execute_tool will dispatch to whatever we actually declared
+        # to the model — stops hallucinated / re-injected tool calls dead.
+        "allowed_tools": {t["name"] for t in tools} | set(mcp_map.keys()),
+    }
     text_tool_mode = False  # True once we've fallen back to JSON-in-text tool calling
 
     try:
@@ -850,7 +862,13 @@ async def _run_agent_gemini(
 
     step = 0
     max_steps = agent.max_steps or 10
-    ctx = {"agent_id": str(agent.id), "user_id": str(agent.user_id)}
+    ctx = {
+        "agent_id": str(agent.id),
+        "user_id": str(agent.user_id),
+        # Cap what _execute_tool will dispatch to whatever we actually declared
+        # to the model — stops hallucinated / re-injected tool calls dead.
+        "allowed_tools": {t["name"] for t in tools} | set(mcp_map.keys()),
+    }
 
     try:
         while step < max_steps:
@@ -1251,6 +1269,13 @@ def _build_builtin_tools(tools_config: dict) -> list[dict]:
 
 
 async def _execute_tool(name: str, inputs: dict, mcp_map: dict, ctx: dict | None = None) -> str:
+    # Defense-in-depth: even if the model hallucinates a tool call for a name
+    # that isn't in its declared tool list (text-mode extraction, retries, etc),
+    # refuse to dispatch it if the caller passed an allowlist. Public shares set
+    # this; authenticated /chat leaves it None → any built-in is allowed.
+    allowed = (ctx or {}).get("allowed_tools")
+    if allowed is not None and name not in allowed and name not in mcp_map:
+        return f"Tool '{name}' is not available in this context."
     try:
         # MCP tool
         if name in mcp_map:
