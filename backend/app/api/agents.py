@@ -171,6 +171,12 @@ class PublicChatRequest(BaseModel):
     conversation_history: list[dict] = Field(default_factory=list, max_length=200)
 
 
+# Safety cap: no matter what the model requests, execute at most this many tool
+# calls per LLM turn. Prevents "single-turn burst" cost surprises (e.g. Llama
+# emitting 50 parallel `browse_url` blocks) even when max_steps is high.
+_MAX_TOOL_CALLS_PER_TURN = 10
+
+
 # Tools an anonymous visitor to a shared agent may invoke. Everything not in this
 # set — send_email, send_sms, http_request, google_sheets, create_agent,
 # list_available_models, verification tools, run_code, and all MCP tools — runs
@@ -562,6 +568,10 @@ async def _run_agent_anthropic(
             if not tool_uses or response.stop_reason == "end_turn":
                 break
 
+            # Cap per-turn burst so a runaway model can't fire 50 tool calls
+            # in one iteration.
+            tool_uses = tool_uses[:_MAX_TOOL_CALLS_PER_TURN]
+
             tool_results: list[dict] = []
             for tu in tool_uses:
                 yield _sse({"type": "tool_call", "tool": tu.name, "input": tu.input})
@@ -734,6 +744,9 @@ async def _run_agent_openai_compat(
             if text_tool_mode:
                 tool_calls = _extract_text_tool_calls(text)
                 if tool_calls:
+                    # Cap per-turn burst — weak models (Llama in text-mode)
+                    # sometimes emit huge batches of parallel tool calls.
+                    tool_calls = tool_calls[:_MAX_TOOL_CALLS_PER_TURN]
                     # Strip the ```tool_call blocks from what the user sees
                     display = _TOOL_CALL_BLOCK_RE.sub("", text).strip()
                     if display:
@@ -765,6 +778,10 @@ async def _run_agent_openai_compat(
                 if not msg.tool_calls or choice.finish_reason == "stop":
                     break
 
+                # Cap per-turn burst so the model can't fire 50 tool calls in
+                # one iteration. We slice the OpenAI native tool_calls list.
+                capped_tool_calls = list(msg.tool_calls)[:_MAX_TOOL_CALLS_PER_TURN]
+
                 messages.append(
                     {
                         "role": "assistant",
@@ -778,12 +795,12 @@ async def _run_agent_openai_compat(
                                     "arguments": tc.function.arguments,
                                 },
                             }
-                            for tc in msg.tool_calls
+                            for tc in capped_tool_calls
                         ],
                     }
                 )
 
-                for tc in msg.tool_calls:
+                for tc in capped_tool_calls:
                     name = tc.function.name.strip()
                     try:
                         inputs = json.loads(tc.function.arguments or "{}")
@@ -902,6 +919,9 @@ async def _run_agent_gemini(
 
             if not function_calls:
                 break
+
+            # Cap per-turn burst — same reason as the other runners.
+            function_calls = function_calls[:_MAX_TOOL_CALLS_PER_TURN]
 
             # Append model turn to contents
             contents.append(response.candidates[0].content)
@@ -1998,13 +2018,37 @@ async def _tool_search_kb(inputs: dict, ctx: dict) -> str:
 
     async with AsyncSessionLocal() as db:
         rag = AgentRAGService(db)
-        _, chunks = await rag.query(
-            agent_id=agent_uuid,
-            user_message=query,
-            top_k=top_k,
-            threshold=0.3,
-            debug=True,
-        )
+        try:
+            _, chunks = await rag.query(
+                agent_id=agent_uuid,
+                user_message=query,
+                top_k=top_k,
+                threshold=0.3,
+                debug=True,
+            )
+        except Exception as exc:
+            # Most common failure is the OpenAI embed call (no key / rate limit).
+            # Return a clean, model-actionable message instead of the raw
+            # provider SDK stack, and log the real error for operators.
+            from app.core.logging import logger as _logger
+
+            msg = str(exc)
+            _logger.warning(f"search_kb query failed for agent {agent_uuid}: {exc!r}")
+            if "api_key" in msg.lower() or "401" in msg or "authentication" in msg.lower():
+                return (
+                    "Knowledge base is unavailable: the embedding service is not "
+                    "configured on this deployment. Fall back to your general knowledge "
+                    "and tell the user the KB search couldn't run."
+                )
+            if "rate" in msg.lower() and "limit" in msg.lower():
+                return (
+                    "Knowledge base is temporarily rate-limited by the embedding "
+                    "service. Try again in a moment or fall back to general knowledge."
+                )
+            return (
+                "Knowledge base search failed. Fall back to your general knowledge "
+                "and let the user know retrieval didn't run this time."
+            )
 
     if not chunks:
         return "No relevant passages found in the knowledge base."
