@@ -69,6 +69,7 @@ const TOOLS = [
   { key: "email",        label: "Email",         description: "Compose and send emails",                        icon: "✉️" },
   { key: "sms",          label: "SMS",           description: "Send text messages via Twilio",                  icon: "💬" },
   { key: "verification", label: "Verification",  description: "Send and verify OTP codes",                      icon: "🔐" },
+  { key: "search_kb",    label: "Knowledge Base",description: "Search this agent's uploaded documents",         icon: "📚" },
   { key: "agent_builder",label: "Agent Builder", description: "Spawn and manage other agents",                  icon: "🤖" },
 ];
 

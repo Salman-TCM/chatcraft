@@ -19,7 +19,7 @@ import {
   Globe, Code2, Link2, Mail, Smartphone, ShieldCheck, Bot,
   Loader2, Check, Brain, Zap, Settings, Plug,
   Webhook, RefreshCw, Trash2, Plus, ExternalLink,
-  AlertCircle, ChevronDown, ChevronUp, Wrench, Sheet,
+  AlertCircle, ChevronDown, ChevronUp, Wrench, Sheet, BookOpen,
 } from "lucide-react";
 import { apiClient } from "@/lib/api";
 
@@ -79,6 +79,7 @@ interface ToolConfig {
 const TOOLS: ToolConfig[] = [
   { key: "web_search",   label: "Web Search",     description: "Search the internet for current information", icon: Globe,       category: "research" },
   { key: "browser",      label: "Browser",        description: "Visit and extract content from web pages",    icon: Globe,       category: "research" },
+  { key: "search_kb",    label: "Knowledge Base", description: "Search this agent's uploaded documents",      icon: BookOpen,    category: "research" },
   { key: "code",         label: "Code Execution", description: "Execute Python code for data processing",     icon: Code2,       category: "compute" },
   { key: "http",         label: "HTTP Requests",  description: "Make API calls to external services",         icon: Link2,       category: "integration" },
   { key: "sheets",       label: "Google Sheets",  description: "Read and write spreadsheet data",             icon: Sheet,       category: "integration" },

@@ -6,7 +6,7 @@ with tiktoken encoding. Produces 500-token chunks with 50-token overlap.
 from dataclasses import dataclass
 
 import tiktoken
-from langchain.text_splitter import RecursiveCharacterTextSplitter
+from langchain_text_splitters import RecursiveCharacterTextSplitter
 
 CHUNK_SIZE = 500  # tokens
 CHUNK_OVERLAP = 50  # tokens
