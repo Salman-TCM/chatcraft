@@ -120,6 +120,13 @@ class Settings(BaseSettings):
     premium_tier_message_cap: int = 5000
     default_fallback_model: str = "gpt-4o-mini"
 
+    # The `code` tool executes arbitrary Python without real isolation:
+    # __import__ is exposed, so os/subprocess/socket all work, and env vars
+    # (SECRET_KEY, DATABASE_URL, provider API keys) are readable. Keep off
+    # until _tool_run_code is behind a real sandbox (Pyodide / gVisor / etc).
+    # Set ENABLE_CODE_TOOL=true in .env to opt in for local development.
+    enable_code_tool: bool = False
+
     @property
     def is_production(self) -> bool:
         return self.environment == "production"

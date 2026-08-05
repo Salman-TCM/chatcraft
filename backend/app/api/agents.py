@@ -1005,7 +1005,12 @@ def _build_builtin_tools(tools_config: dict) -> list[dict]:
             }
         )
 
-    if tools_config.get("code"):
+    # run_code is a real security risk (no sandbox — see _tool_run_code
+    # docstring). Only expose it when the operator has explicitly opted in via
+    # settings.enable_code_tool. This keeps the toggle visible in the UI so
+    # existing agents don't silently break, but the tool won't actually reach
+    # the model.
+    if tools_config.get("code") and settings.enable_code_tool:
         defs.append(
             {
                 "name": "run_code",
@@ -1529,6 +1534,15 @@ async def _tool_http(inputs: dict) -> str:
 
 
 def _tool_run_code(code: str) -> str:
+    if not settings.enable_code_tool:
+        return (
+            "Error: the code execution tool is disabled on this deployment. "
+            "The operator must set ENABLE_CODE_TOOL=true to enable it."
+        )
+    return _tool_run_code_impl(code)
+
+
+def _tool_run_code_impl(code: str) -> str:
     """Execute user-supplied Python. NOT A SANDBOX.
 
     __import__ is exposed in allowed_builtins so `import os` / subprocess /
