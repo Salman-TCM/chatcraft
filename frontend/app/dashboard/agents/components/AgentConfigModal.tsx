@@ -498,8 +498,8 @@ export function AgentConfigModal({ agent, open, onClose, onUpdate }: AgentConfig
 
               <div className="flex items-center justify-between rounded-xl border p-3.5">
                 <div>
-                  <p className="text-sm font-medium">Max Steps</p>
-                  <p className="text-xs text-muted-foreground">Tool-use iterations per run (1–30)</p>
+                  <p className="text-sm font-medium">Max Reasoning Turns</p>
+                  <p className="text-xs text-muted-foreground">LLM think+tool-call rounds (1–30). Each round can fire multiple tools.</p>
                 </div>
                 <Input
                   type="number" min={1} max={30}

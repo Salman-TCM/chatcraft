@@ -550,7 +550,7 @@ export default function AgentsPage() {
                 </span>
                 <span className="flex items-center gap-1 text-[10px] text-muted-foreground">
                   <Zap className="h-2.5 w-2.5" />
-                  {agent.max_steps} steps max
+                  {agent.max_steps} turns max
                 </span>
               </div>
 
