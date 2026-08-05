@@ -173,14 +173,19 @@ class PublicChatRequest(BaseModel):
 
 # Tools an anonymous visitor to a shared agent may invoke. Everything not in this
 # set — send_email, send_sms, http_request, google_sheets, create_agent,
-# list_available_models, verification tools, and all MCP tools — runs under the
-# agent owner's identity, so it must NOT be exposed on public shares. Adding a
-# new tool? Default to "not in the allowlist" unless you've thought through
-# whether an anonymous caller can misuse it to burn the owner's credits,
-# credentials, or third-party balances.
+# list_available_models, verification tools, run_code, and all MCP tools — runs
+# under the agent owner's identity or on shared infrastructure and must NOT be
+# exposed on public shares.
+#
+# ⚠️  run_code intentionally NOT here. _tool_run_code is not a real sandbox: it
+# allows __import__, so `import os`, subprocess, and socket are all reachable.
+# Confirmed reachable from run_code: env vars (DATABASE_URL, SECRET_KEY, provider
+# API keys), shell exec as the container user, arbitrary outbound TCP. Exposing
+# this to anonymous visitors is a network-reachable RCE. Do NOT add run_code
+# back until it's behind a real isolation boundary (Pyodide, gVisor, ephemeral
+# container, or firejail with seccomp).
 _PUBLIC_SHARE_TOOL_ALLOWLIST = {
     "browse_url",
-    "run_code",
     "search_kb",
     "web_search",  # billed to owner but read-only and rate-limited
 }
@@ -1524,6 +1529,21 @@ async def _tool_http(inputs: dict) -> str:
 
 
 def _tool_run_code(code: str) -> str:
+    """Execute user-supplied Python. NOT A SANDBOX.
+
+    __import__ is exposed in allowed_builtins so `import os` / subprocess /
+    socket / urllib all work. Callers can read the container's env vars
+    (DATABASE_URL, SECRET_KEY, provider API keys), execute shell as the
+    container user, and open outbound TCP to arbitrary hosts. The 10-second
+    timeout and 2000-char output cap are DoS mitigations, not security
+    boundaries.
+
+    Because of the above, run_code MUST NOT be exposed on the public share
+    route (see _PUBLIC_SHARE_TOOL_ALLOWLIST) and treat this tool being enabled
+    on any agent as "trusted code execution as the backend container user".
+    Replace with a real sandbox (Pyodide / gVisor / ephemeral container) before
+    treating it as safe for untrusted input.
+    """
     import concurrent.futures
     import contextlib
     import io
