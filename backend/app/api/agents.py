@@ -171,6 +171,21 @@ class PublicChatRequest(BaseModel):
     conversation_history: list[dict] = Field(default_factory=list, max_length=200)
 
 
+# Tools an anonymous visitor to a shared agent may invoke. Everything not in this
+# set — send_email, send_sms, http_request, google_sheets, create_agent,
+# list_available_models, verification tools, and all MCP tools — runs under the
+# agent owner's identity, so it must NOT be exposed on public shares. Adding a
+# new tool? Default to "not in the allowlist" unless you've thought through
+# whether an anonymous caller can misuse it to burn the owner's credits,
+# credentials, or third-party balances.
+_PUBLIC_SHARE_TOOL_ALLOWLIST = {
+    "browse_url",
+    "run_code",
+    "search_kb",
+    "web_search",  # billed to owner but read-only and rate-limited
+}
+
+
 @public_router.post("/{share_token}/chat")
 @limiter.limit("5/minute")
 async def public_agent_chat(
@@ -191,6 +206,12 @@ async def public_agent_chat(
         agent, db
     )  # no user_id — never inject token for public
     tools, mcp_map = await _build_tools_with_mcp(agent, agent.user_id, db)
+    # SECURITY: anonymous share visitors must not be able to invoke tools that
+    # mutate the owner's account (create_agent, send_email, send_sms, sheets,
+    # http_request, MCP) or reveal owner secrets (list_available_models).
+    # Only read-only, per-request-scoped tools survive on the public route.
+    tools = [t for t in tools if t["name"] in _PUBLIC_SHARE_TOOL_ALLOWLIST]
+    mcp_map = {}
     _, api_key = await _resolve_api_key(agent.user_id, agent.model or "claude-sonnet-4-6", db)
     return StreamingResponse(
         _run_agent(
