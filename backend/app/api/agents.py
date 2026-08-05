@@ -651,27 +651,99 @@ def _build_text_tool_instructions(oai_tools: list[dict]) -> str:
     return "\n".join(lines)
 
 
+# The primary format we teach the model — a ```tool_call code fence with JSON.
 _TOOL_CALL_BLOCK_RE = _re.compile(
-    r"```tool_call\s*\n(\{.*?\})\s*\n```",
+    r"```tool_call\s*\n(.*?)\n```",
     _re.DOTALL,
 )
 
+# Fallback formats we've seen weak models emit. Regex just LOCATES the opener;
+# JSON is consumed by json.JSONDecoder.raw_decode so nested braces & trailing
+# junk (semicolons, whitespace) don't break parsing.
+#   <function>NAME>{...}</function>       ← Llama 3.1 via Groq
+#   <function=NAME>{...}</function>       ← Llama 3.1 alt form
+#   <tool_call>{...}</tool_call>          ← another common shape
+_FN_TAG_OPEN_RE = _re.compile(
+    r"<function\s*[=>]?\s*([A-Za-z_][A-Za-z0-9_]*)\s*[=>]?\s*",
+)
+_TOOL_TAG_OPEN_RE = _re.compile(r"<tool_call\s*>")
+# For scrubbing the visible text, match the whole span including a closing tag.
+# Body regex is intentionally permissive — .*? is fine here because we only
+# use these for display-stripping, not for arg extraction.
+_FN_TAG_SPAN_RE = _re.compile(r"<function[^>]*>.*?</function>", _re.DOTALL)
+_TOOL_TAG_SPAN_RE = _re.compile(r"<tool_call>.*?</tool_call>", _re.DOTALL)
+
+
+def _consume_json_object(text: str, start: int) -> tuple[dict, int] | None:
+    """Parse a JSON object starting at `text[start:]` and return (obj, end_idx).
+
+    Uses json.JSONDecoder.raw_decode which handles nested braces correctly.
+    Skips leading whitespace before the '{'. Returns None if no valid object.
+    """
+    i = start
+    while i < len(text) and text[i].isspace():
+        i += 1
+    if i >= len(text) or text[i] != "{":
+        return None
+    try:
+        obj, consumed = json.JSONDecoder().raw_decode(text, i)
+    except json.JSONDecodeError:
+        return None
+    return obj, consumed
+
 
 def _extract_text_tool_calls(text: str) -> list[dict]:
-    """Pull tool call JSON blocks out of a plain-text response."""
-    calls = []
+    """Pull tool call JSON out of a plain-text response.
+
+    Handles:
+      1. ```tool_call\\n{...}\\n```          — the format we teach
+      2. <function>NAME>{...}</function>     — Llama 3.1 (Groq)
+      3. <function=NAME>{...}</function>     — Llama 3.1 alt
+      4. <tool_call>{"name":..,"arguments":..}</tool_call>
+    """
+    calls: list[dict] = []
+
+    # 1. Backtick-fenced blocks.
     for m in _TOOL_CALL_BLOCK_RE.finditer(text):
-        try:
-            data = json.loads(m.group(1))
-            if "name" in data:
-                calls.append(
-                    {
-                        "name": data["name"].strip(),
-                        "args": data.get("args", data.get("arguments", data.get("parameters", {}))),
-                    }
-                )
-        except Exception:
-            pass
+        parsed = _consume_json_object(m.group(1), 0)
+        if not parsed:
+            continue
+        data, _ = parsed
+        if isinstance(data, dict) and "name" in data:
+            calls.append(
+                {
+                    "name": data["name"].strip(),
+                    "args": data.get("args", data.get("arguments", data.get("parameters", {}))),
+                }
+            )
+
+    # 2 & 3. <function ...>{...}</function>
+    for m in _FN_TAG_OPEN_RE.finditer(text):
+        name = (m.group(1) or "").strip()
+        if not name:
+            continue
+        parsed = _consume_json_object(text, m.end())
+        if not parsed:
+            continue
+        args, _end = parsed
+        if not isinstance(args, dict):
+            continue
+        calls.append({"name": name, "args": args})
+
+    # 4. <tool_call>{...}</tool_call>
+    for m in _TOOL_TAG_OPEN_RE.finditer(text):
+        parsed = _consume_json_object(text, m.end())
+        if not parsed:
+            continue
+        data, _end = parsed
+        if isinstance(data, dict) and "name" in data:
+            calls.append(
+                {
+                    "name": data["name"].strip(),
+                    "args": data.get("arguments", data.get("args", data.get("parameters", {}))),
+                }
+            )
+
     return calls
 
 
@@ -747,8 +819,12 @@ async def _run_agent_openai_compat(
                     # Cap per-turn burst — weak models (Llama in text-mode)
                     # sometimes emit huge batches of parallel tool calls.
                     tool_calls = tool_calls[:_MAX_TOOL_CALLS_PER_TURN]
-                    # Strip the ```tool_call blocks from what the user sees
-                    display = _TOOL_CALL_BLOCK_RE.sub("", text).strip()
+                    # Strip ALL known tool-call formats from what the user sees
+                    # so the raw <function>...</function> or ```tool_call blocks
+                    # don't leak into the chat bubble.
+                    display = _TOOL_CALL_BLOCK_RE.sub("", text)
+                    display = _FN_TAG_SPAN_RE.sub("", display)
+                    display = _TOOL_TAG_SPAN_RE.sub("", display).strip()
                     if display:
                         yield _sse({"type": "text", "content": display})
                     messages.append({"role": "assistant", "content": text})
@@ -772,6 +848,33 @@ async def _run_agent_openai_compat(
                         yield _sse({"type": "text", "content": text})
                     break
             else:
+                # Native mode: usually msg.tool_calls has the calls. But weak
+                # models (Llama 8B via Groq) sometimes ignore the native
+                # tool_call channel and just emit <function>NAME>{...}</function>
+                # tags in the text. Detect that and hand off to text-mode
+                # execution so the tool actually fires instead of the raw XML
+                # leaking to the user.
+                if not msg.tool_calls and text:
+                    salvaged = _extract_text_tool_calls(text)
+                    if salvaged:
+                        salvaged = salvaged[:_MAX_TOOL_CALLS_PER_TURN]
+                        display = _TOOL_CALL_BLOCK_RE.sub("", text)
+                        display = _FN_TAG_SPAN_RE.sub("", display)
+                        display = _TOOL_TAG_SPAN_RE.sub("", display).strip()
+                        if display:
+                            yield _sse({"type": "text", "content": display})
+                        messages.append({"role": "assistant", "content": text})
+                        for tc in salvaged:
+                            name = tc["name"]
+                            inputs = tc["args"]
+                            yield _sse({"type": "tool_call", "tool": name, "input": inputs})
+                            result_text = await _execute_tool(name, inputs, mcp_map, ctx)
+                            yield _sse({"type": "tool_result", "tool": name, "result": result_text[:500]})
+                            messages.append(
+                                {"role": "user", "content": f"[Tool result for '{name}']: {result_text}"}
+                            )
+                        continue  # loop back for the next LLM turn
+
                 if text:
                     yield _sse({"type": "text", "content": text})
 
