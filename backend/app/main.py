@@ -11,6 +11,7 @@ from slowapi.middleware import SlowAPIMiddleware
 
 from app.api.a2a import router as a2a_router
 from app.api.admin import router as admin_router
+from app.api.agent_kb import router as agent_kb_router
 from app.api.agents import public_router as agents_public_router
 from app.api.agents import router as agents_router
 from app.api.analytics import router as analytics_router
@@ -115,6 +116,7 @@ app.include_router(billing_router)
 app.include_router(chatbots_router)
 app.include_router(chat_router)
 app.include_router(kb_router)
+app.include_router(agent_kb_router)
 app.include_router(voice_router)
 app.include_router(widget_router)
 app.include_router(usage_router)
