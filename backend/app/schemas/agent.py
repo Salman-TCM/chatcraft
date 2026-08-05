@@ -4,6 +4,8 @@ from datetime import datetime
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from app.services.net_security import is_ssrf_safe
+
 
 class AgentToolsConfig(BaseModel):
     """Boolean toggles for each built-in tool. Unknown keys are rejected so
@@ -47,6 +49,11 @@ def _validate_webhook_url(value: str | None) -> str | None:
         return None
     if not _WEBHOOK_URL_RE.match(value):
         raise ValueError("webhook_url must be an http(s) URL")
+    if not is_ssrf_safe(value):
+        raise ValueError(
+            "webhook_url points at a private/internal address (localhost, private IP "
+            "ranges, cloud metadata endpoints, or bare Docker service names are blocked)"
+        )
     return value
 
 
