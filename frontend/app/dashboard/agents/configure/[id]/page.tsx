@@ -7,7 +7,7 @@ import {
   ArrowLeft, Save, Loader2, Check, Settings,
   Brain, Zap, Terminal, Webhook, Plug, ChevronDown,
   ChevronUp, RefreshCw, Trash2, Plus, ExternalLink,
-  AlertCircle, Globe, Wrench, Sparkles,
+  AlertCircle, Globe, Wrench, Sparkles, BookOpen,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -360,6 +360,14 @@ export default function ConfigureAgentPage() {
               <AlertCircle className="h-3.5 w-3.5" />{error}
             </p>
           )}
+          <Button
+            variant="outline" size="sm"
+            onClick={() => router.push(`/dashboard/agents/${id}/knowledge`)}
+            className="hidden sm:flex"
+          >
+            <BookOpen className="h-3.5 w-3.5 mr-1.5" />
+            Knowledge
+          </Button>
           <Button
             variant="outline" size="sm"
             onClick={() => router.push(`/dashboard/agents/run/${id}`)}
