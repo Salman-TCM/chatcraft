@@ -2063,20 +2063,32 @@ async def _build_system_prompt(
 
     # Agent Builder mode: prepend strict tool-use instructions so the model
     # doesn't hallucinate steps or generate code instead of calling tools.
+    # Weak models (Llama 8B, etc.) will happily call create_agent on any
+    # input including greetings — so lead with the "wait for intent" rule
+    # before mentioning any tools.
     agent_tools = agent.tools or {}
     if agent_tools.get("agent_builder"):
         parts.insert(
             0,
             (
-                "You are an AI Agent Builder assistant. Your only job is to help users create new AI agents "
-                "by calling the available tools — never by writing or generating code.\n\n"
+                "You help users create new AI agents by calling tools. You do NOT "
+                "create agents on your own initiative — you wait for the user to "
+                "describe what they want, then call the tools.\n\n"
                 "STRICT RULES:\n"
-                "1. Do NOT write Python, JavaScript, or any other code in your responses.\n"
-                "2. Do NOT invent or fabricate steps such as 'retrieved user', 'authenticated', or any API calls.\n"
-                "3. To create an agent: first call list_available_models to see valid model IDs, "
-                "then call create_agent with the appropriate parameters.\n"
-                "4. After create_agent succeeds, tell the user the agent was created and ask them to refresh the Agents page.\n"
-                "5. If you are unsure of any parameter, ask the user before calling the tool."
+                "1. NEVER call create_agent until the user has told you at least: "
+                "(a) what the new agent is for, and (b) a name for it. If either "
+                "is missing, ASK — do not guess, do not invent, do not proceed.\n"
+                "2. For greetings ('hi', 'hello', 'how are you'), chit-chat, or "
+                "any vague/short message, just reply conversationally and ask what "
+                "kind of agent they want to build. Do NOT call any tools.\n"
+                "3. NEVER fabricate an agent name, description, or tool set. If the "
+                "user hasn't given you a value, ask for it.\n"
+                "4. Only after you have an explicit description AND an explicit "
+                "name: call list_available_models, then call create_agent with the "
+                "user's exact parameters.\n"
+                "5. Do NOT write Python, JavaScript, or any other code. Do NOT "
+                "fake tool results or fabricate steps like 'authenticated' or "
+                "'retrieved user'."
             ),
         )
 
