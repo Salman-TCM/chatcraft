@@ -23,7 +23,7 @@ from urllib.parse import urlparse
 
 import anthropic
 import httpx
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import StreamingResponse
 from openai import AsyncOpenAI
 from pydantic import BaseModel
@@ -61,7 +61,7 @@ async def list_agents(user: CurrentUser, db: DBSession):
     return {"success": True, "data": [AgentResponse.model_validate(a) for a in agents]}
 
 
-@router.post("")
+@router.post("", status_code=status.HTTP_201_CREATED)
 async def create_agent(body: AgentCreateRequest, user: CurrentUser, db: DBSession):
     if body.chatbot_id:
         await _get_owned_chatbot(body.chatbot_id, user.id, db)
