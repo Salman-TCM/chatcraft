@@ -171,6 +171,26 @@ class PublicChatRequest(BaseModel):
     conversation_history: list[dict] = Field(default_factory=list, max_length=200)
 
 
+# Tools an anonymous visitor to a shared agent may invoke. Everything not in this
+# set — send_email, send_sms, http_request, google_sheets, create_agent,
+# list_available_models, verification tools, run_code, and all MCP tools — runs
+# under the agent owner's identity or on shared infrastructure and must NOT be
+# exposed on public shares.
+#
+# ⚠️  run_code intentionally NOT here. _tool_run_code is not a real sandbox: it
+# allows __import__, so `import os`, subprocess, and socket are all reachable.
+# Confirmed reachable from run_code: env vars (DATABASE_URL, SECRET_KEY, provider
+# API keys), shell exec as the container user, arbitrary outbound TCP. Exposing
+# this to anonymous visitors is a network-reachable RCE. Do NOT add run_code
+# back until it's behind a real isolation boundary (Pyodide, gVisor, ephemeral
+# container, or firejail with seccomp).
+_PUBLIC_SHARE_TOOL_ALLOWLIST = {
+    "browse_url",
+    "search_kb",
+    "web_search",  # billed to owner but read-only and rate-limited
+}
+
+
 @public_router.post("/{share_token}/chat")
 @limiter.limit("5/minute")
 async def public_agent_chat(
@@ -191,6 +211,12 @@ async def public_agent_chat(
         agent, db
     )  # no user_id — never inject token for public
     tools, mcp_map = await _build_tools_with_mcp(agent, agent.user_id, db)
+    # SECURITY: anonymous share visitors must not be able to invoke tools that
+    # mutate the owner's account (create_agent, send_email, send_sms, sheets,
+    # http_request, MCP) or reveal owner secrets (list_available_models).
+    # Only read-only, per-request-scoped tools survive on the public route.
+    tools = [t for t in tools if t["name"] in _PUBLIC_SHARE_TOOL_ALLOWLIST]
+    mcp_map = {}
     _, api_key = await _resolve_api_key(agent.user_id, agent.model or "claude-sonnet-4-6", db)
     return StreamingResponse(
         _run_agent(
@@ -506,7 +532,13 @@ async def _run_agent_anthropic(
 
     step = 0
     max_steps = agent.max_steps or 10
-    ctx = {"agent_id": str(agent.id), "user_id": str(agent.user_id)}
+    ctx = {
+        "agent_id": str(agent.id),
+        "user_id": str(agent.user_id),
+        # Cap what _execute_tool will dispatch to whatever we actually declared
+        # to the model — stops hallucinated / re-injected tool calls dead.
+        "allowed_tools": {t["name"] for t in tools} | set(mcp_map.keys()),
+    }
 
     try:
         while step < max_steps:
@@ -656,7 +688,13 @@ async def _run_agent_openai_compat(
 
     step = 0
     max_steps = agent.max_steps or 10
-    ctx = {"agent_id": str(agent.id), "user_id": str(agent.user_id)}
+    ctx = {
+        "agent_id": str(agent.id),
+        "user_id": str(agent.user_id),
+        # Cap what _execute_tool will dispatch to whatever we actually declared
+        # to the model — stops hallucinated / re-injected tool calls dead.
+        "allowed_tools": {t["name"] for t in tools} | set(mcp_map.keys()),
+    }
     text_tool_mode = False  # True once we've fallen back to JSON-in-text tool calling
 
     try:
@@ -829,7 +867,13 @@ async def _run_agent_gemini(
 
     step = 0
     max_steps = agent.max_steps or 10
-    ctx = {"agent_id": str(agent.id), "user_id": str(agent.user_id)}
+    ctx = {
+        "agent_id": str(agent.id),
+        "user_id": str(agent.user_id),
+        # Cap what _execute_tool will dispatch to whatever we actually declared
+        # to the model — stops hallucinated / re-injected tool calls dead.
+        "allowed_tools": {t["name"] for t in tools} | set(mcp_map.keys()),
+    }
 
     try:
         while step < max_steps:
@@ -961,7 +1005,12 @@ def _build_builtin_tools(tools_config: dict) -> list[dict]:
             }
         )
 
-    if tools_config.get("code"):
+    # run_code is a real security risk (no sandbox — see _tool_run_code
+    # docstring). Only expose it when the operator has explicitly opted in via
+    # settings.enable_code_tool. This keeps the toggle visible in the UI so
+    # existing agents don't silently break, but the tool won't actually reach
+    # the model.
+    if tools_config.get("code") and settings.enable_code_tool:
         defs.append(
             {
                 "name": "run_code",
@@ -1230,6 +1279,13 @@ def _build_builtin_tools(tools_config: dict) -> list[dict]:
 
 
 async def _execute_tool(name: str, inputs: dict, mcp_map: dict, ctx: dict | None = None) -> str:
+    # Defense-in-depth: even if the model hallucinates a tool call for a name
+    # that isn't in its declared tool list (text-mode extraction, retries, etc),
+    # refuse to dispatch it if the caller passed an allowlist. Public shares set
+    # this; authenticated /chat leaves it None → any built-in is allowed.
+    allowed = (ctx or {}).get("allowed_tools")
+    if allowed is not None and name not in allowed and name not in mcp_map:
+        return f"Tool '{name}' is not available in this context."
     try:
         # MCP tool
         if name in mcp_map:
@@ -1478,6 +1534,30 @@ async def _tool_http(inputs: dict) -> str:
 
 
 def _tool_run_code(code: str) -> str:
+    if not settings.enable_code_tool:
+        return (
+            "Error: the code execution tool is disabled on this deployment. "
+            "The operator must set ENABLE_CODE_TOOL=true to enable it."
+        )
+    return _tool_run_code_impl(code)
+
+
+def _tool_run_code_impl(code: str) -> str:
+    """Execute user-supplied Python. NOT A SANDBOX.
+
+    __import__ is exposed in allowed_builtins so `import os` / subprocess /
+    socket / urllib all work. Callers can read the container's env vars
+    (DATABASE_URL, SECRET_KEY, provider API keys), execute shell as the
+    container user, and open outbound TCP to arbitrary hosts. The 10-second
+    timeout and 2000-char output cap are DoS mitigations, not security
+    boundaries.
+
+    Because of the above, run_code MUST NOT be exposed on the public share
+    route (see _PUBLIC_SHARE_TOOL_ALLOWLIST) and treat this tool being enabled
+    on any agent as "trusted code execution as the backend container user".
+    Replace with a real sandbox (Pyodide / gVisor / ephemeral container) before
+    treating it as safe for untrusted input.
+    """
     import concurrent.futures
     import contextlib
     import io
