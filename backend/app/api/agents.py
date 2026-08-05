@@ -1627,6 +1627,17 @@ def _tool_run_code_impl(code: str) -> str:
             return "Error: code execution timed out (10s limit)"
 
 
+_SPA_TELLS = (
+    "you need to enable javascript",
+    "please enable javascript",
+    "javascript is disabled",
+    "javascript required",
+    "we're sorry but",  # common create-react-app placeholder
+    "this app requires javascript",
+    "enable js to continue",
+)
+
+
 async def _tool_browse(url: str) -> str:
     from bs4 import BeautifulSoup
 
@@ -1640,7 +1651,24 @@ async def _tool_browse(url: str) -> str:
     for tag in soup(["script", "style", "nav", "footer", "header"]):
         tag.decompose()
     text = " ".join(soup.stripped_strings)[:4000]
-    return text or "Could not extract content."
+
+    # Many modern sites are client-rendered SPAs — the raw HTML contains only
+    # a placeholder like "You need to enable JavaScript to run this app." and
+    # returning that to the LLM makes it look like the real page content, which
+    # invites hallucination. Detect the pattern and be explicit about it.
+    lowered = text.lower().strip()
+    if not lowered:
+        return f"Could not extract any content from {url}. The response body was empty."
+    if len(lowered) < 300 and any(tell in lowered for tell in _SPA_TELLS):
+        return (
+            f"The page at {url} is a client-side JavaScript application whose "
+            f"content isn't in the raw HTML. Only a placeholder message was "
+            f"returned: {text!r}. This tool cannot render JavaScript. "
+            f"Do NOT invent facts about the site — tell the user the page needs "
+            f"a JavaScript-capable browser to read, or suggest an alternative "
+            f"source (their sitemap, RSS, or a documented API)."
+        )
+    return text
 
 
 async def _tool_sheets(inputs: dict) -> str:
@@ -2085,9 +2113,28 @@ async def _build_system_prompt(
             "You are a helpful AI agent. Use the available tools to complete tasks thoroughly and accurately."
         )
 
+    # Global anti-hallucination stanza — appended to EVERY agent's prompt when
+    # any tool is enabled. Weak models (Llama 8B especially) will fabricate
+    # plausible-sounding emails, prices, phone numbers, and quotes when a tool
+    # returns "no results" or a JavaScript-app placeholder. Tell them not to.
+    agent_tools_cfg = agent.tools or {}
+    if any(agent_tools_cfg.values()):
+        parts.append(
+            "GROUNDING RULES:\n"
+            "1. When a tool returns 'no results', an error, or an unhelpful "
+            "placeholder (like 'You need to enable JavaScript'), say so plainly. "
+            "Do NOT fill the gap with plausible-sounding invented facts.\n"
+            "2. NEVER fabricate specific facts you didn't retrieve: email "
+            "addresses, phone numbers, prices, dates, URLs, product names, "
+            "quoted text. If you don't have it, say you don't have it.\n"
+            "3. Prefer 'I couldn't find that — here's what I tried' over "
+            "'here's my best guess'.\n"
+            "4. When citing information from a tool, quote the source (URL, "
+            "document name, or tool name) so the user can verify."
+        )
+
     # If the agent has ready KB documents AND the search_kb tool is enabled,
     # tell the model the KB exists so it knows to search it.
-    agent_tools_cfg = agent.tools or {}
     if agent_tools_cfg.get("search_kb"):
         kb_result = await db.execute(
             select(func.count(AgentKnowledgeDocument.id)).where(

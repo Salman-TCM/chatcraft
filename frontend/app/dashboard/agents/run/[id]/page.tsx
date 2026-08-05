@@ -410,18 +410,27 @@ export default function AgentRunPage() {
               // Auto-expand newly running tool
               setExpandedTools((prev) => new Set([...prev, newId]));
             } else if (event.type === "tool_result") {
-              setToolExecutions((prev) =>
-                prev.map((exec) =>
-                  exec.id === activeExecutionId
-                    ? {
-                        ...exec,
-                        output: event.result,
-                        status: "completed",
-                        duration: Date.now() - exec.startTime.getTime(),
-                      }
-                    : exec
-                )
-              );
+              // Match by (tool name + still-running) instead of the shared
+              // activeExecutionId var. React batches setState across a burst of
+              // SSE events, and by the time the setState callback runs the
+              // mutable activeExecutionId has been overwritten by the NEXT
+              // tool_call — which left web_search stuck "Running..." forever
+              // any time the model emitted 2+ tools in one turn.
+              const toolName = event.tool as string;
+              setToolExecutions((prev) => {
+                const idx = prev.findIndex(
+                  (e) => e.status === "running" && e.tool === toolName
+                );
+                if (idx < 0) return prev;
+                const next = prev.slice();
+                next[idx] = {
+                  ...next[idx],
+                  output: event.result,
+                  status: "completed",
+                  duration: Date.now() - next[idx].startTime.getTime(),
+                };
+                return next;
+              });
             } else if (event.type === "error") {
               addMessage("error", event.content);
             }
