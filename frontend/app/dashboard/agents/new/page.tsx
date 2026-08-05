@@ -1,12 +1,14 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
   ArrowLeft, ArrowRight, Bot, Brain, Check, ChevronRight,
   Code2, Globe, Link2, Mail, Sparkles, Wand2, Zap,
   Chrome, Sheet, Smartphone, ShieldCheck, Loader2,
   BookOpen, Rocket, Search, Database, MessageSquare,
+  AlertCircle, ExternalLink,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -14,6 +16,13 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { apiClient } from "@/lib/api";
+
+interface ProviderModels {
+  provider: string;
+  label: string;
+  available: boolean;
+  models: { id: string; name: string; allowed?: boolean }[];
+}
 
 type Step = "template" | "basics" | "model" | "tools" | "instructions";
 
@@ -101,43 +110,15 @@ Always confirm understanding before executing multi-step workflows.`,
   },
 ];
 
-const MODELS = [
-  {
-    value: "claude-sonnet-4-6",
-    label: "Claude Sonnet 4.6",
-    description: "Best balance of speed, cost, and capability",
-    badge: "Recommended",
-    color: "bg-indigo-100 text-indigo-700",
-  },
-  {
-    value: "claude-opus-4-7",
-    label: "Claude Opus 4.7",
-    description: "Most capable for complex reasoning",
-    badge: "Premium",
-    color: "bg-purple-100 text-purple-700",
-  },
-  {
-    value: "claude-haiku-4-5-20251001",
-    label: "Claude Haiku 4.5",
-    description: "Fastest and most affordable",
-    badge: "Fast",
-    color: "bg-green-100 text-green-700",
-  },
-  {
-    value: "gpt-4o",
-    label: "GPT-4o",
-    description: "OpenAI's flagship with vision",
-    badge: "Vision",
-    color: "bg-emerald-100 text-emerald-700",
-  },
-  {
-    value: "gpt-4o-mini",
-    label: "GPT-4o Mini",
-    description: "Cost-effective GPT variant",
-    badge: "Budget",
-    color: "bg-teal-100 text-teal-700",
-  },
-];
+const PROVIDER_COLORS: Record<string, string> = {
+  anthropic:   "bg-indigo-100 text-indigo-700",
+  openai:      "bg-emerald-100 text-emerald-700",
+  google:      "bg-blue-100 text-blue-700",
+  groq:        "bg-amber-100 text-amber-700",
+  deepseek:    "bg-cyan-100 text-cyan-700",
+  perplexity:  "bg-violet-100 text-violet-700",
+  xai:         "bg-slate-100 text-slate-700",
+};
 
 const TOOLS = [
   {
@@ -203,6 +184,39 @@ export default function NewAgentPage() {
   const [model, setModel] = useState("claude-sonnet-4-6");
   const [tools, setTools] = useState<Record<string, boolean>>({});
   const [instructions, setInstructions] = useState("");
+
+  const [providers, setProviders] = useState<ProviderModels[]>([]);
+  const [modelsLoading, setModelsLoading] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const { data } = await apiClient.get("/api/v1/models");
+        if (cancelled) return;
+        const list: ProviderModels[] = data.data || [];
+        setProviders(list);
+        // If the current selection isn't available, pick the first allowed model
+        const flat = list
+          .filter((p) => p.available)
+          .flatMap((p) => p.models.filter((m) => m.allowed !== false));
+        if (flat.length && !flat.some((m) => m.id === model)) {
+          setModel(flat[0].id);
+        }
+      } catch {
+        // keep default; UI will show a "configure keys" hint
+      } finally {
+        if (!cancelled) setModelsLoading(false);
+      }
+    })();
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const availableProviders = providers.filter((p) => p.available);
+  const selectedModelMeta = providers
+    .flatMap((p) => p.models.map((m) => ({ ...m, provider: p.provider, providerLabel: p.label })))
+    .find((m) => m.id === model);
 
   const steps: Step[] = ["template", "basics", "model", "tools", "instructions"];
   const currentIndex = steps.indexOf(currentStep);
@@ -427,54 +441,99 @@ export default function NewAgentPage() {
                   Choose the language model that powers your agent
                 </p>
               </div>
-              
-              <div className="space-y-3">
-                {MODELS.map((m) => (
-                  <button
-                    key={m.value}
-                    onClick={() => setModel(m.value)}
-                    className={`w-full flex items-center gap-4 rounded-lg border-2 p-4 text-left transition-all ${
-                      model === m.value
-                        ? "border-primary bg-primary/5"
-                        : "border-border hover:border-primary/50"
-                    }`}
-                  >
-                    <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-muted">
-                      <Brain className="h-5 w-5 text-muted-foreground" />
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2">
-                        <p className="font-medium">{m.label}</p>
-                        <span className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${m.color}`}>
-                          {m.badge}
+
+              {modelsLoading ? (
+                <div className="flex items-center justify-center py-16">
+                  <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+                </div>
+              ) : availableProviders.length === 0 ? (
+                <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 flex items-start gap-3">
+                  <AlertCircle className="h-5 w-5 shrink-0 text-amber-600 mt-0.5" />
+                  <div className="flex-1">
+                    <p className="text-sm font-medium text-amber-900">No models available</p>
+                    <p className="text-xs text-amber-800 mt-1">
+                      Connect at least one AI provider (Anthropic, OpenAI, Groq, etc.) in
+                      Integrations to enable model selection.
+                    </p>
+                    <Link href="/dashboard/settings/integrations" className="inline-block mt-2">
+                      <Button size="sm" variant="outline" className="h-7 text-xs">
+                        Configure API keys
+                        <ExternalLink className="h-3 w-3 ml-1.5" />
+                      </Button>
+                    </Link>
+                  </div>
+                </div>
+              ) : (
+                <div className="space-y-5">
+                  {availableProviders.map((provider) => (
+                    <div key={provider.provider}>
+                      <div className="flex items-center gap-2 mb-2">
+                        <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider ${PROVIDER_COLORS[provider.provider] ?? "bg-muted text-muted-foreground"}`}>
+                          {provider.label}
+                        </span>
+                        <span className="text-[10px] text-muted-foreground">
+                          {provider.models.length} model{provider.models.length !== 1 ? "s" : ""}
                         </span>
                       </div>
-                      <p className="text-xs text-muted-foreground mt-0.5">
-                        {m.description}
-                      </p>
+                      <div className="space-y-2">
+                        {provider.models.map((m) => {
+                          const disabled = m.allowed === false;
+                          const selected = model === m.id;
+                          return (
+                            <button
+                              key={m.id}
+                              disabled={disabled}
+                              onClick={() => setModel(m.id)}
+                              className={`w-full flex items-center gap-4 rounded-lg border-2 p-3 text-left transition-all ${
+                                disabled
+                                  ? "opacity-50 cursor-not-allowed border-border"
+                                  : selected
+                                  ? "border-primary bg-primary/5"
+                                  : "border-border hover:border-primary/50"
+                              }`}
+                            >
+                              <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-muted">
+                                <Brain className="h-4 w-4 text-muted-foreground" />
+                              </div>
+                              <div className="flex-1 min-w-0">
+                                <p className="font-medium text-sm">{m.name}</p>
+                                <p className="text-[11px] text-muted-foreground font-mono truncate">
+                                  {m.id}
+                                </p>
+                              </div>
+                              {disabled && (
+                                <span className="rounded-full bg-muted px-2 py-0.5 text-[10px] font-medium text-muted-foreground">
+                                  Upgrade
+                                </span>
+                              )}
+                              <div className={`h-4 w-4 rounded-full border-2 ${
+                                selected
+                                  ? "border-primary bg-primary"
+                                  : "border-muted-foreground/30"
+                              }`}>
+                                {selected && (
+                                  <Check className="h-3 w-3 text-primary-foreground" />
+                                )}
+                              </div>
+                            </button>
+                          );
+                        })}
+                      </div>
                     </div>
-                    <div className={`h-4 w-4 rounded-full border-2 ${
-                      model === m.value
-                        ? "border-primary bg-primary"
-                        : "border-muted-foreground/30"
-                    }`}>
-                      {model === m.value && (
-                        <Check className="h-3 w-3 text-primary-foreground" />
-                      )}
-                    </div>
-                  </button>
-                ))}
-              </div>
-              
-              <div className="rounded-lg bg-muted/50 p-4">
-                <p className="text-xs font-medium mb-2">Model recommendations</p>
-                <ul className="space-y-1 text-xs text-muted-foreground">
-                  <li>• <strong>Sonnet 4.6</strong>: Best for most agents</li>
-                  <li>• <strong>Opus 4.7</strong>: Complex multi-step tasks</li>
-                  <li>• <strong>Haiku 4.5</strong>: Simple, high-volume tasks</li>
-                  <li>• <strong>GPT-4o</strong>: When you need vision capabilities</li>
-                </ul>
-              </div>
+                  ))}
+
+                  <div className="rounded-lg bg-muted/50 p-3 text-xs text-muted-foreground flex items-start gap-2">
+                    <AlertCircle className="h-3.5 w-3.5 shrink-0 mt-0.5" />
+                    <span>
+                      Only providers with a saved API key are shown.{" "}
+                      <Link href="/dashboard/settings/integrations" className="text-primary hover:underline">
+                        Add more providers
+                      </Link>
+                      .
+                    </span>
+                  </div>
+                </div>
+              )}
             </div>
           )}
 
@@ -601,7 +660,9 @@ Always maintain a professional and friendly tone.`}
                   </div>
                   <div className="flex justify-between">
                     <span className="text-muted-foreground">Model:</span>
-                    <span className="font-medium">{MODELS.find(m => m.value === model)?.label}</span>
+                    <span className="font-medium">
+                      {selectedModelMeta?.name || model || "Not set"}
+                    </span>
                   </div>
                   <div className="flex justify-between">
                     <span className="text-muted-foreground">Tools enabled:</span>
