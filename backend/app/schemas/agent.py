@@ -51,6 +51,8 @@ def _validate_webhook_url(value: str | None) -> str | None:
 
 
 class AgentCreateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     name: str = Field(..., min_length=1, max_length=255)
     description: str | None = Field(None, max_length=2000)
     instructions: str | None = Field(None, max_length=8000)
@@ -59,6 +61,7 @@ class AgentCreateRequest(BaseModel):
     tools: AgentToolsConfig = Field(default_factory=AgentToolsConfig)
     memory_enabled: bool = False
     max_steps: int = Field(10, ge=1, le=30)
+    is_active: bool = True
     webhook_url: str | None = Field(None, max_length=2048)
 
     _v_model = field_validator("model")(lambda cls, v: _validate_model_id(v))
@@ -66,6 +69,8 @@ class AgentCreateRequest(BaseModel):
 
 
 class AgentUpdateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     name: str | None = Field(None, min_length=1, max_length=255)
     description: str | None = Field(None, max_length=2000)
     instructions: str | None = Field(None, max_length=8000)

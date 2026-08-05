@@ -75,6 +75,8 @@ async def create_agent(body: AgentCreateRequest, user: CurrentUser, db: DBSessio
         tools=body.tools.model_dump(),
         memory_enabled=body.memory_enabled,
         max_steps=body.max_steps,
+        is_active=body.is_active,
+        webhook_url=body.webhook_url,
     )
     db.add(agent)
     await db.commit()
@@ -178,6 +180,15 @@ async def public_agent_chat(
 ):
     """Stream a public agent response. No authentication required."""
     agent = await _get_shared_agent(share_token, db)
+    if not agent.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={
+                "success": False,
+                "error": "Agent is inactive",
+                "code": "AGENT_INACTIVE",
+            },
+        )
     system_prompt = await _build_system_prompt(
         agent, db
     )  # no user_id — never inject token for public
@@ -345,6 +356,15 @@ async def agent_chat(
 ):
     """Stream an agent response with tool use, showing thinking steps as SSE events."""
     agent = await _get_owned_agent(agent_id, user.id, db)
+    if not agent.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={
+                "success": False,
+                "error": "Agent is inactive. Enable it in Configure to run.",
+                "code": "AGENT_INACTIVE",
+            },
+        )
     system_prompt = await _build_system_prompt(agent, db, user_id=user.id)
     tools, mcp_map = await _build_tools_with_mcp(agent, user.id, db)
     _, api_key = await _resolve_api_key(user.id, agent.model or "claude-sonnet-4-6", db)
