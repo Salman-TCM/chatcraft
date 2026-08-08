@@ -158,18 +158,21 @@ async def extract_text_for_document(
     if not file_url:
         raise ValueError(f"file_url required for document type '{doc_type}'")
 
-    # Read local-storage files from disk to avoid HTTP round-trips inside
-    # Docker (the celery worker container shares the uploads volume with the
-    # backend container, so this works without any network dependency).
-    from app.services.storage import local_path_for_url
+    from app.services.storage import download_minio_object, local_path_for_url, minio_key_for_url
 
-    local = local_path_for_url(file_url)
-    if local is not None:
-        if not local.exists():
-            raise FileNotFoundError(f"Local upload not found: {local}")
-        data = local.read_bytes()
+    minio_key = minio_key_for_url(file_url)
+    if minio_key is not None:
+        # Use boto3 directly — bypasses SSRF guard and Docker-internal DNS
+        # (minio:9000 resolves to a private IP that _assert_safe_url rejects).
+        data = await download_minio_object(minio_key)
     else:
-        data = await _download_bytes(file_url)
+        local = local_path_for_url(file_url)
+        if local is not None:
+            if not local.exists():
+                raise FileNotFoundError(f"Local upload not found: {local}")
+            data = local.read_bytes()
+        else:
+            data = await _download_bytes(file_url)
 
     if doc_type == "pdf":
         return extract_pdf(data)

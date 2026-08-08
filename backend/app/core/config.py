@@ -120,9 +120,18 @@ class Settings(BaseSettings):
     premium_tier_message_cap: int = 5000
     default_fallback_model: str = "gpt-4o-mini"
 
-    # Local filesystem storage — used when neither S3 nor Supabase is configured.
-    # Both the backend and celery_worker containers must mount the same directory
-    # (done via the `uploads_data` Docker volume in docker-compose.yml).
+    # S3-compatible endpoint override — set to http://minio:9000 to use MinIO
+    # instead of AWS. When empty, boto3 routes to real AWS S3.
+    aws_endpoint_url: str = ""
+
+    # Public-facing base URL for MinIO file access. Used to construct the URL
+    # returned by upload_file/upload_logo. In dev: http://localhost:9000.
+    # In prod: set to wherever nginx proxies /files/ (e.g. https://domain.com/files).
+    minio_public_url: str = ""
+
+    # Local filesystem storage — last-resort fallback when no cloud storage is
+    # configured. Both backend and celery_worker share this path via the
+    # uploads_data Docker volume.
     local_uploads_dir: str = "/app/uploads"
 
     # The `code` tool executes arbitrary Python without real isolation:
