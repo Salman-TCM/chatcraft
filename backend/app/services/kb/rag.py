@@ -1,7 +1,7 @@
 """
 RAG Query Pipeline
 ==================
-1. Embed the user's query with text-embedding-3-small.
+1. Embed the user's query with the owner's configured embedding provider.
 2. Vector cosine similarity search (top-K chunks from pgvector).
 3. Keyword BM25 filter for hybrid recall (re-ranks/supplements vector hits).
 4. Relevance threshold (drop chunks below 0.75 cosine similarity).
@@ -25,11 +25,13 @@ from dataclasses import dataclass
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.models.chatbot_config import ChatbotConfig
 from app.models.knowledge_base import (
     DocumentStatus,
     KnowledgeBaseDocument,
 )
-from app.services.kb.embedder import embed_texts
+from app.services.kb.embedder import embed_texts, resolve_embedding_provider
+from app.services.llm.key_store import get_all_keys
 
 RELEVANCE_THRESHOLD = 0.75  # cosine similarity floor
 TOP_K = 5
@@ -66,8 +68,11 @@ class RAGService:
         if not has_docs:
             return None, []
 
-        # Embed query
-        query_vectors = await embed_texts([user_message])
+        # Embed query — use the chatbot owner's own provider key if they have one
+        chatbot = await self._db.get(ChatbotConfig, chatbot_id)
+        user_keys = await get_all_keys(chatbot.user_id, self._db) if chatbot else {}
+        provider, api_key = resolve_embedding_provider(user_keys)
+        query_vectors = await embed_texts([user_message], provider, api_key)
         query_vector = query_vectors[0]
 
         # Vector search — fetch more than top_k so BM25 re-rank has headroom
