@@ -717,6 +717,30 @@ _TOOL_TAG_OPEN_RE = _re.compile(r"<tool_call\s*>")
 _FN_TAG_SPAN_RE = _re.compile(r"<function[^>]*>.*?</function>", _re.DOTALL)
 _TOOL_TAG_SPAN_RE = _re.compile(r"<tool_call>.*?</tool_call>", _re.DOTALL)
 
+# Some models name the fence after the tool itself instead of the taught
+# "tool_call" tag, e.g. ```http_request\n{...}\n```. Only recognized when the
+# tag matches a real tool identifier (see _BUILTIN_TOOL_NAMES below) so an
+# incidental ```json or ```python example block is never mistaken for a call.
+_GENERIC_FENCE_RE = _re.compile(r"```([A-Za-z_][A-Za-z0-9_]*)\s*\n(.*?)\n```", _re.DOTALL)
+
+_BUILTIN_TOOL_NAMES = frozenset(
+    {
+        "web_search",
+        "http_request",
+        "run_code",
+        "browse_url",
+        "google_sheets",
+        "send_email",
+        "send_sms",
+        "send_email_verification",
+        "send_sms_verification",
+        "verify_code",
+        "list_available_models",
+        "create_agent",
+        "search_kb",
+    }
+)
+
 
 def _consume_json_object(text: str, start: int) -> tuple[dict, int] | None:
     """Parse a JSON object starting at `text[start:]` and return (obj, end_idx).
@@ -736,7 +760,7 @@ def _consume_json_object(text: str, start: int) -> tuple[dict, int] | None:
     return obj, consumed
 
 
-def _extract_text_tool_calls(text: str) -> list[dict]:
+def _extract_text_tool_calls(text: str, known_tool_names: frozenset[str] = frozenset()) -> tuple[list[dict], int]:
     """Pull tool call JSON out of a plain-text response.
 
     Handles:
@@ -744,8 +768,17 @@ def _extract_text_tool_calls(text: str) -> list[dict]:
       2. <function>NAME>{...}</function>     — Llama 3.1 (Groq)
       3. <function=NAME>{...}</function>     — Llama 3.1 alt
       4. <tool_call>{"name":..,"arguments":..}</tool_call>
+      5. A bare {"name": ..., "arguments": {...}} with no wrapper at all
+      6. ```<tool_name>\\n{...}\\n```         — model names the fence after
+         the tool itself instead of "tool_call" (`known_tool_names`-gated)
+
+    Also returns `cutoff`: the end offset of the last recognized call. Weak
+    models sometimes keep generating past the call, narrating a fabricated
+    "result" and answer as if the tool had already run and returned data.
+    Callers MUST discard everything after `cutoff` — none of it is real.
     """
     calls: list[dict] = []
+    cutoff = 0
 
     # 1. Backtick-fenced blocks.
     for m in _TOOL_CALL_BLOCK_RE.finditer(text):
@@ -760,6 +793,7 @@ def _extract_text_tool_calls(text: str) -> list[dict]:
                     "args": data.get("args", data.get("arguments", data.get("parameters", {}))),
                 }
             )
+            cutoff = max(cutoff, m.end())
 
     # 2 & 3. <function ...>{...}</function>
     for m in _FN_TAG_OPEN_RE.finditer(text):
@@ -773,6 +807,7 @@ def _extract_text_tool_calls(text: str) -> list[dict]:
         if not isinstance(args, dict):
             continue
         calls.append({"name": name, "args": args})
+        cutoff = max(cutoff, _end)
 
     # 4. <tool_call>{...}</tool_call>
     for m in _TOOL_TAG_OPEN_RE.finditer(text):
@@ -787,6 +822,20 @@ def _extract_text_tool_calls(text: str) -> list[dict]:
                     "args": data.get("arguments", data.get("args", data.get("parameters", {}))),
                 }
             )
+            cutoff = max(cutoff, _end)
+
+    # 6. ```<tool_name>\n{...}\n``` — fence tagged with the tool's own name.
+    for m in _GENERIC_FENCE_RE.finditer(text):
+        tag = m.group(1)
+        if tag == "tool_call" or tag not in (known_tool_names | _BUILTIN_TOOL_NAMES):
+            continue
+        parsed = _consume_json_object(m.group(2), 0)
+        if not parsed:
+            continue
+        data, _ = parsed
+        if isinstance(data, dict):
+            calls.append({"name": tag, "args": data})
+            cutoff = max(cutoff, m.end())
 
     # 5. Bare JSON object, no fence/tags at all — some Groq models (e.g.
     # gpt-oss, qwen) emit a raw {"name": ..., "arguments": {...}} as the
@@ -794,9 +843,10 @@ def _extract_text_tool_calls(text: str) -> list[dict]:
     if not calls:
         stripped = text.strip()
         if stripped.startswith("{"):
+            leading = len(text) - len(text.lstrip())
             parsed = _consume_json_object(stripped, 0)
             if parsed:
-                data, _end = parsed
+                data, consumed = parsed
                 if isinstance(data, dict) and "name" in data and isinstance(data["name"], str):
                     calls.append(
                         {
@@ -804,8 +854,20 @@ def _extract_text_tool_calls(text: str) -> list[dict]:
                             "args": data.get("args", data.get("arguments", data.get("parameters", {}))),
                         }
                     )
+                    cutoff = max(cutoff, leading + consumed)
 
-    return calls
+    return calls, cutoff
+
+
+def _strip_recognized_fences(text: str, known_tool_names: frozenset[str] = frozenset()) -> str:
+    """Remove every span _extract_text_tool_calls recognizes as a tool-call
+    attempt, so the raw fence/tag never leaks into the chat bubble."""
+    text = _TOOL_CALL_BLOCK_RE.sub("", text)
+    text = _FN_TAG_SPAN_RE.sub("", text)
+    text = _TOOL_TAG_SPAN_RE.sub("", text)
+    allowed = known_tool_names | _BUILTIN_TOOL_NAMES
+    text = _GENERIC_FENCE_RE.sub(lambda m: "" if m.group(1) in allowed else m.group(0), text)
+    return text.strip()
 
 
 # Keys models commonly use when they wrap a plain-language answer in JSON
@@ -910,20 +972,20 @@ async def _run_agent_openai_compat(
             text = msg.content or ""
 
             if text_tool_mode:
-                tool_calls = _extract_text_tool_calls(text)
+                tool_calls, cutoff = _extract_text_tool_calls(text, ctx["allowed_tools"])
                 if tool_calls:
                     # Cap per-turn burst — weak models (Llama in text-mode)
                     # sometimes emit huge batches of parallel tool calls.
                     tool_calls = tool_calls[:_MAX_TOOL_CALLS_PER_TURN]
-                    # Strip ALL known tool-call formats from what the user sees
-                    # so the raw <function>...</function> or ```tool_call blocks
-                    # don't leak into the chat bubble.
-                    display = _TOOL_CALL_BLOCK_RE.sub("", text)
-                    display = _FN_TAG_SPAN_RE.sub("", display)
-                    display = _TOOL_TAG_SPAN_RE.sub("", display).strip()
+                    # Discard everything after the last recognized call —
+                    # some models keep generating past it, narrating a
+                    # fabricated "result" and answer as if the (real) tool
+                    # had already run. None of that is trustworthy.
+                    trusted_text = text[:cutoff]
+                    display = _strip_recognized_fences(trusted_text, ctx["allowed_tools"])
                     if display:
                         yield _sse({"type": "text", "content": display})
-                    messages.append({"role": "assistant", "content": text})
+                    messages.append({"role": "assistant", "content": trusted_text})
                     for tc in tool_calls:
                         name = tc["name"]
                         inputs = tc["args"]
@@ -951,15 +1013,14 @@ async def _run_agent_openai_compat(
                 # execution so the tool actually fires instead of the raw XML
                 # leaking to the user.
                 if not msg.tool_calls and text:
-                    salvaged = _extract_text_tool_calls(text)
+                    salvaged, cutoff = _extract_text_tool_calls(text, ctx["allowed_tools"])
                     if salvaged:
                         salvaged = salvaged[:_MAX_TOOL_CALLS_PER_TURN]
-                        display = _TOOL_CALL_BLOCK_RE.sub("", text)
-                        display = _FN_TAG_SPAN_RE.sub("", display)
-                        display = _TOOL_TAG_SPAN_RE.sub("", display).strip()
+                        trusted_text = text[:cutoff]
+                        display = _strip_recognized_fences(trusted_text, ctx["allowed_tools"])
                         if display:
                             yield _sse({"type": "text", "content": display})
-                        messages.append({"role": "assistant", "content": text})
+                        messages.append({"role": "assistant", "content": trusted_text})
                         for tc in salvaged:
                             name = tc["name"]
                             inputs = tc["args"]
