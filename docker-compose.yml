@@ -40,6 +40,30 @@ services:
       start_period: 5s
 
   # ---------------------------------------------------------------------------
+  # MinIO — S3-compatible object storage for uploaded files (KB docs, logos).
+  # API on 9000, web console on 9001.
+  # Credentials default to minioadmin:minioadmin — override in .env for prod.
+  # ---------------------------------------------------------------------------
+  minio:
+    image: minio/minio:latest
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    ports:
+      - "${MINIO_API_PORT:-9000}:9000"
+      - "${MINIO_CONSOLE_PORT:-9001}:9001"
+    volumes:
+      - minio_data:/data
+    environment:
+      MINIO_ROOT_USER:     ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin}
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  # ---------------------------------------------------------------------------
   # FastAPI backend — hot reload in dev
   # ---------------------------------------------------------------------------
   backend:
@@ -86,10 +110,12 @@ services:
       SLACK_ALERT_WEBHOOK_URL:  ${SLACK_ALERT_WEBHOOK_URL:-}
       AXIOM_TOKEN:              ${AXIOM_TOKEN:-}
       AXIOM_DATASET:            ${AXIOM_DATASET:-chatcraft-logs}
-      AWS_ACCESS_KEY_ID:        ${AWS_ACCESS_KEY_ID:-}
-      AWS_SECRET_ACCESS_KEY:    ${AWS_SECRET_ACCESS_KEY:-}
-      AWS_S3_BUCKET:            ${AWS_S3_BUCKET:-chatcraft-uploads}
+      AWS_ACCESS_KEY_ID:        ${AWS_ACCESS_KEY_ID:-minioadmin}
+      AWS_SECRET_ACCESS_KEY:    ${AWS_SECRET_ACCESS_KEY:-minioadmin}
+      AWS_S3_BUCKET:            ${AWS_S3_BUCKET:-chatcraft}
       AWS_REGION:               ${AWS_REGION:-us-east-1}
+      AWS_ENDPOINT_URL:         ${AWS_ENDPOINT_URL:-http://minio:9000}
+      MINIO_PUBLIC_URL:         ${MINIO_PUBLIC_URL:-http://localhost:9000/chatcraft}
       TWILIO_ACCOUNT_SID:       ${TWILIO_ACCOUNT_SID:-}
       TWILIO_AUTH_TOKEN:        ${TWILIO_AUTH_TOKEN:-}
       TWILIO_PHONE_NUMBER:      ${TWILIO_PHONE_NUMBER:-}
@@ -153,10 +179,12 @@ services:
       EMAIL_FROM:               ${EMAIL_FROM:-noreply@chatcraft.ai}
       SUPABASE_URL:             ${SUPABASE_URL:-}
       SUPABASE_KEY:             ${SUPABASE_KEY:-}
-      AWS_ACCESS_KEY_ID:        ${AWS_ACCESS_KEY_ID:-}
-      AWS_SECRET_ACCESS_KEY:    ${AWS_SECRET_ACCESS_KEY:-}
-      AWS_S3_BUCKET:            ${AWS_S3_BUCKET:-chatcraft-uploads}
+      AWS_ACCESS_KEY_ID:        ${AWS_ACCESS_KEY_ID:-minioadmin}
+      AWS_SECRET_ACCESS_KEY:    ${AWS_SECRET_ACCESS_KEY:-minioadmin}
+      AWS_S3_BUCKET:            ${AWS_S3_BUCKET:-chatcraft}
       AWS_REGION:               ${AWS_REGION:-us-east-1}
+      AWS_ENDPOINT_URL:         ${AWS_ENDPOINT_URL:-http://minio:9000}
+      MINIO_PUBLIC_URL:         ${MINIO_PUBLIC_URL:-http://localhost:9000/chatcraft}
       STRIPE_SECRET_KEY:        ${STRIPE_SECRET_KEY:-}
       SENTRY_DSN:               ${SENTRY_DSN:-}
       AXIOM_TOKEN:              ${AXIOM_TOKEN:-}
@@ -278,6 +306,7 @@ services:
 volumes:
   postgres_data:
   redis_data:
+  minio_data:
   celery_beat_data:
   frontend_node_modules:
   shared_node_modules:

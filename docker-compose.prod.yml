@@ -57,6 +57,36 @@ services:
         max-file: "5"
 
   # ---------------------------------------------------------------------------
+  # ---------------------------------------------------------------------------
+  # MinIO — S3-compatible object storage. Not published to the host; nginx
+  # proxies /files/ → MinIO so files get a clean public URL.
+  # ---------------------------------------------------------------------------
+  minio:
+    image: minio/minio:latest
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    ports: !reset []
+    volumes:
+      - minio_data:/data
+    networks: [edge, data]
+    environment:
+      MINIO_ROOT_USER:     ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 512M
+    logging:
+      driver: json-file
+      options: { max-size: "10m", max-file: "5" }
+
   # Postgres + Redis — singletons. No blue/green: they're stateful, and
   # migrations already run against a single database under a deploy lock
   # (see scripts/deploy/migrate.sh). Not on the edge network.
@@ -164,9 +194,11 @@ services:
       RESEND_API_KEY: ${RESEND_API_KEY:-}
       SENTRY_DSN: ${SENTRY_DSN:-}
       SLACK_ALERT_WEBHOOK_URL: ${SLACK_ALERT_WEBHOOK_URL:-}
-      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-}
-      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-}
-      AWS_S3_BUCKET: ${AWS_S3_BUCKET:-chatcraft-uploads}
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-${MINIO_ROOT_USER:-minioadmin}}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-${MINIO_ROOT_PASSWORD}}
+      AWS_S3_BUCKET: ${AWS_S3_BUCKET:-chatcraft}
+      AWS_ENDPOINT_URL: ${AWS_ENDPOINT_URL:-http://minio:9000}
+      MINIO_PUBLIC_URL: ${MINIO_PUBLIC_URL}
       CLAMAV_HOST: clamav
       CLAMAV_PORT: "3310"
     depends_on:
@@ -278,4 +310,5 @@ networks:
 
 volumes:
   certbot_webroot:
+  minio_data:
   uploads_data:
