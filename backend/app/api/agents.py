@@ -744,7 +744,59 @@ def _extract_text_tool_calls(text: str) -> list[dict]:
                 }
             )
 
+    # 5. Bare JSON object, no fence/tags at all — some Groq models (e.g.
+    # gpt-oss, qwen) emit a raw {"name": ..., "arguments": {...}} as the
+    # entire message body.
+    if not calls:
+        stripped = text.strip()
+        if stripped.startswith("{"):
+            parsed = _consume_json_object(stripped, 0)
+            if parsed:
+                data, _end = parsed
+                if isinstance(data, dict) and "name" in data and isinstance(data["name"], str):
+                    calls.append(
+                        {
+                            "name": data["name"].strip(),
+                            "args": data.get("args", data.get("arguments", data.get("parameters", {}))),
+                        }
+                    )
+
     return calls
+
+
+# Keys models commonly use when they wrap a plain-language answer in JSON
+# instead of just writing it (seen from Groq's gpt-oss / qwen models).
+_TEXT_JSON_KEYS = ("response", "answer", "content", "message", "text", "output", "reply")
+_JSON_FENCE_RE = _re.compile(r"^```(?:json)?\s*\n(.*)\n```$", _re.DOTALL)
+
+
+def _normalize_plain_text(text: str) -> str:
+    """Unwrap a JSON-encoded answer so replies read as plain text on every model.
+
+    Some Groq models occasionally emit `{"response": "..."}` (or similar)
+    instead of writing the answer directly. If the whole message is such an
+    object, pull the human-readable field out of it; ordinary prose (even
+    prose that happens to contain a JSON snippet) is left untouched.
+    """
+    stripped = text.strip()
+    if not stripped:
+        return text
+    fence = _JSON_FENCE_RE.match(stripped)
+    if fence:
+        stripped = fence.group(1).strip()
+    if not (stripped.startswith("{") and stripped.endswith("}")):
+        return text
+    try:
+        data = json.loads(stripped)
+    except json.JSONDecodeError:
+        return text
+    if not isinstance(data, dict) or "name" in data:
+        return text
+    for key in _TEXT_JSON_KEYS:
+        value = data.get(key)
+        if isinstance(value, str) and value.strip():
+            return value
+    return text
 
 
 async def _run_agent_openai_compat(
@@ -845,7 +897,7 @@ async def _run_agent_openai_compat(
                         )
                 else:
                     if text:
-                        yield _sse({"type": "text", "content": text})
+                        yield _sse({"type": "text", "content": _normalize_plain_text(text)})
                     break
             else:
                 # Native mode: usually msg.tool_calls has the calls. But weak
@@ -876,7 +928,7 @@ async def _run_agent_openai_compat(
                         continue  # loop back for the next LLM turn
 
                 if text:
-                    yield _sse({"type": "text", "content": text})
+                    yield _sse({"type": "text", "content": _normalize_plain_text(text)})
 
                 if not msg.tool_calls or choice.finish_reason == "stop":
                     break
