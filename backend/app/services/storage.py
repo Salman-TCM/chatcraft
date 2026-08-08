@@ -1,11 +1,11 @@
 """
 File storage abstraction.
-Uploads to S3 when AWS credentials are configured; falls back to Supabase Storage.
-Returns a public or pre-signed URL that the document processor can download.
+Priority: S3 → Supabase → local filesystem (uploads_data volume).
+Returns a URL the document processor can use to retrieve the file.
 """
 
 import uuid
-from pathlib import PurePosixPath
+from pathlib import Path, PurePosixPath
 from urllib.parse import urlsplit
 
 import boto3
@@ -13,6 +13,9 @@ from botocore.exceptions import BotoCoreError, ClientError
 
 from app.core.config import settings
 from app.core.logging import logger
+
+# URL prefix the backend serves local uploads under (StaticFiles mount).
+_LOCAL_UPLOADS_PREFIX = "/uploads/"
 
 # Allowed MIME types → document type string used in KnowledgeBaseDocument
 ALLOWED_MIME_TYPES: dict[str, str] = {
@@ -60,11 +63,7 @@ async def upload_logo(
         return await _upload_s3(data, key, content_type)
     if settings.supabase_url and settings.supabase_key:
         return await _upload_supabase(data, key, content_type)
-
-    raise RuntimeError(
-        "No storage backend configured. Set AWS_ACCESS_KEY_ID + AWS_S3_BUCKET "
-        "or SUPABASE_URL + SUPABASE_KEY."
-    )
+    return await _upload_local(data, key)
 
 
 async def upload_file(
@@ -84,11 +83,7 @@ async def upload_file(
         return await _upload_s3(data, key, content_type)
     if settings.supabase_url and settings.supabase_key:
         return await _upload_supabase(data, key, content_type)
-
-    raise RuntimeError(
-        "No storage backend configured. Set AWS_ACCESS_KEY_ID + AWS_S3_BUCKET "
-        "or SUPABASE_URL + SUPABASE_KEY."
-    )
+    return await _upload_local(data, key)
 
 
 async def delete_file(file_url: str) -> None:
@@ -114,7 +109,11 @@ async def delete_file(file_url: str) -> None:
             key = file_url[idx + len(marker) :]
             await _delete_supabase(key)
         else:
-            logger.warning(f"Unrecognized storage URL, skipping delete: {file_url!r}")
+            local = local_path_for_url(file_url)
+            if local and local.exists():
+                local.unlink(missing_ok=True)
+            else:
+                logger.warning(f"Unrecognized storage URL, skipping delete: {file_url!r}")
     except (BotoCoreError, ClientError) as exc:
         logger.warning(f"Failed to delete storage object for {file_url!r}: {exc!r}")
     except Exception as exc:
@@ -154,6 +153,29 @@ async def _upload_s3(data: bytes, key: str, content_type: str) -> str:
 
     await loop.run_in_executor(None, _put)
     return f"https://{settings.aws_s3_bucket}.s3.{settings.aws_region}.amazonaws.com/{key}"
+
+
+async def _upload_local(data: bytes, key: str) -> str:
+    """Store bytes on the local filesystem and return a URL served by StaticFiles."""
+    import asyncio
+
+    dest = Path(settings.local_uploads_dir) / key
+    dest.parent.mkdir(parents=True, exist_ok=True)
+
+    def _write() -> None:
+        dest.write_bytes(data)
+
+    await asyncio.get_event_loop().run_in_executor(None, _write)
+    return f"{settings.api_base_url}{_LOCAL_UPLOADS_PREFIX}{key}"
+
+
+def local_path_for_url(file_url: str) -> Path | None:
+    """Return the filesystem Path for a local-upload URL, or None if not local."""
+    prefix = f"{settings.api_base_url}{_LOCAL_UPLOADS_PREFIX}"
+    if not file_url.startswith(prefix):
+        return None
+    key = file_url[len(prefix):]
+    return Path(settings.local_uploads_dir) / key
 
 
 async def _upload_supabase(data: bytes, key: str, content_type: str) -> str:

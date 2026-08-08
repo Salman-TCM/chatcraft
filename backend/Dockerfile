@@ -49,7 +49,8 @@ RUN apk add --no-cache \
 # Non-root user
 RUN addgroup -g 1001 appgroup && \
     adduser -u 1001 -G appgroup -s /bin/bash -D appuser && \
-    mkdir -p /var/run/celerybeat && chown appuser:appgroup /var/run/celerybeat
+    mkdir -p /var/run/celerybeat && chown appuser:appgroup /var/run/celerybeat && \
+    mkdir -p /app/uploads && chown appuser:appgroup /app/uploads
 
 # Copy installed Python packages from builder
 COPY --from=builder /install /usr/local
