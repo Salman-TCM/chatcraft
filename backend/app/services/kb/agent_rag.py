@@ -14,9 +14,10 @@ import uuid
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.models.agent import Agent
 from app.models.agent_knowledge_base import AgentKnowledgeDocument
 from app.models.knowledge_base import DocumentStatus
-from app.services.kb.embedder import embed_texts
+from app.services.kb.embedder import embed_texts, resolve_embedding_provider
 from app.services.kb.rag import (
     BM25_CANDIDATE_MULTIPLIER,
     RELEVANCE_THRESHOLD,
@@ -25,6 +26,7 @@ from app.services.kb.rag import (
     _bm25_rerank,
     _build_context,
 )
+from app.services.llm.key_store import get_all_keys
 
 
 class AgentRAGService:
@@ -47,7 +49,11 @@ class AgentRAGService:
         if not await self._has_ready_documents(agent_id):
             return None, []
 
-        query_vectors = await embed_texts([user_message])
+        agent = await self._db.get(Agent, agent_id)
+        user_keys = await get_all_keys(agent.user_id, self._db) if agent else {}
+        provider, api_key = resolve_embedding_provider(user_keys)
+
+        query_vectors = await embed_texts([user_message], provider, api_key)
         query_vector = query_vectors[0]
 
         candidates = await self._vector_search(
