@@ -8,7 +8,7 @@ import {
   Smartphone, ShieldCheck, Zap, Circle, Play,
   MoreHorizontal, ExternalLink, MessageCircle, PanelRight,
   Mic, LayoutTemplate, Copy, QrCode, PauseCircle, PlayCircle,
-  Trash2, Check,
+  Trash2, Check, BookOpen,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -48,6 +48,7 @@ interface Agent {
   share_enabled: boolean;
   share_token: string | null;
   webhook_url: string | null;
+  welcome_message: string | null;
   created_at: string;
 }
 
@@ -61,6 +62,7 @@ interface EmbedModal {
 const TOOL_META: Record<string, { icon: React.ElementType; label: string; color: string }> = {
   web_search:    { icon: Globe,        label: "Web Search",    color: "text-blue-500" },
   browser:       { icon: Chrome,       label: "Browser",       color: "text-orange-500" },
+  search_kb:     { icon: BookOpen,     label: "Knowledge Base",color: "text-teal-500" },
   code:          { icon: Code2,        label: "Run Code",      color: "text-purple-500" },
   http:          { icon: Link2,        label: "HTTP",          color: "text-green-500" },
   sheets:        { icon: Sheet,        label: "Sheets",        color: "text-emerald-500" },
