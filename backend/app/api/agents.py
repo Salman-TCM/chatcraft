@@ -667,7 +667,56 @@ def _is_tool_generation_error(exc: Exception) -> bool:
         "tool_use_failed" in s
         or "failed to call a function" in s
         or "tool call validation failed" in s
+        or "tool choice is none, but model called a tool" in s
     )
+
+
+# Groq's tool_use_failed error attaches the raw generation string on the body.
+# The SDK renders it inside str(exc) using Python-repr for the outer dict but
+# the inner value is a JSON string, so we locate it by key and json-decode it.
+_FAILED_GEN_RE = _re.compile(
+    r"['\"]failed_generation['\"]\s*:\s*(['\"])(.+?)(?<!\\)\1",
+    _re.DOTALL,
+)
+
+
+def _extract_failed_tool_call(exc: Exception) -> dict | None:
+    """Try to salvage a tool call from a provider's tool_use_failed error body.
+
+    Groq (and other OpenAI-compat providers) attach the model's raw generation
+    on the error under `failed_generation`. That generation is usually the
+    native OpenAI tool-call JSON: {"name": ..., "arguments": {...}}. When our
+    text-mode fallback can't stop the model from emitting it, we salvage the
+    call directly from the error instead of surfacing a 400 to the user.
+
+    Returns {"name": str, "args": dict} on success, or None if we can't parse
+    a recognizable tool call out of the exception.
+    """
+    match = _FAILED_GEN_RE.search(str(exc))
+    if not match:
+        return None
+    raw = match.group(2)
+    # str(exc) uses Python repr so the escapes are ordinary JSON escapes; no
+    # extra unescaping needed beyond what json.loads already does.
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError:
+        # Some providers double-encode; try one more layer.
+        try:
+            data = json.loads(json.loads(f'"{raw}"'))
+        except Exception:
+            return None
+    if not isinstance(data, dict) or "name" not in data:
+        return None
+    args = data.get("arguments", data.get("args", data.get("parameters", {})))
+    if isinstance(args, str):
+        try:
+            args = json.loads(args)
+        except json.JSONDecodeError:
+            args = {}
+    if not isinstance(args, dict):
+        args = {}
+    return {"name": str(data["name"]).strip(), "args": args}
 
 
 def _build_text_tool_instructions(oai_tools: list[dict]) -> str:
@@ -956,9 +1005,44 @@ async def _run_agent_openai_compat(
             try:
                 response = await client.chat.completions.create(**kwargs)
             except Exception as exc:
-                if oai_tools and not text_tool_mode and _is_tool_generation_error(exc):
-                    # The model can't generate valid native tool calls.
-                    # Switch to text-mode: inject instructions and retry without tools.
+                if not _is_tool_generation_error(exc):
+                    raise
+                # Try to salvage the tool call from the provider's error body —
+                # Groq attaches the model's raw generation on `failed_generation`
+                # and it's usually a valid native-format tool call. Executing it
+                # keeps the conversation alive even after text-mode fallback,
+                # where the model still emits native JSON and Groq rejects with
+                # "Tool choice is none, but model called a tool".
+                salvaged = _extract_failed_tool_call(exc)
+                if salvaged and salvaged["name"] in ctx["allowed_tools"]:
+                    name = salvaged["name"]
+                    inputs = salvaged["args"]
+                    yield _sse({"type": "tool_call", "tool": name, "input": inputs})
+                    result_text = await _execute_tool(name, inputs, mcp_map, ctx)
+                    yield _sse(
+                        {"type": "tool_result", "tool": name, "result": result_text[:500]}
+                    )
+                    # Record what the model tried to do + the result so the
+                    # next turn has coherent history in either tool mode.
+                    messages.append(
+                        {
+                            "role": "assistant",
+                            "content": (
+                                f'Calling tool `{name}` with '
+                                f"{json.dumps(inputs, ensure_ascii=False)}"
+                            ),
+                        }
+                    )
+                    messages.append(
+                        {
+                            "role": "user",
+                            "content": f"[Tool result for '{name}']: {result_text}",
+                        }
+                    )
+                    continue  # skip to the next LLM turn
+                if oai_tools and not text_tool_mode:
+                    # First-time fallback: the model can't generate valid native
+                    # tool calls. Switch to text-mode and retry without tools.
                     text_tool_mode = True
                     instructions = _build_text_tool_instructions(oai_tools)
                     if messages and messages[0]["role"] == "system":
