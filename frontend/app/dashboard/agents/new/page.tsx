@@ -22,6 +22,7 @@ interface ProviderModels {
   label: string;
   available: boolean;
   models: { id: string; name: string; allowed?: boolean }[];
+  custom_model_input?: boolean;
 }
 
 type Step = "template" | "basics" | "model" | "tools" | "instructions";
@@ -118,7 +119,10 @@ const PROVIDER_COLORS: Record<string, string> = {
   deepseek:    "bg-cyan-100 text-cyan-700",
   perplexity:  "bg-violet-100 text-violet-700",
   xai:         "bg-slate-100 text-slate-700",
+  self_hosted: "bg-teal-100 text-teal-700",
 };
+
+const SELF_HOSTED_PREFIX = "self-hosted/";
 
 const TOOLS = [
   {
@@ -472,9 +476,20 @@ export default function NewAgentPage() {
                           {provider.label}
                         </span>
                         <span className="text-[10px] text-muted-foreground">
-                          {provider.models.length} model{provider.models.length !== 1 ? "s" : ""}
+                          {provider.custom_model_input
+                            ? "your own endpoint"
+                            : `${provider.models.length} model${provider.models.length !== 1 ? "s" : ""}`}
                         </span>
                       </div>
+                      {provider.custom_model_input ? (
+                        <Input
+                          type="text"
+                          placeholder="Model name on your server, e.g. llama3.1:8b"
+                          value={model.startsWith(SELF_HOSTED_PREFIX) ? model.slice(SELF_HOSTED_PREFIX.length) : ""}
+                          onChange={(e) => setModel(SELF_HOSTED_PREFIX + e.target.value)}
+                          className="text-sm font-mono"
+                        />
+                      ) : (
                       <div className="space-y-2">
                         {provider.models.map((m) => {
                           const disabled = m.allowed === false;
@@ -519,6 +534,7 @@ export default function NewAgentPage() {
                           );
                         })}
                       </div>
+                      )}
                     </div>
                   ))}
 

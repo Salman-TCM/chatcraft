@@ -223,7 +223,9 @@ async def public_agent_chat(
     # Only read-only, per-request-scoped tools survive on the public route.
     tools = [t for t in tools if t["name"] in _PUBLIC_SHARE_TOOL_ALLOWLIST]
     mcp_map = {}
-    _, api_key = await _resolve_api_key(agent.user_id, agent.model or "claude-sonnet-4-6", db)
+    _, api_key, base_url = await _resolve_api_key(
+        agent.user_id, agent.model or "claude-sonnet-4-6", db
+    )
     return StreamingResponse(
         _run_agent(
             agent,
@@ -233,6 +235,7 @@ async def public_agent_chat(
             body.message,
             body.conversation_history,
             api_key=api_key,
+            base_url=base_url,
         ),
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
@@ -399,7 +402,7 @@ async def agent_chat(
         )
     system_prompt = await _build_system_prompt(agent, db, user_id=user.id)
     tools, mcp_map = await _build_tools_with_mcp(agent, user.id, db)
-    _, api_key = await _resolve_api_key(user.id, agent.model or "claude-sonnet-4-6", db)
+    _, api_key, base_url = await _resolve_api_key(user.id, agent.model or "claude-sonnet-4-6", db)
 
     # Load memory and inject as extra history if enabled
     history = list(body.conversation_history)
@@ -412,7 +415,14 @@ async def agent_chat(
         tool_call_count = 0
 
         async for chunk in _run_agent(
-            agent, system_prompt, tools, mcp_map, body.message, history, api_key=api_key
+            agent,
+            system_prompt,
+            tools,
+            mcp_map,
+            body.message,
+            history,
+            api_key=api_key,
+            base_url=base_url,
         ):
             yield chunk
             try:
@@ -466,20 +476,31 @@ def _model_provider(model: str) -> str:
     return get_model_provider(model)
 
 
-async def _resolve_api_key(user_id: uuid.UUID, model: str, db) -> tuple[str, str | None]:
-    """Return (provider, api_key) for the given model, reading per-user keys first."""
+async def _resolve_api_key(
+    user_id: uuid.UUID, model: str, db
+) -> tuple[str, str | None, str | None]:
+    """Return (provider, api_key, base_url) for the given model, reading per-user keys first.
+
+    base_url is only populated for provider == "self_hosted"; None otherwise.
+    """
     provider = _model_provider(model)
+    if provider == "self_hosted":
+        from app.services.llm.key_store import get_base_url as _get_base_url
+
+        user_key = await _get_user_key(user_id, provider, db)
+        base_url = await _get_base_url(user_id, db)
+        return provider, user_key or None, base_url
     user_key = await _get_user_key(user_id, provider, db)
     if user_key:
-        return provider, user_key
+        return provider, user_key, None
     attr = _SETTINGS_KEY_ATTR.get(provider, "")
     fallback = getattr(settings, attr, None) if attr else None
-    return provider, fallback or None
+    return provider, fallback or None, None
 
 
 # kept for callers that pre-resolve (public_agent_chat, agent_chat)
 async def _resolve_anthropic_key(user_id: uuid.UUID, db) -> str | None:
-    _, key = await _resolve_api_key(user_id, "claude-sonnet-4-6", db)
+    _, key, _base_url = await _resolve_api_key(user_id, "claude-sonnet-4-6", db)
     return key
 
 
@@ -492,11 +513,24 @@ async def _run_agent(
     history: list[dict],
     *,
     api_key: str | None = None,
+    base_url: str | None = None,
 ) -> AsyncIterator[str]:
     model = agent.model or "claude-sonnet-4-6"
     provider = _model_provider(model)
 
-    if not api_key:
+    if provider == "self_hosted":
+        if not base_url:
+            yield _sse(
+                {
+                    "type": "error",
+                    "content": (
+                        "No self-hosted endpoint configured. "
+                        "Add one in Settings → Model Keys."
+                    ),
+                }
+            )
+            return
+    elif not api_key:
         yield _sse(
             {
                 "type": "error",
@@ -516,9 +550,19 @@ async def _run_agent(
         ):
             yield chunk
     else:
-        base_url = _PROVIDER_BASE_URLS.get(provider, "https://api.openai.com/v1")
+        resolved_base_url = (
+            base_url if provider == "self_hosted"
+            else _PROVIDER_BASE_URLS.get(provider, "https://api.openai.com/v1")
+        )
         async for chunk in _run_agent_openai_compat(
-            agent, system_prompt, tools, mcp_map, user_message, history, api_key, base_url
+            agent,
+            system_prompt,
+            tools,
+            mcp_map,
+            user_message,
+            history,
+            api_key or "not-needed",
+            resolved_base_url,
         ):
             yield chunk
 
@@ -2120,6 +2164,9 @@ async def _tool_list_available_models(ctx: dict) -> str:
             lines.append(f"\n{provider.upper()}:")
             for m in models:
                 lines.append(f"  - {m}")
+    if user_keys.get("self_hosted_base_url"):
+        lines.append("\nSELF-HOSTED:")
+        lines.append("  - self-hosted/<your-model-name> (routes to your configured endpoint)")
     if len(lines) == 1:
         return "No models available. Please add API keys in Settings → Model Keys."
     return "\n".join(lines)

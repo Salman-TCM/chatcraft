@@ -104,6 +104,14 @@ _PROVIDER_META = [
             {"id": "grok-3-mini-fast", "name": "Grok 3 Mini Fast"},
         ],
     },
+    {
+        "provider": "self_hosted",
+        "label": "Self-hosted",
+        "models": [],
+        # No fixed model catalog — the frontend renders a free-text model
+        # name input instead of a dropdown for this provider.
+        "custom_model_input": True,
+    },
 ]
 
 
@@ -114,14 +122,18 @@ async def list_models(user: CurrentUser, db: DBSession) -> dict:
     result = []
     for meta in _PROVIDER_META:
         provider = meta["provider"]
-        settings_key = _PROVIDER_SETTINGS_KEY.get(provider, "")
-        platform_key = getattr(settings, settings_key, "") if settings_key else ""
-        available = bool(user_keys.get(provider)) or bool(platform_key)
+        if provider == "self_hosted":
+            available = bool(user_keys.get("self_hosted_base_url"))
+        else:
+            settings_key = _PROVIDER_SETTINGS_KEY.get(provider, "")
+            platform_key = getattr(settings, settings_key, "") if settings_key else ""
+            available = bool(user_keys.get(provider)) or bool(platform_key)
         result.append(
             {
                 "provider": provider,
                 "label": meta["label"],
                 "available": available,
+                "custom_model_input": meta.get("custom_model_input", False),
                 "models": [
                     {**m, "allowed": is_model_allowed(user.role, m["id"])} for m in meta["models"]
                 ],

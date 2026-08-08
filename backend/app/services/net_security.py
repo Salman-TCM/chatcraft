@@ -23,6 +23,36 @@ _PRIVATE_NETS = [
 _BLOCKED_HOSTNAMES = {"localhost", "metadata.google.internal", "metadata.internal"}
 
 
+_METADATA_IP = ipaddress.ip_address("169.254.169.254")
+
+
+def is_valid_self_hosted_url(url: str) -> bool:
+    """Looser check for a user's own self-hosted model endpoint.
+
+    Unlike `is_ssrf_safe`, this allows localhost/private/LAN addresses —
+    that's the whole point of "self-hosted" (Ollama, vLLM, LM Studio typically
+    run on 127.0.0.1 or a LAN IP). It still blocks the cloud metadata IP,
+    since there's no legitimate self-hosted-model reason to target it.
+    """
+    try:
+        parsed = urlparse(url)
+        if parsed.scheme not in ("http", "https"):
+            return False
+        host = (parsed.hostname or "").lower().rstrip(".")
+        if not host:
+            return False
+        if host in ("metadata.google.internal", "metadata.internal"):
+            return False
+        try:
+            if ipaddress.ip_address(host) == _METADATA_IP:
+                return False
+        except ValueError:
+            pass  # not an IP literal — fine
+        return True
+    except Exception:
+        return False
+
+
 def is_ssrf_safe(url: str) -> bool:
     """Return True only if the URL does not target a private/internal address."""
     try:

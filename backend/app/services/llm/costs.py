@@ -64,11 +64,16 @@ _MODEL_COSTS: dict[str, tuple[Decimal, Decimal]] = {
 }
 
 _FALLBACK_COST = (Decimal("5.00"), Decimal("15.00"))
+_SELF_HOSTED_COST = (Decimal("0"), Decimal("0"))
 
 
 def calculate_cost(model: str, input_tokens: int, output_tokens: int) -> Decimal:
     """Return cost in USD for the given token counts."""
-    input_rate, output_rate = _MODEL_COSTS.get(model, _FALLBACK_COST)
+    if model.startswith("self-hosted/"):
+        # Runs on the user's own infrastructure — no per-token provider cost.
+        input_rate, output_rate = _SELF_HOSTED_COST
+    else:
+        input_rate, output_rate = _MODEL_COSTS.get(model, _FALLBACK_COST)
     return input_rate * Decimal(input_tokens) / Decimal("1_000_000") + output_rate * Decimal(
         output_tokens
     ) / Decimal("1_000_000")

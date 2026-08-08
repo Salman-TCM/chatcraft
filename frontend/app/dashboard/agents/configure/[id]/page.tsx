@@ -57,9 +57,13 @@ interface ProviderModels {
   label: string;
   available: boolean;
   models: { id: string; name: string; allowed?: boolean }[];
+  custom_model_input?: boolean;
 }
 
 // ─── Constants ────────────────────────────────────────────────────────────────
+
+const SELF_HOSTED_PREFIX = "self-hosted/";
+const SELF_HOSTED_OPTION = "__self_hosted__";
 
 const TOOLS = [
   { key: "web_search",   label: "Web Search",    description: "Search the internet for real-time information",  icon: "🔍" },
@@ -242,6 +246,8 @@ export default function ConfigureAgentPage() {
     webhook_url: "",
     tools: {} as Record<string, boolean>,
   });
+
+  const isSelfHostedModel = form.model.startsWith(SELF_HOSTED_PREFIX);
 
   const loadAgent = useCallback(async () => {
     try {
@@ -523,39 +529,62 @@ export default function ConfigureAgentPage() {
                     </div>
                   </div>
                 ) : (
-                  <Select value={form.model} onValueChange={(v) => set("model", v)}>
-                    <SelectTrigger className="text-sm">
-                      <SelectValue placeholder="Select a model" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {providers
-                        .filter((p) => p.available)
-                        .map((p) => (
-                          <div key={p.provider}>
-                            <div className="px-2 py-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-                              {p.label}
+                  <>
+                    <Select
+                      value={isSelfHostedModel ? SELF_HOSTED_OPTION : form.model}
+                      onValueChange={(v) =>
+                        set("model", v === SELF_HOSTED_OPTION ? SELF_HOSTED_PREFIX : v)
+                      }
+                    >
+                      <SelectTrigger className="text-sm">
+                        <SelectValue placeholder="Select a model" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {providers
+                          .filter((p) => p.available)
+                          .map((p) => (
+                            <div key={p.provider}>
+                              <div className="px-2 py-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                                {p.label}
+                              </div>
+                              {p.custom_model_input ? (
+                                <SelectItem value={SELF_HOSTED_OPTION} className="text-sm">
+                                  Custom model…
+                                </SelectItem>
+                              ) : (
+                                p.models.map((m) => (
+                                  <SelectItem
+                                    key={m.id}
+                                    value={m.id}
+                                    disabled={m.allowed === false}
+                                    className="text-sm"
+                                  >
+                                    <span>{m.name}</span>
+                                    {m.allowed === false && (
+                                      <Badge variant="outline" className="ml-2 text-[10px] px-1 py-0">
+                                        Upgrade
+                                      </Badge>
+                                    )}
+                                  </SelectItem>
+                                ))
+                              )}
                             </div>
-                            {p.models.map((m) => (
-                              <SelectItem
-                                key={m.id}
-                                value={m.id}
-                                disabled={m.allowed === false}
-                                className="text-sm"
-                              >
-                                <span>{m.name}</span>
-                                {m.allowed === false && (
-                                  <Badge variant="outline" className="ml-2 text-[10px] px-1 py-0">
-                                    Upgrade
-                                  </Badge>
-                                )}
-                              </SelectItem>
-                            ))}
-                          </div>
-                        ))}
-                    </SelectContent>
-                  </Select>
+                          ))}
+                      </SelectContent>
+                    </Select>
+                    {isSelfHostedModel && (
+                      <Input
+                        type="text"
+                        placeholder="Model name on your server, e.g. llama3.1:8b"
+                        value={form.model.slice(SELF_HOSTED_PREFIX.length)}
+                        onChange={(e) => set("model", SELF_HOSTED_PREFIX + e.target.value)}
+                        className="text-sm font-mono mt-2"
+                      />
+                    )}
+                  </>
                 )}
-                {!modelsLoading && form.model && !providers.some((p) => p.models.some((m) => m.id === form.model)) && (
+                {!modelsLoading && form.model && !isSelfHostedModel &&
+                  !providers.some((p) => p.models.some((m) => m.id === form.model)) && (
                   <p className="text-[11px] text-amber-700 flex items-center gap-1 mt-1">
                     <AlertCircle className="h-3 w-3" />
                     Currently saved model <code className="font-mono">{form.model}</code> is not

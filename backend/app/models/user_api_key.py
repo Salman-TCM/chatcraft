@@ -15,6 +15,7 @@ PROVIDERS = (
     "groq",
     "perplexity",
     "xai",
+    "self_hosted",
     # Search providers
     "tavily",
     "brave_search",
@@ -33,3 +34,6 @@ class UserApiKey(TimestampMixin, Base):
     user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False, index=True)
     provider: Mapped[str] = mapped_column(String(50), nullable=False)
     api_key_encrypted: Mapped[str] = mapped_column(String(1000), nullable=False)
+    # Only used by the "self_hosted" provider — the user's own OpenAI-compatible
+    # endpoint (Ollama, vLLM, LM Studio, ...). Null for every other provider.
+    base_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
