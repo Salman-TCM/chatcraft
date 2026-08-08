@@ -24,22 +24,26 @@ _splitter: RecursiveCharacterTextSplitter | None = None
 _encoder: tiktoken.Encoding | None = None
 
 
-def _get_splitter() -> RecursiveCharacterTextSplitter:
-    global _splitter
-    if _splitter is None:
-        _splitter = RecursiveCharacterTextSplitter.from_tiktoken_encoder(
-            encoding_name=ENCODING,
-            chunk_size=CHUNK_SIZE,
-            chunk_overlap=CHUNK_OVERLAP,
-        )
-    return _splitter
-
-
 def _get_encoder() -> tiktoken.Encoding:
     global _encoder
     if _encoder is None:
         _encoder = tiktoken.get_encoding(ENCODING)
     return _encoder
+
+
+def _get_splitter() -> RecursiveCharacterTextSplitter:
+    global _splitter
+    if _splitter is None:
+        enc = _get_encoder()
+        # Use explicit length_function instead of from_tiktoken_encoder() —
+        # the classmethod internally imports from langchain.text_splitter on
+        # some production image versions, causing ModuleNotFoundError.
+        _splitter = RecursiveCharacterTextSplitter(
+            chunk_size=CHUNK_SIZE,
+            chunk_overlap=CHUNK_OVERLAP,
+            length_function=lambda text: len(enc.encode(text)),
+        )
+    return _splitter
 
 
 def chunk_text(text: str) -> list[Chunk]:

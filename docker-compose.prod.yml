@@ -101,7 +101,8 @@ services:
   # celery_worker/beat need `edge` too — they call Anthropic/OpenAI/Stripe/
   # Resend directly (see docker-compose.yml env vars), all internet-bound.
   celery_worker:
-    volumes: !reset []
+    volumes:
+      - uploads_data:/app/uploads
     networks: [edge, data]
     environment:
       ENVIRONMENT: production
@@ -139,7 +140,8 @@ services:
       dockerfile: Dockerfile
     image: chatcraft-backend:${BACKEND_IMAGE_TAG:-latest}
     restart: unless-stopped
-    volumes: !reset []
+    volumes:
+      - uploads_data:/app/uploads
     ports: !reset []
     networks: [edge, data]
     environment:
@@ -276,3 +278,4 @@ networks:
 
 volumes:
   certbot_webroot:
+  uploads_data:

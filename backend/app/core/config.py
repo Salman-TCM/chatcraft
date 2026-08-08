@@ -120,6 +120,11 @@ class Settings(BaseSettings):
     premium_tier_message_cap: int = 5000
     default_fallback_model: str = "gpt-4o-mini"
 
+    # Local filesystem storage — used when neither S3 nor Supabase is configured.
+    # Both the backend and celery_worker containers must mount the same directory
+    # (done via the `uploads_data` Docker volume in docker-compose.yml).
+    local_uploads_dir: str = "/app/uploads"
+
     # The `code` tool executes arbitrary Python without real isolation:
     # __import__ is exposed, so os/subprocess/socket all work, and env vars
     # (SECRET_KEY, DATABASE_URL, provider API keys) are readable. Keep off

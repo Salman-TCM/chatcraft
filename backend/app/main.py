@@ -1,10 +1,12 @@
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from fastapi.staticfiles import StaticFiles
 from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 from slowapi.middleware import SlowAPIMiddleware
@@ -153,6 +155,14 @@ app.include_router(agents_public_router)
 app.include_router(voice_calls_router)
 app.include_router(google_sheets_router)
 app.include_router(models_router)
+
+
+try:
+    _uploads_dir = Path(settings.local_uploads_dir)
+    _uploads_dir.mkdir(parents=True, exist_ok=True)
+    app.mount("/uploads", StaticFiles(directory=str(_uploads_dir)), name="uploads")
+except Exception:
+    pass  # volume not yet mounted or no local storage configured
 
 
 @app.get("/", tags=["health"])
