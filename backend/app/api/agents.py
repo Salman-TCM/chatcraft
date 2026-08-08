@@ -75,6 +75,8 @@ async def create_agent(body: AgentCreateRequest, user: CurrentUser, db: DBSessio
         max_steps=body.max_steps,
         is_active=body.is_active,
         webhook_url=body.webhook_url,
+        welcome_message=body.welcome_message,
+        suggestions_enabled=body.suggestions_enabled,
     )
     db.add(agent)
     await db.commit()
@@ -162,6 +164,8 @@ async def get_public_agent(share_token: str, db: DBSession):
             "name": agent.name,
             "description": agent.description,
             "model": agent.model,
+            "welcome_message": agent.welcome_message,
+            "suggestions_enabled": agent.suggestions_enabled,
         },
     }
 
@@ -2414,6 +2418,20 @@ async def _build_system_prompt(
                 f"details, prior context), call the search_kb tool BEFORE relying on your own "
                 f"general knowledge. Cite the source document name when you use retrieved content."
             )
+
+    if agent.suggestions_enabled:
+        parts.append(
+            "SUGGESTED REPLIES:\n"
+            "After every response, end your message with 3-4 short suggested "
+            "follow-up questions or actions tailored to what was just discussed "
+            "— things the user would plausibly want to ask or do next. Use this "
+            "exact format (including the delimiters):\n\n"
+            "<<<RICH>>>\n"
+            '{"type":"quick_replies","replies":["Suggestion 1","Suggestion 2","Suggestion 3"]}\n'
+            "<<<END>>>\n\n"
+            "Keep each suggestion under 6 words. Only use this block for "
+            "suggested replies, and only once per response, at the very end."
+        )
 
     # Agent Builder mode: prepend strict tool-use instructions so the model
     # doesn't hallucinate steps or generate code instead of calling tools.

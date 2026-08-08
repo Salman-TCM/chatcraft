@@ -6,12 +6,15 @@ import { AlertCircle, Bot, Check, ChevronDown, ChevronUp, Loader2, Send, Zap } f
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { APP_NAME } from "@/lib/constants";
+import { RichContent, parseRichContent } from "@/components/chat/rich-content";
 
 interface AgentInfo {
   id: string;
   name: string;
   description: string | null;
   model: string;
+  welcome_message: string | null;
+  suggestions_enabled: boolean;
 }
 
 interface ChatMessage {
@@ -19,6 +22,7 @@ interface ChatMessage {
   content: string;
   tool?: string;
   step?: number;
+  isWelcome?: boolean;
 }
 
 export default function PublicAgentPage() {
@@ -42,6 +46,9 @@ export default function PublicAgentPage() {
       .then(d => {
         if (d.success) {
           setAgent(d.data);
+          if (d.data.welcome_message) {
+            setMessages([{ role: "assistant", content: d.data.welcome_message, isWelcome: true }]);
+          }
         } else {
           setNotFound(true);
         }
@@ -54,8 +61,8 @@ export default function PublicAgentPage() {
     chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
-  async function sendMessage() {
-    const text = chatInput.trim();
+  async function sendMessage(override?: string) {
+    const text = (override ?? chatInput).trim();
     if (!text || running) return;
     setChatInput("");
     setMessages(prev => [...prev, { role: "user", content: text }]);
@@ -63,7 +70,7 @@ export default function PublicAgentPage() {
     setStepCount(0);
 
     const history = messages
-      .filter(m => m.role === "user" || m.role === "assistant")
+      .filter(m => !m.isWelcome && (m.role === "user" || m.role === "assistant"))
       .map(m => ({ role: m.role as "user" | "assistant", content: m.content }));
 
     const pushError = (msg: string) =>
@@ -255,18 +262,24 @@ export default function PublicAgentPage() {
             );
           }
 
+          const rich = msg.role === "assistant" ? parseRichContent(msg.content) : null;
           return (
-            <div key={i} className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}>
+            <div key={i} className={`flex flex-col ${msg.role === "user" ? "items-end" : "items-start"}`}>
               <div className={`rounded-2xl px-4 py-2.5 text-sm max-w-[80%] whitespace-pre-wrap break-words ${
                 msg.role === "user"
                   ? "bg-primary text-primary-foreground rounded-br-sm"
                   : "bg-muted text-foreground rounded-bl-sm"
               }`}>
-                {msg.content}
+                {rich ? rich.text : msg.content}
                 {msg.role === "assistant" && running && i === messages.length - 1 && (
                   <span className="inline-block w-1.5 h-4 bg-current animate-pulse ml-0.5 align-text-bottom rounded-sm" />
                 )}
               </div>
+              {rich?.blocks.map((block, bi) => (
+                <div key={bi} className="max-w-[80%]">
+                  <RichContent block={block} onQuickReply={(reply) => sendMessage(reply)} />
+                </div>
+              ))}
             </div>
           );
         })}
@@ -299,7 +312,7 @@ export default function PublicAgentPage() {
           />
           <Button
             size="icon"
-            onClick={sendMessage}
+            onClick={() => sendMessage()}
             disabled={!chatInput.trim() || running}
             className="shrink-0"
           >
