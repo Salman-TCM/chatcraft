@@ -54,6 +54,9 @@ if [[ "$TARGET_ENV" == "staging" ]]; then
 
   if [[ "$SERVICE" == "backend" ]]; then
     bash scripts/deploy/migrate.sh "$CONTAINER" || fail "staging migration failed"
+    compose build celery_worker celery_beat
+    compose up -d --force-recreate --no-deps celery_worker celery_beat
+    compose up -d --no-deps minio
   fi
 
   docker image prune -f > /dev/null
@@ -109,6 +112,26 @@ compose stop "$ACTIVE_NAME"
 write_state "${TARGET_ENV}-${SERVICE}.active" "$IDLE"
 write_state "${TARGET_ENV}-${SERVICE}.previous" "$ACTIVE"
 write_state "${TARGET_ENV}-${SERVICE}.image_tag" "$GIT_SHA"
+
+# ---------------------------------------------------------------------------
+# Keep backend-adjacent services in sync after every backend deploy.
+# Celery worker/beat share the same Dockerfile as the backend — they must be
+# rebuilt and recreated whenever backend code changes, otherwise they run
+# stale code (old chunkers, missing tools, etc.).
+# MinIO is infrastructure — just ensure it's running; no rebuild needed.
+# ---------------------------------------------------------------------------
+if [[ "$SERVICE" == "backend" ]]; then
+  log "Rebuilding celery_worker and celery_beat to match new backend image..."
+  compose build celery_worker celery_beat
+
+  log "Recreating celery_worker..."
+  compose up -d --force-recreate --no-deps celery_worker
+  log "Recreating celery_beat..."
+  compose up -d --force-recreate --no-deps celery_beat
+
+  log "Ensuring MinIO is running..."
+  compose up -d --no-deps minio
+fi
 
 docker image prune -f > /dev/null
 
