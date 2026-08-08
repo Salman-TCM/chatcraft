@@ -90,12 +90,17 @@ def setup_logging() -> None:
     logger.remove()  # remove Loguru's default handler
 
     if settings.is_production:
-        # Structured JSON to stdout (picked up by Railway / Docker logs)
+        # Structured JSON to stdout (picked up by Railway / Docker logs).
+        # We use a sink callable rather than format= because loguru runs
+        # format_map() on whatever format= returns — JSON braces then get
+        # misinterpreted as Python format fields, raising KeyError.
+        def _json_sink(message) -> None:  # message is a str subclass with .record
+            sys.stdout.write(_serialize(message.record) + "\n")
+            sys.stdout.flush()
+
         logger.add(
-            sys.stdout,
-            format=_serialize,  # type: ignore[arg-type]
+            _json_sink,
             level="INFO",
-            serialize=False,
             enqueue=True,
             backtrace=False,
             diagnose=False,
