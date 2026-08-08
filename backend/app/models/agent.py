@@ -58,6 +58,16 @@ class Agent(TimestampMixin, Base):
     # Webhook — POST to this URL after every completed agent run
     webhook_url: Mapped[str | None] = mapped_column(String(2048), nullable=True)
 
+    # Shown as the first message before the visitor sends anything (public
+    # share page, test chat). Mirrors ChatbotConfig.welcome_message.
+    welcome_message: Mapped[str | None] = mapped_column(String(500), nullable=True)
+
+    # When true, the system prompt teaches the model to end every response
+    # with a small set of suggested follow-up replies as tappable buttons.
+    suggestions_enabled: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default="false"
+    )
+
     # Relationships
     user: Mapped["User"] = relationship("User")  # type: ignore[name-defined]
     chatbot: Mapped["ChatbotConfig | None"] = relationship("ChatbotConfig")  # type: ignore[name-defined]

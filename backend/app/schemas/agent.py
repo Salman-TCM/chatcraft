@@ -74,6 +74,8 @@ class AgentCreateRequest(BaseModel):
     max_steps: int = Field(10, ge=1, le=30)
     is_active: bool = True
     webhook_url: str | None = Field(None, max_length=2048)
+    welcome_message: str | None = Field(None, max_length=500)
+    suggestions_enabled: bool = False
 
     _v_model = field_validator("model")(lambda cls, v: _validate_model_id(v))
     _v_webhook = field_validator("webhook_url")(lambda cls, v: _validate_webhook_url(v))
@@ -93,6 +95,8 @@ class AgentUpdateRequest(BaseModel):
     is_published: bool | None = None
     is_active: bool | None = None
     webhook_url: str | None = Field(None, max_length=2048)
+    welcome_message: str | None = Field(None, max_length=500)
+    suggestions_enabled: bool | None = None
 
     _v_model = field_validator("model")(
         lambda cls, v: _validate_model_id(v) if v is not None else v
@@ -117,5 +121,7 @@ class AgentResponse(BaseModel):
     share_enabled: bool = False
     share_token: str | None = None
     webhook_url: str | None = None
+    welcome_message: str | None = None
+    suggestions_enabled: bool = False
     created_at: datetime
     updated_at: datetime

@@ -9,6 +9,7 @@ import { useEffect, useRef, useState } from "react";
 import { Send, X, Loader2, Wrench, ArrowRight, MessageSquare } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { apiClient } from "@/lib/api";
+import { RichContent, parseRichContent } from "@/components/chat/rich-content";
 
 type Event =
   | { kind: "user"; content: string }
@@ -20,6 +21,7 @@ type Event =
 interface Props {
   agentId: string;
   agentName: string;
+  welcomeMessage?: string | null;
   open: boolean;
   onClose: () => void;
 }
@@ -91,7 +93,7 @@ function getAuthToken(): string {
   return "";
 }
 
-export function TestChatDrawer({ agentId, agentName, open, onClose }: Props) {
+export function TestChatDrawer({ agentId, agentName, welcomeMessage, open, onClose }: Props) {
   const [events, setEvents] = useState<Event[]>([]);
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
@@ -103,6 +105,13 @@ export function TestChatDrawer({ agentId, agentName, open, onClose }: Props) {
   }, [events, sending]);
 
   useEffect(() => {
+    if (open && events.length === 0 && welcomeMessage) {
+      setEvents([{ kind: "assistant", content: welcomeMessage }]);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, welcomeMessage]);
+
+  useEffect(() => {
     // Cancel any inflight stream when the drawer closes so tokens aren't wasted.
     if (!open && abortRef.current) {
       abortRef.current.abort();
@@ -111,8 +120,8 @@ export function TestChatDrawer({ agentId, agentName, open, onClose }: Props) {
     }
   }, [open]);
 
-  async function send() {
-    const msg = input.trim();
+  async function send(override?: string) {
+    const msg = (override ?? input).trim();
     if (!msg || sending) return;
     setInput("");
     setEvents((prev) => [...prev, { kind: "user", content: msg }]);
@@ -156,7 +165,7 @@ export function TestChatDrawer({ agentId, agentName, open, onClose }: Props) {
 
   function reset() {
     stop();
-    setEvents([]);
+    setEvents(welcomeMessage ? [{ kind: "assistant", content: welcomeMessage }] : []);
   }
 
   if (!open) return null;
@@ -209,11 +218,17 @@ export function TestChatDrawer({ agentId, agentName, open, onClose }: Props) {
               );
             }
             if (e.kind === "assistant") {
+              const rich = parseRichContent(e.content);
               return (
-                <div key={i} className="flex justify-start">
+                <div key={i} className="flex flex-col items-start gap-1.5">
                   <div className="max-w-[85%] rounded-2xl bg-muted px-3 py-2 text-sm whitespace-pre-wrap break-words">
-                    {e.content}
+                    {rich.text}
                   </div>
+                  {rich.blocks.map((block, bi) => (
+                    <div key={bi} className="max-w-[85%]">
+                      <RichContent block={block} onQuickReply={(reply) => send(reply)} />
+                    </div>
+                  ))}
                 </div>
               );
             }
@@ -286,7 +301,7 @@ export function TestChatDrawer({ agentId, agentName, open, onClose }: Props) {
                 <X className="h-4 w-4" />
               </Button>
             ) : (
-              <Button size="icon" className="h-9 w-9" onClick={send} disabled={!input.trim()}>
+              <Button size="icon" className="h-9 w-9" onClick={() => send()} disabled={!input.trim()}>
                 <Send className="h-4 w-4" />
               </Button>
             )}

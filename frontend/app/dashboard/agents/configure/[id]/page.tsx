@@ -244,6 +244,8 @@ export default function ConfigureAgentPage() {
     max_steps: 10,
     is_active: true,
     webhook_url: "",
+    welcome_message: "",
+    suggestions_enabled: false,
     tools: {} as Record<string, boolean>,
   });
 
@@ -262,6 +264,8 @@ export default function ConfigureAgentPage() {
         max_steps: d.max_steps,
         is_active: d.is_active,
         webhook_url: d.webhook_url || "",
+        welcome_message: d.welcome_message || "",
+        suggestions_enabled: d.suggestions_enabled || false,
         tools: d.tools || {},
       });
     } catch {
@@ -301,6 +305,8 @@ export default function ConfigureAgentPage() {
         max_steps: form.max_steps,
         is_active: form.is_active,
         webhook_url: form.webhook_url.trim() || null,
+        welcome_message: form.welcome_message.trim() || null,
+        suggestions_enabled: form.suggestions_enabled,
         tools: form.tools,
       });
       setSaved(true);
@@ -478,6 +484,36 @@ export default function ConfigureAgentPage() {
                   </span>
                   <Switch checked={form.is_active} onCheckedChange={(v) => set("is_active", v)} />
                 </div>
+              </div>
+
+              <div className="space-y-1.5">
+                <Label>Welcome Message</Label>
+                <Textarea
+                  value={form.welcome_message}
+                  onChange={(e) => set("welcome_message", e.target.value)}
+                  placeholder="e.g. Hi! I'm here to help with orders, shipping, and product questions. What can I help you with?"
+                  rows={2}
+                  maxLength={500}
+                  className="text-sm resize-none"
+                />
+                <p className="text-xs text-muted-foreground">
+                  Shown as the first message before the visitor types anything, on the public share
+                  page and in Test Chat.
+                </p>
+              </div>
+
+              <div className="flex items-center justify-between rounded-xl border p-4">
+                <div>
+                  <p className="text-sm font-medium">Suggested Reply Buttons</p>
+                  <p className="text-xs text-muted-foreground mt-0.5">
+                    After each response, show 3-4 tappable follow-up suggestions tailored to the
+                    conversation so far.
+                  </p>
+                </div>
+                <Switch
+                  checked={form.suggestions_enabled}
+                  onCheckedChange={(v) => set("suggestions_enabled", v)}
+                />
               </div>
 
               <div className="space-y-1.5">
@@ -777,6 +813,7 @@ export default function ConfigureAgentPage() {
       <TestChatDrawer
         agentId={id}
         agentName={form.name || "Agent"}
+        welcomeMessage={form.welcome_message}
         open={testChatOpen}
         onClose={() => setTestChatOpen(false)}
       />
