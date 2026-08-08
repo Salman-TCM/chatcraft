@@ -36,6 +36,7 @@ interface Agent {
   max_steps: number;
   is_active: boolean;
   webhook_url: string | null;
+  welcome_message: string | null;
 }
 
 interface MCPServer {
@@ -182,6 +183,7 @@ export function AgentConfigModal({ agent, open, onClose, onUpdate }: AgentConfig
     max_steps: agent.max_steps,
     is_active: agent.is_active,
     webhook_url: agent.webhook_url || "",
+    welcome_message: agent.welcome_message || "",
     tools: { ...agent.tools },
   });
   const [saving, setSaving]           = useState(false);
@@ -222,6 +224,7 @@ export function AgentConfigModal({ agent, open, onClose, onUpdate }: AgentConfig
         max_steps: agent.max_steps,
         is_active: agent.is_active,
         webhook_url: agent.webhook_url || "",
+        welcome_message: agent.welcome_message || "",
         tools: { ...agent.tools },
       });
       setErrors({});
@@ -256,6 +259,7 @@ export function AgentConfigModal({ agent, open, onClose, onUpdate }: AgentConfig
         max_steps: form.max_steps,
         is_active: form.is_active,
         webhook_url: form.webhook_url.trim() || null,
+        welcome_message: form.welcome_message.trim() || null,
         tools: form.tools,
       });
       onUpdate(res.data.data);
@@ -363,6 +367,21 @@ export function AgentConfigModal({ agent, open, onClose, onUpdate }: AgentConfig
                   rows={2}
                   className="text-sm resize-none"
                 />
+              </div>
+
+              <div className="space-y-1.5">
+                <Label className="text-xs">Welcome Message</Label>
+                <Textarea
+                  value={form.welcome_message}
+                  onChange={(e) => set("welcome_message", e.target.value)}
+                  placeholder="Hi! How can I help you today?"
+                  rows={2}
+                  maxLength={500}
+                  className="text-sm resize-none"
+                />
+                <p className="text-[11px] text-muted-foreground">
+                  Shown as the agent's first message when a chat starts.
+                </p>
               </div>
 
               <div className="space-y-1.5">
