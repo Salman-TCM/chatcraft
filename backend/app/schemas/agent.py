@@ -30,17 +30,21 @@ _WEBHOOK_URL_RE = re.compile(r"^https?://[^\s]+$")
 
 def _validate_model_id(value: str) -> str:
     """Validate the model ID against the known provider registry so we don't
-    persist typos (e.g. 'pretend-model-9000') that would only fail at runtime."""
-    from app.services.llm.router import get_model_provider
+    persist typos (e.g. 'pretend-model-9000') that would only fail at runtime.
 
-    provider = get_model_provider(value)
-    # get_model_provider defaults to 'anthropic' for unknown IDs — detect that by
-    # explicitly checking the mapping for a hit.
+    "self-hosted/<name>" is exempt — the name is whatever the user's own
+    server calls it, so it can't be checked against a fixed model list."""
+    from app.services.llm.router import SELF_HOSTED_PREFIX
+
+    if value.startswith(SELF_HOSTED_PREFIX):
+        if len(value) <= len(SELF_HOSTED_PREFIX):
+            raise ValueError("Self-hosted model id must include a model name after the prefix")
+        return value
+
     from app.services.llm.router import _PROVIDER_MAP  # noqa
 
     if value not in _PROVIDER_MAP:
         raise ValueError(f"Unknown model id: {value!r}")
-    _ = provider  # provider is validated indirectly by _PROVIDER_MAP lookup
     return value
 
 

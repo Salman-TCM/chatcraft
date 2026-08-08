@@ -13,13 +13,15 @@ interface ProviderMeta {
   label: string;
   models: string[];
   key_hint: string;
-  docs_url: string;
+  docs_url: string | null;
+  requires_base_url?: boolean;
 }
 
 interface KeyStatus {
   provider: string;
   configured: boolean;
   label: string;
+  base_url?: string;
 }
 
 const PROVIDER_ICONS: Record<string, string> = {
@@ -30,12 +32,14 @@ const PROVIDER_ICONS: Record<string, string> = {
   groq: "⚡",
   perplexity: "🔮",
   xai: "✖️",
+  self_hosted: "🖥️",
 };
 
 export default function IntegrationsPage() {
   const [meta, setMeta] = useState<Record<string, ProviderMeta>>({});
   const [statuses, setStatuses] = useState<KeyStatus[]>([]);
   const [inputs, setInputs] = useState<Record<string, string>>({});
+  const [baseUrlInputs, setBaseUrlInputs] = useState<Record<string, string>>({});
   const [visible, setVisible] = useState<Record<string, boolean>>({});
   const [saving, setSaving] = useState<Record<string, boolean>>({});
   const [testing, setTesting] = useState<Record<string, boolean>>({});
@@ -51,18 +55,32 @@ export default function IntegrationsPage() {
     setMeta(metaRes.data.data);
     try {
       const statusRes = await apiClient.get("/api/settings/model-keys");
-      setStatuses(statusRes.data.data);
+      const data: KeyStatus[] = statusRes.data.data;
+      setStatuses(data);
+      const selfHosted = data.find((s) => s.provider === "self_hosted");
+      if (selfHosted?.base_url) {
+        setBaseUrlInputs((p) => ({ ...p, self_hosted: selfHosted.base_url! }));
+      }
     } catch {
       // not authenticated yet — show cards with no configured status
     }
   }
 
   async function handleSave(provider: string) {
-    const key = inputs[provider]?.trim();
-    if (!key) return;
+    const key = inputs[provider]?.trim() ?? "";
+    const baseUrl = baseUrlInputs[provider]?.trim();
+    if (provider === "self_hosted") {
+      if (!baseUrl) return;
+    } else if (!key) {
+      return;
+    }
     setSaving((p) => ({ ...p, [provider]: true }));
     try {
-      await apiClient.post("/api/settings/model-keys", { provider, api_key: key });
+      await apiClient.post("/api/settings/model-keys", {
+        provider,
+        api_key: key,
+        ...(provider === "self_hosted" ? { base_url: baseUrl } : {}),
+      });
       setInputs((p) => ({ ...p, [provider]: "" }));
       await load();
     } finally {
@@ -127,7 +145,9 @@ export default function IntegrationsPage() {
                 <div>
                   <p className="text-sm font-semibold">{info.label}</p>
                   <p className="text-xs text-muted-foreground mt-0.5">
-                    {info.models.slice(0, 3).join(", ")}{info.models.length > 3 ? ` +${info.models.length - 3} more` : ""}
+                    {provider === "self_hosted"
+                      ? "Your own OpenAI-compatible server (Ollama, vLLM, LM Studio, ...)"
+                      : `${info.models.slice(0, 3).join(", ")}${info.models.length > 3 ? ` +${info.models.length - 3} more` : ""}`}
                   </p>
                 </div>
               </div>
@@ -141,16 +161,29 @@ export default function IntegrationsPage() {
                     Not connected
                   </Badge>
                 )}
-                <a
-                  href={info.docs_url}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="text-muted-foreground hover:text-foreground"
-                >
-                  <ExternalLink className="h-3.5 w-3.5" />
-                </a>
+                {info.docs_url && (
+                  <a
+                    href={info.docs_url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-muted-foreground hover:text-foreground"
+                  >
+                    <ExternalLink className="h-3.5 w-3.5" />
+                  </a>
+                )}
               </div>
             </div>
+
+            {/* Base URL input (self-hosted only) */}
+            {provider === "self_hosted" && (
+              <Input
+                type="text"
+                placeholder="http://localhost:11434/v1"
+                value={baseUrlInputs[provider] ?? ""}
+                onChange={(e) => setBaseUrlInputs((p) => ({ ...p, [provider]: e.target.value }))}
+                className="text-sm font-mono"
+              />
+            )}
 
             {/* Key input */}
             <div className="flex gap-2">
@@ -173,7 +206,12 @@ export default function IntegrationsPage() {
               </div>
               <Button
                 size="sm"
-                disabled={!inputs[provider]?.trim() || isSaving}
+                disabled={
+                  isSaving ||
+                  (provider === "self_hosted"
+                    ? !baseUrlInputs[provider]?.trim()
+                    : !inputs[provider]?.trim())
+                }
                 onClick={() => handleSave(provider)}
               >
                 {isSaving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : "Save"}

@@ -540,6 +540,9 @@ function Section({ title, children }: { title: string; children: React.ReactNode
   );
 }
 
+const SELF_HOSTED_PREFIX = "self-hosted/";
+const SELF_HOSTED_OPTION = "__self_hosted__";
+
 function ModelSelect({
   value,
   onChange,
@@ -553,46 +556,68 @@ function ModelSelect({
   configuredProviders: Set<string>;
   includeNone: boolean;
 }) {
-  const configured = Object.entries(providerMeta).filter(([p]) => configuredProviders.has(p));
-  const unconfigured = Object.entries(providerMeta).filter(([p]) => !configuredProviders.has(p));
+  const isSelfHostedValue = value.startsWith(SELF_HOSTED_PREFIX);
+  const selfHostedConfigured = configuredProviders.has("self_hosted");
+  const configured = Object.entries(providerMeta).filter(
+    ([p]) => configuredProviders.has(p) && p !== "self_hosted"
+  );
+  const unconfigured = Object.entries(providerMeta).filter(
+    ([p]) => !configuredProviders.has(p) && p !== "self_hosted"
+  );
   const lockedByPlan = configured.flatMap(([, info]) =>
     info.models.filter((m) => !m.allowed).map((m) => ({ ...m, label: info.label }))
   );
   return (
-    <select
-      value={value}
-      onChange={(e) => onChange(e.target.value)}
-      className="w-full rounded-md border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-ring"
-    >
-      {includeNone && <option value="">None</option>}
-      {configured.map(([provider, info]) => {
-        const allowedModels = info.models.filter((m) => m.allowed);
-        if (allowedModels.length === 0) return null;
-        return (
-          <optgroup key={provider} label={info.label}>
-            {allowedModels.map((m) => (
-              <option key={m.id} value={m.id}>{m.id}</option>
+    <div className="space-y-2">
+      <select
+        value={isSelfHostedValue ? SELF_HOSTED_OPTION : value}
+        onChange={(e) =>
+          onChange(e.target.value === SELF_HOSTED_OPTION ? SELF_HOSTED_PREFIX : e.target.value)
+        }
+        className="w-full rounded-md border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-ring"
+      >
+        {includeNone && <option value="">None</option>}
+        {configured.map(([provider, info]) => {
+          const allowedModels = info.models.filter((m) => m.allowed);
+          if (allowedModels.length === 0) return null;
+          return (
+            <optgroup key={provider} label={info.label}>
+              {allowedModels.map((m) => (
+                <option key={m.id} value={m.id}>{m.id}</option>
+              ))}
+            </optgroup>
+          );
+        })}
+        {selfHostedConfigured && (
+          <option value={SELF_HOSTED_OPTION}>Self-hosted — custom model…</option>
+        )}
+        {lockedByPlan.length > 0 && (
+          <optgroup label="── Upgrade to Pro to unlock ──" disabled>
+            {lockedByPlan.map((m) => (
+              <option key={m.id} value={m.id} disabled>{m.label} — {m.id} (Pro)</option>
             ))}
           </optgroup>
-        );
-      })}
-      {lockedByPlan.length > 0 && (
-        <optgroup label="── Upgrade to Pro to unlock ──" disabled>
-          {lockedByPlan.map((m) => (
-            <option key={m.id} value={m.id} disabled>{m.label} — {m.id} (Pro)</option>
-          ))}
-        </optgroup>
+        )}
+        {unconfigured.length > 0 && (
+          <optgroup label="── No key configured ──" disabled>
+            {unconfigured.map(([provider, info]) =>
+              info.models.map((m) => (
+                <option key={m.id} value={m.id} disabled>{info.label} — {m.id}</option>
+              ))
+            )}
+          </optgroup>
+        )}
+      </select>
+      {isSelfHostedValue && (
+        <Input
+          type="text"
+          placeholder="Model name on your server, e.g. llama3.1:8b"
+          value={value.slice(SELF_HOSTED_PREFIX.length)}
+          onChange={(e) => onChange(SELF_HOSTED_PREFIX + e.target.value)}
+          className="text-sm font-mono"
+        />
       )}
-      {unconfigured.length > 0 && (
-        <optgroup label="── No key configured ──" disabled>
-          {unconfigured.map(([provider, info]) =>
-            info.models.map((m) => (
-              <option key={m.id} value={m.id} disabled>{info.label} — {m.id}</option>
-            ))
-          )}
-        </optgroup>
-      )}
-    </select>
+    </div>
   );
 }
 

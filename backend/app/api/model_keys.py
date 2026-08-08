@@ -16,6 +16,7 @@ from app.core.dependencies import CurrentUser, DBSession
 from app.core.plan_limits import is_model_allowed
 from app.models.user_api_key import PROVIDERS, UserApiKey
 from app.services.llm.key_store import decrypt_key, encrypt_key
+from app.services.net_security import is_valid_self_hosted_url
 
 router = APIRouter(prefix="/api/settings/model-keys", tags=["model-keys"])
 
@@ -98,12 +99,20 @@ PROVIDER_META = {
         "key_hint": "xai-...",
         "docs_url": "https://console.x.ai/",
     },
+    "self_hosted": {
+        "label": "Self-hosted",
+        "models": [],
+        "key_hint": "optional — leave blank if your server doesn't require one",
+        "docs_url": None,
+        "requires_base_url": True,
+    },
 }
 
 
 class UpsertKeyRequest(BaseModel):
     provider: str
-    api_key: str
+    api_key: str = ""
+    base_url: str | None = None
 
 
 @router.get("/providers")
@@ -125,7 +134,7 @@ async def list_providers(user: CurrentUser) -> dict:
 async def list_keys(user: CurrentUser, db: DBSession) -> dict:
     result = await db.execute(select(UserApiKey).where(UserApiKey.user_id == user.id))
     rows = result.scalars().all()
-    configured = {row.provider for row in rows}
+    configured = {row.provider: row for row in rows}
     return {
         "success": True,
         "data": [
@@ -133,6 +142,11 @@ async def list_keys(user: CurrentUser, db: DBSession) -> dict:
                 "provider": p,
                 "configured": p in configured,
                 "label": PROVIDER_META.get(p, {}).get("label", p),
+                **(
+                    {"base_url": configured[p].base_url}
+                    if p in configured and p == "self_hosted"
+                    else {}
+                ),
             }
             for p in PROVIDERS
         ],
@@ -150,7 +164,25 @@ async def upsert_key(body: UpsertKeyRequest, user: CurrentUser, db: DBSession) -
                 "code": "INVALID_PROVIDER",
             },
         )
-    if not body.api_key.strip():
+
+    base_url = (body.base_url or "").strip() or None
+    if body.provider == "self_hosted":
+        if not base_url:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail={
+                    "success": False,
+                    "error": "Base URL is required for a self-hosted endpoint",
+                    "code": "EMPTY_BASE_URL",
+                },
+            )
+        if not is_valid_self_hosted_url(base_url):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail={"success": False, "error": "Invalid base URL", "code": "INVALID_BASE_URL"},
+            )
+        # Self-hosted servers often don't require auth at all.
+    elif not body.api_key.strip():
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail={"success": False, "error": "API key cannot be empty", "code": "EMPTY_KEY"},
@@ -167,11 +199,14 @@ async def upsert_key(body: UpsertKeyRequest, user: CurrentUser, db: DBSession) -
     row = result.scalar_one_or_none()
     if row:
         row.api_key_encrypted = encrypted
+        if body.provider == "self_hosted":
+            row.base_url = base_url
     else:
         row = UserApiKey(
             user_id=user.id,
             provider=body.provider,
             api_key_encrypted=encrypted,
+            base_url=base_url if body.provider == "self_hosted" else None,
         )
         db.add(row)
 
@@ -253,6 +288,17 @@ async def test_key(provider: str, user: CurrentUser, db: DBSession) -> dict:
             from openai import AsyncOpenAI
 
             client = AsyncOpenAI(api_key=api_key, base_url=base_urls[provider])
+            await client.models.list()
+
+        elif provider == "self_hosted":
+            if not row.base_url:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail={"success": False, "error": "No base URL saved", "code": "NO_BASE_URL"},
+                )
+            from openai import AsyncOpenAI
+
+            client = AsyncOpenAI(api_key=api_key or "not-needed", base_url=row.base_url)
             await client.models.list()
 
         return {"success": True, "data": {"provider": provider, "valid": True}}

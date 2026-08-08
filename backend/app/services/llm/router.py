@@ -72,6 +72,10 @@ _XAI_MODELS = {
 DEFAULT_MODEL = "claude-sonnet-4-6"
 DEFAULT_FALLBACK = "gpt-4o-mini"
 
+# Model ids of this shape route to the user's own OpenAI-compatible endpoint
+# (Ollama, vLLM, LM Studio, ...) instead of a known hosted provider.
+SELF_HOSTED_PREFIX = "self-hosted/"
+
 _PROVIDER_MAP: dict[str, str] = (
     dict.fromkeys(_ANTHROPIC_MODELS, "anthropic")
     | dict.fromkeys(_OPENAI_MODELS, "openai")
@@ -85,11 +89,26 @@ _PROVIDER_MAP: dict[str, str] = (
 
 def get_model_provider(model: str) -> str:
     """Return the provider name for a given model ID."""
+    if model.startswith(SELF_HOSTED_PREFIX):
+        return "self_hosted"
     return _PROVIDER_MAP.get(model, "anthropic")
 
 
 def get_provider(model: str, api_keys: dict[str, str] | None = None) -> LLMProvider:
     keys = api_keys or {}
+    if model.startswith(SELF_HOSTED_PREFIX):
+        base_url = keys.get("self_hosted_base_url")
+        if not base_url:
+            logger.warning(
+                f"Self-hosted model '{model}' requested with no base_url configured, "
+                f"falling back to {DEFAULT_MODEL}"
+            )
+            return AnthropicProvider(DEFAULT_MODEL, api_key=keys.get("anthropic"))
+        return OpenAICompatProvider(
+            model[len(SELF_HOSTED_PREFIX) :],
+            base_url=base_url,
+            api_key=keys.get("self_hosted") or "not-needed",
+        )
     if model in _ANTHROPIC_MODELS:
         return AnthropicProvider(model, api_key=keys.get("anthropic"))
     if model in _OPENAI_MODELS:
