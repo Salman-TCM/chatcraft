@@ -37,6 +37,7 @@ interface Agent {
   is_active: boolean;
   webhook_url: string | null;
   welcome_message: string | null;
+  suggestions_enabled: boolean;
 }
 
 interface MCPServer {
@@ -58,7 +59,10 @@ interface ProviderModels {
   label: string;
   available: boolean;
   models: { id: string; name: string; allowed?: boolean }[];
+  custom_model_input?: boolean;
 }
+
+const SELF_HOSTED_PREFIX = "self-hosted/";
 
 interface AgentConfigModalProps {
   agent: Agent;
@@ -184,6 +188,7 @@ export function AgentConfigModal({ agent, open, onClose, onUpdate }: AgentConfig
     is_active: agent.is_active,
     webhook_url: agent.webhook_url || "",
     welcome_message: agent.welcome_message || "",
+    suggestions_enabled: agent.suggestions_enabled,
     tools: { ...agent.tools },
   });
   const [saving, setSaving]           = useState(false);
@@ -225,6 +230,7 @@ export function AgentConfigModal({ agent, open, onClose, onUpdate }: AgentConfig
         is_active: agent.is_active,
         webhook_url: agent.webhook_url || "",
         welcome_message: agent.welcome_message || "",
+        suggestions_enabled: agent.suggestions_enabled,
         tools: { ...agent.tools },
       });
       setErrors({});
@@ -260,6 +266,7 @@ export function AgentConfigModal({ agent, open, onClose, onUpdate }: AgentConfig
         is_active: form.is_active,
         webhook_url: form.webhook_url.trim() || null,
         welcome_message: form.welcome_message.trim() || null,
+        suggestions_enabled: form.suggestions_enabled,
         tools: form.tools,
       });
       onUpdate(res.data.data);
@@ -437,21 +444,29 @@ export function AgentConfigModal({ agent, open, onClose, onUpdate }: AgentConfig
                             <div className="px-2 py-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
                               {p.label}
                             </div>
-                            {p.models.map((m) => (
-                              <SelectItem
-                                key={m.id}
-                                value={m.id}
-                                disabled={m.allowed === false}
-                                className="text-sm"
-                              >
-                                {m.name}
-                                {m.allowed === false && (
-                                  <Badge variant="outline" className="ml-2 text-[10px] px-1 py-0">
-                                    Upgrade
-                                  </Badge>
-                                )}
-                              </SelectItem>
-                            ))}
+                            {p.custom_model_input ? (
+                              form.model.startsWith(SELF_HOSTED_PREFIX) && (
+                                <SelectItem value={form.model} className="text-sm font-mono">
+                                  {form.model.slice(SELF_HOSTED_PREFIX.length)}
+                                </SelectItem>
+                              )
+                            ) : (
+                              p.models.map((m) => (
+                                <SelectItem
+                                  key={m.id}
+                                  value={m.id}
+                                  disabled={m.allowed === false}
+                                  className="text-sm"
+                                >
+                                  {m.name}
+                                  {m.allowed === false && (
+                                    <Badge variant="outline" className="ml-2 text-[10px] px-1 py-0">
+                                      Upgrade
+                                    </Badge>
+                                  )}
+                                </SelectItem>
+                              ))
+                            )}
                           </div>
                         ))}
                     </SelectContent>
@@ -468,48 +483,58 @@ export function AgentConfigModal({ agent, open, onClose, onUpdate }: AgentConfig
                         <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-2">
                           {p.label}
                         </p>
-                        <div className="space-y-2">
-                          {p.models.map((m) => {
-                            const disabled = m.allowed === false;
-                            const selected = form.model === m.id;
-                            return (
-                              <button
-                                key={m.id}
-                                type="button"
-                                disabled={disabled}
-                                onClick={() => set("model", m.id)}
-                                className={`w-full flex items-center justify-between rounded-xl border px-4 py-3 text-left transition-colors ${
-                                  disabled
-                                    ? "opacity-50 cursor-not-allowed"
-                                    : selected
-                                    ? "border-primary bg-primary/5"
-                                    : "hover:bg-muted/40"
-                                }`}
-                              >
-                                <div className="min-w-0">
-                                  <p className={`text-sm font-medium truncate ${selected ? "text-primary" : ""}`}>
-                                    {m.name}
-                                  </p>
-                                  <p className="text-[10px] text-muted-foreground font-mono truncate">
-                                    {m.id}
-                                  </p>
-                                </div>
-                                <div className="flex items-center gap-2 shrink-0">
-                                  {disabled && (
-                                    <Badge variant="outline" className="text-[10px] px-1.5">
-                                      Upgrade
-                                    </Badge>
-                                  )}
-                                  <div className={`h-4 w-4 rounded-full border-2 flex items-center justify-center ${
-                                    selected ? "border-primary bg-primary" : "border-muted-foreground/30"
-                                  }`}>
-                                    {selected && <Check className="h-2.5 w-2.5 text-white" />}
+                        {p.custom_model_input ? (
+                          <Input
+                            type="text"
+                            placeholder="Model name on your server, e.g. llama3.1:8b"
+                            value={form.model.startsWith(SELF_HOSTED_PREFIX) ? form.model.slice(SELF_HOSTED_PREFIX.length) : ""}
+                            onChange={(e) => set("model", SELF_HOSTED_PREFIX + e.target.value)}
+                            className="text-sm font-mono"
+                          />
+                        ) : (
+                          <div className="space-y-2">
+                            {p.models.map((m) => {
+                              const disabled = m.allowed === false;
+                              const selected = form.model === m.id;
+                              return (
+                                <button
+                                  key={m.id}
+                                  type="button"
+                                  disabled={disabled}
+                                  onClick={() => set("model", m.id)}
+                                  className={`w-full flex items-center justify-between rounded-xl border px-4 py-3 text-left transition-colors ${
+                                    disabled
+                                      ? "opacity-50 cursor-not-allowed"
+                                      : selected
+                                      ? "border-primary bg-primary/5"
+                                      : "hover:bg-muted/40"
+                                  }`}
+                                >
+                                  <div className="min-w-0">
+                                    <p className={`text-sm font-medium truncate ${selected ? "text-primary" : ""}`}>
+                                      {m.name}
+                                    </p>
+                                    <p className="text-[10px] text-muted-foreground font-mono truncate">
+                                      {m.id}
+                                    </p>
                                   </div>
-                                </div>
-                              </button>
-                            );
-                          })}
-                        </div>
+                                  <div className="flex items-center gap-2 shrink-0">
+                                    {disabled && (
+                                      <Badge variant="outline" className="text-[10px] px-1.5">
+                                        Upgrade
+                                      </Badge>
+                                    )}
+                                    <div className={`h-4 w-4 rounded-full border-2 flex items-center justify-center ${
+                                      selected ? "border-primary bg-primary" : "border-muted-foreground/30"
+                                    }`}>
+                                      {selected && <Check className="h-2.5 w-2.5 text-white" />}
+                                    </div>
+                                  </div>
+                                </button>
+                              );
+                            })}
+                          </div>
+                        )}
                       </div>
                     ))}
                 </div>
@@ -534,6 +559,19 @@ export function AgentConfigModal({ agent, open, onClose, onUpdate }: AgentConfig
                   <p className="text-xs text-muted-foreground">Remember context across conversations</p>
                 </div>
                 <Switch checked={form.memory_enabled} onCheckedChange={(v) => set("memory_enabled", v)} />
+              </div>
+
+              <div className="flex items-center justify-between rounded-xl border p-3.5">
+                <div>
+                  <p className="text-sm font-medium">Suggested Reply Buttons</p>
+                  <p className="text-xs text-muted-foreground">
+                    After each response, show 3-4 tappable follow-up suggestions
+                  </p>
+                </div>
+                <Switch
+                  checked={form.suggestions_enabled}
+                  onCheckedChange={(v) => set("suggestions_enabled", v)}
+                />
               </div>
             </TabsContent>
 
