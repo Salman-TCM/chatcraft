@@ -49,6 +49,7 @@ interface Agent {
   share_token: string | null;
   webhook_url: string | null;
   welcome_message: string | null;
+  suggestions_enabled: boolean;
   created_at: string;
 }
 

@@ -37,6 +37,7 @@ interface Agent {
   is_active: boolean;
   webhook_url: string | null;
   welcome_message: string | null;
+  suggestions_enabled: boolean;
 }
 
 interface MCPServer {
@@ -187,6 +188,7 @@ export function AgentConfigModal({ agent, open, onClose, onUpdate }: AgentConfig
     is_active: agent.is_active,
     webhook_url: agent.webhook_url || "",
     welcome_message: agent.welcome_message || "",
+    suggestions_enabled: agent.suggestions_enabled,
     tools: { ...agent.tools },
   });
   const [saving, setSaving]           = useState(false);
@@ -228,6 +230,7 @@ export function AgentConfigModal({ agent, open, onClose, onUpdate }: AgentConfig
         is_active: agent.is_active,
         webhook_url: agent.webhook_url || "",
         welcome_message: agent.welcome_message || "",
+        suggestions_enabled: agent.suggestions_enabled,
         tools: { ...agent.tools },
       });
       setErrors({});
@@ -263,6 +266,7 @@ export function AgentConfigModal({ agent, open, onClose, onUpdate }: AgentConfig
         is_active: form.is_active,
         webhook_url: form.webhook_url.trim() || null,
         welcome_message: form.welcome_message.trim() || null,
+        suggestions_enabled: form.suggestions_enabled,
         tools: form.tools,
       });
       onUpdate(res.data.data);
@@ -555,6 +559,19 @@ export function AgentConfigModal({ agent, open, onClose, onUpdate }: AgentConfig
                   <p className="text-xs text-muted-foreground">Remember context across conversations</p>
                 </div>
                 <Switch checked={form.memory_enabled} onCheckedChange={(v) => set("memory_enabled", v)} />
+              </div>
+
+              <div className="flex items-center justify-between rounded-xl border p-3.5">
+                <div>
+                  <p className="text-sm font-medium">Suggested Reply Buttons</p>
+                  <p className="text-xs text-muted-foreground">
+                    After each response, show 3-4 tappable follow-up suggestions
+                  </p>
+                </div>
+                <Switch
+                  checked={form.suggestions_enabled}
+                  onCheckedChange={(v) => set("suggestions_enabled", v)}
+                />
               </div>
             </TabsContent>
 
