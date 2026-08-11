@@ -26,6 +26,7 @@ from app.api.chat import router as chat_router
 from app.api.chatbots import router as chatbots_router
 from app.api.commerce import router as commerce_router
 from app.api.crm import router as crm_router
+from app.api.faraid import router as faraid_router
 from app.api.flows import router as flows_router
 from app.api.forms import public_router as forms_public_router
 from app.api.forms import router as forms_router
@@ -119,6 +120,7 @@ app.include_router(chatbots_router)
 app.include_router(chat_router)
 app.include_router(kb_router)
 app.include_router(agent_kb_router)
+app.include_router(faraid_router)
 app.include_router(voice_router)
 app.include_router(widget_router)
 app.include_router(usage_router)
