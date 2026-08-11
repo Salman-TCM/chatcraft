@@ -19,9 +19,10 @@ import {
   Globe, Code2, Link2, Mail, Smartphone, ShieldCheck, Bot,
   Loader2, Check, Brain, Zap, Settings, Plug,
   Webhook, RefreshCw, Trash2, Plus, ExternalLink,
-  AlertCircle, ChevronDown, ChevronUp, Wrench, Sheet, BookOpen,
+  AlertCircle, ChevronDown, ChevronUp, Wrench, Sheet, BookOpen, Scale,
 } from "lucide-react";
 import { apiClient } from "@/lib/api";
+import { AgentKnowledgeManager } from "./AgentKnowledgeManager";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -86,6 +87,7 @@ const TOOLS: ToolConfig[] = [
   { key: "browser",      label: "Browser",        description: "Visit and extract content from web pages",    icon: Globe,       category: "research" },
   { key: "search_kb",    label: "Knowledge Base", description: "Search this agent's uploaded documents",      icon: BookOpen,    category: "research" },
   { key: "code",         label: "Code Execution", description: "Execute Python code for data processing",     icon: Code2,       category: "compute" },
+  { key: "faraid",       label: "Faraid Calculator", description: "Deterministic Islamic inheritance (Hanafi) share calculation", icon: Scale, category: "compute" },
   { key: "http",         label: "HTTP Requests",  description: "Make API calls to external services",         icon: Link2,       category: "integration" },
   { key: "sheets",       label: "Google Sheets",  description: "Read and write spreadsheet data",             icon: Sheet,       category: "integration" },
   { key: "email",        label: "Email",          description: "Send emails via configured service",          icon: Mail,        category: "communication" },
@@ -325,6 +327,11 @@ export function AgentConfigModal({ agent, open, onClose, onUpdate }: AgentConfig
               <TabsTrigger value="tools"   className="flex-1 text-xs h-7 rounded-md data-[state=active]:bg-background data-[state=active]:shadow-sm">
                 <Zap className="h-3.5 w-3.5 mr-1 shrink-0" />Tools
                 {enabledCount > 0 && <Badge className="ml-1 h-4 px-1 text-[9px]">{enabledCount}</Badge>}
+              </TabsTrigger>
+              <TabsTrigger value="knowledge" className="flex-1 text-xs h-7 rounded-md data-[state=active]:bg-background data-[state=active]:shadow-sm">
+                <BookOpen className="h-3.5 w-3.5 mr-1 shrink-0" />
+                <span className="hidden sm:inline">Knowledge</span>
+                <span className="sm:hidden">KB</span>
               </TabsTrigger>
               <TabsTrigger value="mcp"     className="flex-1 text-xs h-7 rounded-md data-[state=active]:bg-background data-[state=active]:shadow-sm">
                 <Plug className="h-3.5 w-3.5 mr-1 shrink-0" />MCP
@@ -617,6 +624,11 @@ export function AgentConfigModal({ agent, open, onClose, onUpdate }: AgentConfig
                   </div>
                 </div>
               ))}
+            </TabsContent>
+
+            {/* ── Knowledge ─────────────────────────────────────────────────── */}
+            <TabsContent value="knowledge" className="mt-0">
+              <AgentKnowledgeManager agentId={agent.id} showTestSearch={false} />
             </TabsContent>
 
             {/* ── MCP ───────────────────────────────────────────────────────── */}

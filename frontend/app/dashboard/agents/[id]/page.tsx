@@ -7,7 +7,7 @@ import {
   ChevronUp, Code2, Copy, ExternalLink, Globe, Loader2, Mail,
   Link2, MessageSquare, RefreshCw, Send, Server, ShieldCheck,
   Chrome, Sheet, Smartphone, Trash2, Zap, ToggleLeft, ToggleRight,
-  BarChart2, Webhook, Brain, Clock,
+  BarChart2, Webhook, Brain, Clock, Scale,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -16,6 +16,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { apiClient } from "@/lib/api";
 import { getSession } from "next-auth/react";
+import { AgentKnowledgeManager } from "../components/AgentKnowledgeManager";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -150,14 +151,24 @@ const TOOLS = [
     bg: "bg-sky-50 border-sky-200",
     activeBg: "bg-sky-600",
   },
+  {
+    key: "faraid",
+    label: "Faraid Calculator",
+    icon: Scale,
+    description: "Deterministic Islamic inheritance (Hanafi) share calculation — never estimated by the model",
+    color: "text-teal-600",
+    bg: "bg-teal-50 border-teal-200",
+    activeBg: "bg-teal-600",
+  },
 ];
 
-type Tab = "identity" | "model" | "instructions" | "tools" | "mcp" | "advanced" | "share" | "analytics";
+type Tab = "identity" | "model" | "instructions" | "knowledge" | "tools" | "mcp" | "advanced" | "share" | "analytics";
 
 const TABS: { id: Tab; label: string }[] = [
   { id: "identity",     label: "Identity" },
   { id: "model",        label: "Model" },
   { id: "instructions", label: "Instructions" },
+  { id: "knowledge",    label: "Knowledge" },
   { id: "tools",        label: "Tools" },
   { id: "mcp",          label: "MCP" },
   { id: "advanced",     label: "Advanced" },
@@ -601,7 +612,7 @@ export default function AgentBuilderPage() {
                 />
               </div>
               <div className="space-y-1.5">
-                <Label className="text-xs">Attach Chatbot Knowledge Base</Label>
+                <Label className="text-xs">Attach Chatbot <span className="text-muted-foreground">(optional)</span></Label>
                 <select
                   value={chatbotId}
                   onChange={e => setChatbotId(e.target.value)}
@@ -611,7 +622,9 @@ export default function AgentBuilderPage() {
                   {chatbots.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
                 </select>
                 <p className="text-[11px] text-muted-foreground">
-                  The agent inherits that chatbot&apos;s knowledge base and system prompt.
+                  Optionally inherits that chatbot&apos;s knowledge base and system prompt, in
+                  addition to whatever you add in the Knowledge tab. Not required — this agent
+                  can have its own files, URLs, and text with no chatbot attached.
                 </p>
               </div>
             </div>
@@ -724,6 +737,11 @@ Always prefer primary sources over aggregator sites.`}
                 ))}
               </div>
             </div>
+          )}
+
+          {/* ─ Knowledge tab ─ */}
+          {activeTab === "knowledge" && (
+            <AgentKnowledgeManager agentId={id} />
           )}
 
           {/* ─ Tools tab ─ */}
