@@ -7,7 +7,7 @@ import {
   ChevronUp, Code2, Copy, ExternalLink, Globe, Loader2, Mail,
   Link2, MessageSquare, RefreshCw, Send, Server, ShieldCheck,
   Chrome, Sheet, Smartphone, Trash2, Zap, ToggleLeft, ToggleRight,
-  BarChart2, Webhook, Brain, Clock,
+  BarChart2, Webhook, Brain, Clock, Scale,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -150,6 +150,15 @@ const TOOLS = [
     color: "text-sky-600",
     bg: "bg-sky-50 border-sky-200",
     activeBg: "bg-sky-600",
+  },
+  {
+    key: "faraid",
+    label: "Faraid Calculator",
+    icon: Scale,
+    description: "Deterministic Islamic inheritance (Hanafi) share calculation — never estimated by the model",
+    color: "text-teal-600",
+    bg: "bg-teal-50 border-teal-200",
+    activeBg: "bg-teal-600",
   },
 ];
 
