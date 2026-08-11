@@ -34,8 +34,8 @@ from app.core.rate_limit import limiter
 from app.models.agent import Agent
 from app.models.agent_conversation import AgentConversation
 from app.models.agent_knowledge_base import AgentKnowledgeDocument
-from app.models.knowledge_base import DocumentStatus
 from app.models.chatbot_config import ChatbotConfig
+from app.models.knowledge_base import DocumentStatus
 from app.models.mcp import MCPServerConfig
 from app.models.usage_log import UsageLog
 from app.schemas.agent import AgentCreateRequest, AgentResponse, AgentUpdateRequest
@@ -198,6 +198,7 @@ _PUBLIC_SHARE_TOOL_ALLOWLIST = {
     "browse_url",
     "search_kb",
     "web_search",  # billed to owner but read-only and rate-limited
+    "calculate_faraid",  # pure calculation, no DB/network access, no owner cost
 }
 
 
@@ -528,8 +529,7 @@ async def _run_agent(
                 {
                     "type": "error",
                     "content": (
-                        "No self-hosted endpoint configured. "
-                        "Add one in Settings → Model Keys."
+                        "No self-hosted endpoint configured. Add one in Settings → Model Keys."
                     ),
                 }
             )
@@ -555,7 +555,8 @@ async def _run_agent(
             yield chunk
     else:
         resolved_base_url = (
-            base_url if provider == "self_hosted"
+            base_url
+            if provider == "self_hosted"
             else _PROVIDER_BASE_URLS.get(provider, "https://api.openai.com/v1")
         )
         async for chunk in _run_agent_openai_compat(
@@ -791,6 +792,7 @@ _BUILTIN_TOOL_NAMES = frozenset(
         "list_available_models",
         "create_agent",
         "search_kb",
+        "calculate_faraid",
     }
 )
 
@@ -813,7 +815,9 @@ def _consume_json_object(text: str, start: int) -> tuple[dict, int] | None:
     return obj, consumed
 
 
-def _extract_text_tool_calls(text: str, known_tool_names: frozenset[str] = frozenset()) -> tuple[list[dict], int]:
+def _extract_text_tool_calls(
+    text: str, known_tool_names: frozenset[str] = frozenset()
+) -> tuple[list[dict], int]:
     """Pull tool call JSON out of a plain-text response.
 
     Handles:
@@ -904,7 +908,9 @@ def _extract_text_tool_calls(text: str, known_tool_names: frozenset[str] = froze
                     calls.append(
                         {
                             "name": data["name"].strip(),
-                            "args": data.get("args", data.get("arguments", data.get("parameters", {}))),
+                            "args": data.get(
+                                "args", data.get("arguments", data.get("parameters", {}))
+                            ),
                         }
                     )
                     cutoff = max(cutoff, leading + consumed)
@@ -1019,16 +1025,14 @@ async def _run_agent_openai_compat(
                     inputs = salvaged["args"]
                     yield _sse({"type": "tool_call", "tool": name, "input": inputs})
                     result_text = await _execute_tool(name, inputs, mcp_map, ctx)
-                    yield _sse(
-                        {"type": "tool_result", "tool": name, "result": result_text[:500]}
-                    )
+                    yield _sse({"type": "tool_result", "tool": name, "result": result_text[:500]})
                     # Record what the model tried to do + the result so the
                     # next turn has coherent history in either tool mode.
                     messages.append(
                         {
                             "role": "assistant",
                             "content": (
-                                f'Calling tool `{name}` with '
+                                f"Calling tool `{name}` with "
                                 f"{json.dumps(inputs, ensure_ascii=False)}"
                             ),
                         }
@@ -1114,9 +1118,14 @@ async def _run_agent_openai_compat(
                             inputs = tc["args"]
                             yield _sse({"type": "tool_call", "tool": name, "input": inputs})
                             result_text = await _execute_tool(name, inputs, mcp_map, ctx)
-                            yield _sse({"type": "tool_result", "tool": name, "result": result_text[:500]})
+                            yield _sse(
+                                {"type": "tool_result", "tool": name, "result": result_text[:500]}
+                            )
                             messages.append(
-                                {"role": "user", "content": f"[Tool result for '{name}']: {result_text}"}
+                                {
+                                    "role": "user",
+                                    "content": f"[Tool result for '{name}']: {result_text}",
+                                }
                             )
                         continue  # loop back for the next LLM turn
 
@@ -1640,6 +1649,87 @@ def _build_builtin_tools(tools_config: dict) -> list[dict]:
             }
         )
 
+    if tools_config.get("faraid"):
+        defs.append(
+            {
+                "name": "calculate_faraid",
+                "description": (
+                    "Deterministically calculate Islamic (Faraid) inheritance shares — Hanafi rules. "
+                    "This tool does the actual arithmetic; you must never compute or estimate shares "
+                    "yourself. Before calling it, ask the user for every field below that they "
+                    "haven't already stated — do not assume an heir is absent just because it wasn't "
+                    "mentioned, and do not guess estate amounts. Only call this tool once you have "
+                    "the decedent's gender, the net estate figures, and an explicit answer (present/"
+                    "absent, or a count) for each heir category that could plausibly apply."
+                ),
+                "input_schema": {
+                    "type": "object",
+                    "properties": {
+                        "decedent_gender": {"type": "string", "enum": ["male", "female"]},
+                        "gross_estate": {
+                            "type": "string",
+                            "description": "Total estate value before deductions, as a decimal string, e.g. '125000.00'",
+                        },
+                        "funeral_expenses": {
+                            "type": "string",
+                            "description": "Decimal string, default '0'",
+                        },
+                        "debts": {"type": "string", "description": "Decimal string, default '0'"},
+                        "bequest": {
+                            "type": "string",
+                            "description": "Wasiyyah — decimal string, default '0'. Capped at 1/3 of the estate after debts.",
+                        },
+                        "currency": {
+                            "type": "string",
+                            "description": "3-letter currency code, default 'GBP'",
+                        },
+                        "heirs": {
+                            "type": "object",
+                            "description": "Set only the fields the user actually confirmed; leave the rest unset (they default to absent/zero) only after explicitly asking.",
+                            "properties": {
+                                "husband": {
+                                    "type": "boolean",
+                                    "description": "Only valid if decedent_gender is female",
+                                },
+                                "wives": {
+                                    "type": "integer",
+                                    "description": "0-4; only valid if decedent_gender is male",
+                                },
+                                "sons": {"type": "integer"},
+                                "daughters": {"type": "integer"},
+                                "father": {"type": "boolean"},
+                                "mother": {"type": "boolean"},
+                                "paternal_grandfather": {"type": "boolean"},
+                                "paternal_grandmother": {"type": "boolean"},
+                                "maternal_grandmother": {"type": "boolean"},
+                                "full_brothers": {"type": "integer"},
+                                "full_sisters": {"type": "integer"},
+                                "paternal_brothers": {
+                                    "type": "integer",
+                                    "description": "Consanguine — same father, different mother",
+                                },
+                                "paternal_sisters": {"type": "integer"},
+                                "maternal_brothers": {
+                                    "type": "integer",
+                                    "description": "Uterine — same mother, different father",
+                                },
+                                "maternal_sisters": {"type": "integer"},
+                                "grandsons_via_son": {
+                                    "type": "integer",
+                                    "description": "Sons of sons",
+                                },
+                                "granddaughters_via_son": {
+                                    "type": "integer",
+                                    "description": "Daughters of sons",
+                                },
+                            },
+                        },
+                    },
+                    "required": ["decedent_gender", "gross_estate", "heirs"],
+                },
+            }
+        )
+
     return defs
 
 
@@ -1685,6 +1775,8 @@ async def _execute_tool(name: str, inputs: dict, mcp_map: dict, ctx: dict | None
             return await _tool_create_agent(inputs, ctx or {})
         elif name == "search_kb":
             return await _tool_search_kb(inputs, ctx or {})
+        elif name == "calculate_faraid":
+            return _tool_calculate_faraid(inputs)
         return f"Unknown tool: {name}"
     except Exception as exc:
         return f"Tool error: {exc}"
@@ -2440,6 +2532,36 @@ async def _tool_search_kb(inputs: dict, ctx: dict) -> str:
     return "\n\n---\n\n".join(parts)
 
 
+def _tool_calculate_faraid(inputs: dict) -> str:
+    """Deterministic Faraid (Islamic inheritance) calculation. Never calculates
+    anything itself beyond input validation — all arithmetic happens in
+    app.services.faraid.engine, on Fraction/Decimal, with no LLM involved."""
+    import json
+
+    from pydantic import ValidationError
+
+    from app.schemas.faraid import FaraidCalculateRequest
+    from app.services.faraid.engine import calculate
+
+    try:
+        request = FaraidCalculateRequest.model_validate(inputs)
+    except ValidationError as exc:
+        errors = [f"{'.'.join(str(p) for p in e['loc'])}: {e['msg']}" for e in exc.errors()]
+        return (
+            "Error: invalid input — ask the user for corrected/missing information, do not guess:\n"
+            + "\n".join(errors)
+        )
+    except ValueError as exc:
+        return f"Error: invalid input — ask the user to correct this: {exc}"
+
+    try:
+        result = calculate(request)
+    except ValueError as exc:
+        return f"Error: {exc}"
+
+    return json.dumps(result.model_dump(), indent=2)
+
+
 # ─── System prompt builder ────────────────────────────────────────────────────
 
 
@@ -2502,6 +2624,29 @@ async def _build_system_prompt(
                 f"details, prior context), call the search_kb tool BEFORE relying on your own "
                 f"general knowledge. Cite the source document name when you use retrieved content."
             )
+
+    if agent_tools_cfg.get("faraid"):
+        parts.append(
+            "FARAID (ISLAMIC INHERITANCE) RULES:\n"
+            "1. You have the calculate_faraid tool. It is the ONLY source of truth for shares — "
+            "you must NEVER compute, estimate, or restate a share from memory or general "
+            "knowledge, even a simple one.\n"
+            "2. Before calling the tool, collect every piece of information it needs by asking "
+            "the user directly: the decedent's gender, the estate value (and any debts, "
+            "funeral costs, or bequest), and — for each heir category that could plausibly "
+            "apply — whether that heir survived them (or how many, for counted heirs like sons "
+            "or siblings).\n"
+            "3. NEVER assume an heir is absent because the user didn't mention them. Silence is "
+            "not an answer — ask explicitly, especially about heirs that are easy to forget "
+            "(grandparents, siblings, multiple wives).\n"
+            "4. Only call calculate_faraid once you have real answers, not placeholders. If the "
+            "tool reports invalid input, relay exactly what's wrong and ask the user to correct "
+            "it — do not silently substitute a guess.\n"
+            "5. After the tool returns, explain the result in plain language: who gets what "
+            "(fraction, percentage, and amount), why anyone was blocked, and any warnings "
+            "(awl/radd adjustments, capped bequest, unresolved classical corner cases). Always "
+            "include the tool's disclaimer that this is not a fatwa or legal advice."
+        )
 
     if agent.suggestions_enabled:
         parts.append(
