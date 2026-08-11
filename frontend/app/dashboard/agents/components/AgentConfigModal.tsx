@@ -22,6 +22,7 @@ import {
   AlertCircle, ChevronDown, ChevronUp, Wrench, Sheet, BookOpen,
 } from "lucide-react";
 import { apiClient } from "@/lib/api";
+import { AgentKnowledgeManager } from "./AgentKnowledgeManager";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -326,6 +327,11 @@ export function AgentConfigModal({ agent, open, onClose, onUpdate }: AgentConfig
                 <Zap className="h-3.5 w-3.5 mr-1 shrink-0" />Tools
                 {enabledCount > 0 && <Badge className="ml-1 h-4 px-1 text-[9px]">{enabledCount}</Badge>}
               </TabsTrigger>
+              <TabsTrigger value="knowledge" className="flex-1 text-xs h-7 rounded-md data-[state=active]:bg-background data-[state=active]:shadow-sm">
+                <BookOpen className="h-3.5 w-3.5 mr-1 shrink-0" />
+                <span className="hidden sm:inline">Knowledge</span>
+                <span className="sm:hidden">KB</span>
+              </TabsTrigger>
               <TabsTrigger value="mcp"     className="flex-1 text-xs h-7 rounded-md data-[state=active]:bg-background data-[state=active]:shadow-sm">
                 <Plug className="h-3.5 w-3.5 mr-1 shrink-0" />MCP
                 {activeMcpCount > 0 && <Badge className="ml-1 h-4 px-1 text-[9px] bg-emerald-500">{activeMcpCount}</Badge>}
@@ -617,6 +623,11 @@ export function AgentConfigModal({ agent, open, onClose, onUpdate }: AgentConfig
                   </div>
                 </div>
               ))}
+            </TabsContent>
+
+            {/* ── Knowledge ─────────────────────────────────────────────────── */}
+            <TabsContent value="knowledge" className="mt-0">
+              <AgentKnowledgeManager agentId={agent.id} showTestSearch={false} />
             </TabsContent>
 
             {/* ── MCP ───────────────────────────────────────────────────────── */}
