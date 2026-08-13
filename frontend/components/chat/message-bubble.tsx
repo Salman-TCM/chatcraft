@@ -6,6 +6,7 @@ import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { apiClient } from "@/lib/api";
 import { AudioPlayer } from "./audio-player";
+import { MarkdownContent } from "./markdown-content";
 import { RichContent, parseRichContent } from "./rich-content";
 import type { ChatMessage } from "./types";
 
@@ -93,7 +94,7 @@ export function MessageBubble({
                 : "bg-muted text-foreground rounded-tl-sm"
             )}
           >
-            {displayText}
+            {isUser ? displayText : <MarkdownContent content={displayText} />}
             {message.isStreaming && (
               <span className="ml-0.5 inline-block h-4 w-0.5 animate-pulse bg-current opacity-70" />
             )}

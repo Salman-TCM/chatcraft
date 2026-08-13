@@ -6,6 +6,7 @@ import { AlertCircle, Bot, Check, ChevronDown, ChevronUp, Loader2, Send, Zap } f
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { APP_NAME } from "@/lib/constants";
+import { MarkdownContent } from "@/components/chat/markdown-content";
 import { RichContent, parseRichContent } from "@/components/chat/rich-content";
 
 interface AgentInfo {
@@ -270,7 +271,11 @@ export default function PublicAgentPage() {
                   ? "bg-primary text-primary-foreground rounded-br-sm"
                   : "bg-muted text-foreground rounded-bl-sm"
               }`}>
-                {rich ? rich.text : msg.content}
+                {msg.role === "assistant" ? (
+                  <MarkdownContent content={rich ? rich.text : msg.content} />
+                ) : (
+                  msg.content
+                )}
                 {msg.role === "assistant" && running && i === messages.length - 1 && (
                   <span className="inline-block w-1.5 h-4 bg-current animate-pulse ml-0.5 align-text-bottom rounded-sm" />
                 )}
