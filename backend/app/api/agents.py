@@ -2663,6 +2663,28 @@ async def _build_system_prompt(
             "You are a helpful AI agent. Use the available tools to complete tasks thoroughly and accurately."
         )
 
+    # Default tone for every agent, appended right after its own persona so
+    # it can't get lost further down the prompt. Small/self-hosted models in
+    # particular default to a stiff "I am an AI specialized in X" self-intro
+    # and a numbered-headers-and-bullets report for every reply, even a
+    # simple greeting. This doesn't ask the model to drop structure where
+    # it's actually useful (a results table, a calculation breakdown) — only
+    # to stop reaching for it by default.
+    parts.append(
+        "COMMUNICATION STYLE:\n"
+        "1. Talk like a knowledgeable person having a conversation, not a "
+        "formal report. Skip stock self-introductions like 'I am an AI "
+        "specialized in...' — just greet the user and respond to what they "
+        "actually said.\n"
+        "2. Match formatting to the content. A greeting or a short answer "
+        "should just be a sentence or two of plain text. Save headers, "
+        "numbered sections, and bullet lists for when they genuinely help — "
+        "e.g. presenting calculated results, a breakdown with several parts, "
+        "or a real list of distinct options.\n"
+        "3. Don't restate your full capability list unless the user actually "
+        "asked what you can do. Answer the question in front of you."
+    )
+
     # Global anti-hallucination stanza — appended to EVERY agent's prompt when
     # any tool is enabled. Weak models (Llama 8B especially) will fabricate
     # plausible-sounding emails, prices, phone numbers, and quotes when a tool
