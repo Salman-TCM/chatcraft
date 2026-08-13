@@ -21,7 +21,7 @@ from typing import Any
 
 import anthropic
 import httpx
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Request, UploadFile, status
 from fastapi.responses import StreamingResponse
 from openai import AsyncOpenAI
 from pydantic import BaseModel, Field
@@ -39,6 +39,7 @@ from app.models.knowledge_base import DocumentStatus
 from app.models.mcp import MCPServerConfig
 from app.models.usage_log import UsageLog
 from app.schemas.agent import AgentCreateRequest, AgentResponse, AgentUpdateRequest
+from app.services.kb.extractor import extract_docx, extract_pdf, extract_txt
 from app.services.llm.key_store import get_key as _get_user_key
 
 router = APIRouter(
@@ -410,6 +411,101 @@ async def get_agent_analytics(agent_id: uuid.UUID, user: CurrentUser, db: DBSess
             "output_tokens": int(row.output_tokens),
             "cost_usd": float(row.cost_usd),
             "daily": daily,
+        },
+    }
+
+
+# ─── Chat attachments ──────────────────────────────────────────────────────────
+#
+# One-off text extraction for a file dropped into the agent Run chat. This is
+# NOT the KB pipeline — nothing is chunked, embedded, or persisted. The
+# extracted text is returned to the frontend, which folds it into the next
+# chat message as plain context. Reuses the same extractor functions (and
+# Bijoy/legacy-Bengali-encoding fix) as KB document ingestion.
+
+_ATTACHMENT_MAX_BYTES = 10 * 1024 * 1024  # 10 MB
+_ATTACHMENT_MAX_CHARS = 20_000  # keep one attachment from dominating the context window
+_ATTACHMENT_MIME_TO_TYPE = {
+    "application/pdf": "pdf",
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document": "docx",
+    "text/plain": "txt",
+}
+_ATTACHMENT_EXT_TO_TYPE = {".pdf": "pdf", ".docx": "docx", ".txt": "txt"}
+
+
+def _resolve_attachment_doc_type(content_type: str | None, filename: str | None) -> str | None:
+    """Map an upload's MIME type (falling back to its extension) to pdf/docx/txt."""
+    doc_type = _ATTACHMENT_MIME_TO_TYPE.get(content_type or "")
+    if doc_type:
+        return doc_type
+    name = (filename or "").lower()
+    for ext, t in _ATTACHMENT_EXT_TO_TYPE.items():
+        if name.endswith(ext):
+            return t
+    return None
+
+
+def _truncate_attachment_text(text: str) -> tuple[str, bool]:
+    """Cap extracted attachment text so one file can't dominate the context window."""
+    text = text.strip()
+    truncated = len(text) > _ATTACHMENT_MAX_CHARS
+    return (text[:_ATTACHMENT_MAX_CHARS] if truncated else text), truncated
+
+
+@router.post("/{agent_id}/attachments/extract")
+async def extract_attachment_text(
+    agent_id: uuid.UUID,
+    user: CurrentUser,
+    db: DBSession,
+    file: UploadFile,
+):
+    """Extract text from an uploaded PDF/DOCX/TXT for use as chat context."""
+    await _get_owned_agent(agent_id, user.id, db)
+
+    data = await file.read()
+    if not data:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={"success": False, "error": "Empty file", "code": "EMPTY_FILE"},
+        )
+    if len(data) > _ATTACHMENT_MAX_BYTES:
+        raise HTTPException(
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            detail={"success": False, "error": "File exceeds 10 MB", "code": "FILE_TOO_LARGE"},
+        )
+
+    doc_type = _resolve_attachment_doc_type(file.content_type, file.filename)
+    if not doc_type:
+        raise HTTPException(
+            status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
+            detail={
+                "success": False,
+                "error": "Only PDF, DOCX, and TXT files are supported",
+                "code": "UNSUPPORTED_TYPE",
+            },
+        )
+
+    try:
+        if doc_type == "pdf":
+            text = extract_pdf(data)
+        elif doc_type == "docx":
+            text = extract_docx(data)
+        else:
+            text = extract_txt(data)
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={"success": False, "error": f"Could not read file: {exc}", "code": "EXTRACT_FAILED"},
+        ) from exc
+
+    text, truncated = _truncate_attachment_text(text)
+
+    return {
+        "success": True,
+        "data": {
+            "filename": file.filename or "attachment",
+            "text": text,
+            "truncated": truncated,
         },
     }
 
