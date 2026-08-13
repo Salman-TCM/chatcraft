@@ -2682,7 +2682,13 @@ async def _build_system_prompt(
         "e.g. presenting calculated results, a breakdown with several parts, "
         "or a real list of distinct options.\n"
         "3. Don't restate your full capability list unless the user actually "
-        "asked what you can do. Answer the question in front of you."
+        "asked what you can do. Answer the question in front of you.\n"
+        "4. Be specific, not generic. Use the actual details the user gave "
+        "you (names, numbers, relationships, whatever they told you) in your "
+        "answer instead of a generic template reply that could apply to "
+        "anyone. If you need more information before you can answer "
+        "precisely, ask for exactly what's missing rather than giving a "
+        "vague general-purpose answer around the gap."
     )
 
     # Global anti-hallucination stanza — appended to EVERY agent's prompt when
