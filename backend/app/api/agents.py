@@ -180,6 +180,45 @@ class PublicChatRequest(BaseModel):
 # emitting 50 parallel `browse_url` blocks) even when max_steps is high.
 _MAX_TOOL_CALLS_PER_TURN = 10
 
+# Weak models sometimes just paste a tool's raw JSON payload back as their
+# final answer instead of following the "explain in plain language" system
+# prompt instruction. This gets appended once, right after any tool result,
+# so the very next turn has the reminder immediately before it decides how
+# to respond — instructions further back in the system prompt are easy for
+# a small model to lose track of.
+_TOOL_RESULT_FOLLOWUP_REMINDER = (
+    "Reminder: respond to the user in plain, natural language based on the "
+    "result above. Do not paste raw JSON, code blocks, or internal field "
+    "names — describe the outcome conversationally, following any "
+    "tool-specific instructions in your system prompt (e.g. citing sources, "
+    "including disclaimers)."
+)
+
+# A model that skips calculate_faraid and computes a share itself almost
+# always still writes the fraction out (e.g. "1/8", "7/40") even in an
+# otherwise non-English reply — that notation essentially never appears in
+# ordinary inheritance-law prose that isn't stating a computed share. Used as
+# a safety net to catch the tool being silently bypassed on a real question.
+_FRACTION_PATTERN = _re.compile(r"\d\s*/\s*\d")
+
+
+def _looks_like_unverified_faraid_share(text: str) -> bool:
+    return bool(_FRACTION_PATTERN.search(text))
+
+
+# Sent back as a corrective user turn — never as a forced tool_choice, which
+# would just make the model invent placeholder heir data to satisfy the
+# forced call. This only fires once per conversation (see faraid_retry_used)
+# so a model that ignores it too doesn't loop forever.
+_FARAID_SELF_COMPUTE_CORRECTION = (
+    "That last reply computed a Faraid share directly instead of calling "
+    "calculate_faraid, which your instructions do not allow. Do not repeat "
+    "that mistake: either call calculate_faraid now with the information "
+    "already given, or ask the user for whatever specific piece of "
+    "information is still missing. Do not state any fraction, percentage, "
+    "or amount yourself."
+)
+
 
 # Tools an anonymous visitor to a shared agent may invoke. Everything not in this
 # set — send_email, send_sms, http_request, google_sheets, create_agent,
@@ -630,6 +669,7 @@ async def _run_agent_anthropic(
                     {"type": "tool_result", "tool_use_id": tu.id, "content": result_text}
                 )
 
+            tool_results.append({"type": "text", "text": _TOOL_RESULT_FOLLOWUP_REMINDER})
             messages.append({"role": "assistant", "content": response.content})
             messages.append({"role": "user", "content": tool_results})
 
@@ -995,6 +1035,15 @@ async def _run_agent_openai_compat(
         "allowed_tools": {t["name"] for t in tools} | set(mcp_map.keys()),
     }
     text_tool_mode = False  # True once we've fallen back to JSON-in-text tool calling
+    calculate_faraid_called = False
+    faraid_retry_used = False  # only ever force one corrective retry, never loop forever
+
+    def _faraid_share_leaked(text: str) -> bool:
+        return (
+            "calculate_faraid" in ctx["allowed_tools"]
+            and not calculate_faraid_called
+            and _looks_like_unverified_faraid_share(text)
+        )
 
     try:
         while step < max_steps:
@@ -1023,6 +1072,8 @@ async def _run_agent_openai_compat(
                 if salvaged and salvaged["name"] in ctx["allowed_tools"]:
                     name = salvaged["name"]
                     inputs = salvaged["args"]
+                    if name == "calculate_faraid":
+                        calculate_faraid_called = True
                     yield _sse({"type": "tool_call", "tool": name, "input": inputs})
                     result_text = await _execute_tool(name, inputs, mcp_map, ctx)
                     yield _sse({"type": "tool_result", "tool": name, "result": result_text[:500]})
@@ -1040,7 +1091,8 @@ async def _run_agent_openai_compat(
                     messages.append(
                         {
                             "role": "user",
-                            "content": f"[Tool result for '{name}']: {result_text}",
+                            "content": f"[Tool result for '{name}']: {result_text}\n\n"
+                            f"{_TOOL_RESULT_FOLLOWUP_REMINDER}",
                         }
                     )
                     continue  # skip to the next LLM turn
@@ -1081,6 +1133,8 @@ async def _run_agent_openai_compat(
                     for tc in tool_calls:
                         name = tc["name"]
                         inputs = tc["args"]
+                        if name == "calculate_faraid":
+                            calculate_faraid_called = True
                         yield _sse({"type": "tool_call", "tool": name, "input": inputs})
                         result_text = await _execute_tool(name, inputs, mcp_map, ctx)
                         yield _sse(
@@ -1093,7 +1147,15 @@ async def _run_agent_openai_compat(
                                 "content": f"[Tool result for '{name}']: {result_text}",
                             }
                         )
+                    messages.append({"role": "user", "content": _TOOL_RESULT_FOLLOWUP_REMINDER})
                 else:
+                    if text and _faraid_share_leaked(text) and not faraid_retry_used:
+                        faraid_retry_used = True
+                        messages.append({"role": "assistant", "content": text})
+                        messages.append(
+                            {"role": "user", "content": _FARAID_SELF_COMPUTE_CORRECTION}
+                        )
+                        continue
                     if text:
                         yield _sse({"type": "text", "content": _normalize_plain_text(text)})
                     break
@@ -1116,6 +1178,8 @@ async def _run_agent_openai_compat(
                         for tc in salvaged:
                             name = tc["name"]
                             inputs = tc["args"]
+                            if name == "calculate_faraid":
+                                calculate_faraid_called = True
                             yield _sse({"type": "tool_call", "tool": name, "input": inputs})
                             result_text = await _execute_tool(name, inputs, mcp_map, ctx)
                             yield _sse(
@@ -1127,12 +1191,22 @@ async def _run_agent_openai_compat(
                                     "content": f"[Tool result for '{name}']: {result_text}",
                                 }
                             )
+                        messages.append(
+                            {"role": "user", "content": _TOOL_RESULT_FOLLOWUP_REMINDER}
+                        )
                         continue  # loop back for the next LLM turn
+
+                is_final_turn = not msg.tool_calls or choice.finish_reason == "stop"
+                if text and is_final_turn and _faraid_share_leaked(text) and not faraid_retry_used:
+                    faraid_retry_used = True
+                    messages.append({"role": "assistant", "content": text})
+                    messages.append({"role": "user", "content": _FARAID_SELF_COMPUTE_CORRECTION})
+                    continue
 
                 if text:
                     yield _sse({"type": "text", "content": _normalize_plain_text(text)})
 
-                if not msg.tool_calls or choice.finish_reason == "stop":
+                if is_final_turn:
                     break
 
                 # Cap per-turn burst so the model can't fire 50 tool calls in
@@ -1163,10 +1237,13 @@ async def _run_agent_openai_compat(
                         inputs = json.loads(tc.function.arguments or "{}")
                     except Exception:
                         inputs = {}
+                    if name == "calculate_faraid":
+                        calculate_faraid_called = True
                     yield _sse({"type": "tool_call", "tool": name, "input": inputs})
                     result_text = await _execute_tool(name, inputs, mcp_map, ctx)
                     yield _sse({"type": "tool_result", "tool": name, "result": result_text[:500]})
                     messages.append({"role": "tool", "tool_call_id": tc.id, "content": result_text})
+                messages.append({"role": "user", "content": _TOOL_RESULT_FOLLOWUP_REMINDER})
 
                 if choice.finish_reason != "tool_calls":
                     break
