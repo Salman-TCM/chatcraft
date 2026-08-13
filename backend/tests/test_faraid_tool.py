@@ -70,3 +70,38 @@ def test_faraid_tools_config_field_exists():
     cfg = AgentToolsConfig(faraid=True)
     assert cfg.faraid is True
     assert AgentToolsConfig().faraid is False
+
+
+# ─── Self-computed-share detection (bypass safety net) ─────────────────────
+#
+# Weak/self-hosted models sometimes skip calculate_faraid entirely and just
+# compute a share themselves in freeform text, defeating the whole point of
+# the deterministic tool. _looks_like_unverified_faraid_share() is the
+# safety-net heuristic _run_agent_openai_compat uses to catch that and force
+# one corrective retry instead of silently sending the self-computed answer.
+
+
+def test_flags_reply_with_ascii_fraction():
+    from app.api.agents import _looks_like_unverified_faraid_share
+
+    reply = "স্ত্রী: ১/৮ অংশ পাবেন। প্রতি পুত্র পাবে: 7/20"
+    assert _looks_like_unverified_faraid_share(reply) is True
+
+
+def test_flags_reply_with_spaced_fraction():
+    from app.api.agents import _looks_like_unverified_faraid_share
+
+    assert _looks_like_unverified_faraid_share("The wife gets 1 / 8 of the estate.") is True
+
+
+def test_does_not_flag_reply_with_no_fraction():
+    from app.api.agents import _looks_like_unverified_faraid_share
+
+    reply = "Could you confirm whether the deceased's parents are still living?"
+    assert _looks_like_unverified_faraid_share(reply) is False
+
+
+def test_does_not_flag_empty_reply():
+    from app.api.agents import _looks_like_unverified_faraid_share
+
+    assert _looks_like_unverified_faraid_share("") is False

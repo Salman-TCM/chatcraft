@@ -62,6 +62,44 @@ async def _download_bytes(url: str) -> bytes:
         return resp.content
 
 
+# Legacy Bengali word processors (Bijoy Classic, SutonnyMJ, and similar
+# pre-Unicode fonts) don't use real Bengali code points — they remap Bengali
+# glyphs onto ordinary Latin-1/Windows-1252 slots. Extracted text from a PDF
+# built with one of these fonts therefore comes out as this exact byte
+# sequence, which happens to be near-valid Windows-1252 text, not Bengali
+# Unicode. `‡` (U+2021) and `†` (U+2020) are the glyph slots these fonts use
+# for the extremely common e-kar/o-kar vowel signs, so they show up densely
+# in converted text and essentially never in genuine English or already-
+# correct Unicode Bengali — that density is what we use to detect it.
+_BIJOY_SIGNAL_CHARS = "‡†"
+_BIJOY_SIGNAL_THRESHOLD = 0.01
+
+
+def _looks_like_bijoy_encoded(text: str) -> bool:
+    if not text:
+        return False
+    signal_count = sum(text.count(c) for c in _BIJOY_SIGNAL_CHARS)
+    return (signal_count / len(text)) > _BIJOY_SIGNAL_THRESHOLD
+
+
+def _fix_legacy_bengali_encoding(text: str) -> str:
+    """Re-decode legacy Bijoy/SutonnyMJ-encoded text into real Bengali Unicode.
+
+    Safe to call on any extracted text: it only rewrites text that matches
+    the Bijoy signal above, and leaves normal English/Unicode text alone.
+    """
+    if not _looks_like_bijoy_encoded(text):
+        return text
+    try:
+        from bijoy2unicode.converter import Unicode as _BijoyConverter
+
+        converted = _BijoyConverter().convertBijoyToUnicode(text)
+    except Exception as exc:
+        logger.warning(f"Bijoy-to-Unicode conversion failed: {exc!r}, keeping original text")
+        return text
+    return converted or text
+
+
 def extract_pdf(data: bytes) -> str:
     """pdfplumber first; fall back to PyMuPDF if extraction is empty."""
     import pdfplumber
@@ -75,7 +113,7 @@ def extract_pdf(data: bytes) -> str:
                     text_parts.append(t)
         text = "\n\n".join(text_parts).strip()
         if text:
-            return text
+            return _fix_legacy_bengali_encoding(text)
     except Exception as exc:
         logger.warning(f"pdfplumber failed: {exc!r}, trying PyMuPDF")
 
@@ -85,7 +123,7 @@ def extract_pdf(data: bytes) -> str:
     doc = fitz.open(stream=data, filetype="pdf")
     for page in doc:
         text_parts.append(page.get_text())
-    return "\n\n".join(text_parts).strip()
+    return _fix_legacy_bengali_encoding("\n\n".join(text_parts).strip())
 
 
 def extract_docx(data: bytes) -> str:
@@ -93,16 +131,16 @@ def extract_docx(data: bytes) -> str:
 
     doc = Document(io.BytesIO(data))
     paragraphs = [p.text for p in doc.paragraphs if p.text.strip()]
-    return "\n\n".join(paragraphs)
+    return _fix_legacy_bengali_encoding("\n\n".join(paragraphs))
 
 
 def extract_txt(data: bytes) -> str:
     for enc in ("utf-8", "latin-1", "cp1252"):
         try:
-            return data.decode(enc)
+            return _fix_legacy_bengali_encoding(data.decode(enc))
         except UnicodeDecodeError:
             continue
-    return data.decode("utf-8", errors="replace")
+    return _fix_legacy_bengali_encoding(data.decode("utf-8", errors="replace"))
 
 
 async def extract_url(url: str) -> str:
