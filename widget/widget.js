@@ -5,8 +5,8 @@
  * Attributes:
  *   data-chatbot-id      (required) chatbot UUID
  *   data-widget-token    (required) embed token
- *   data-type            launcher | iframe | voice   (default: launcher)
- *   data-position        bottom-right | bottom-left | top-right | top-left
+ *   data-type            launcher | bubble | iframe | voice | voice-launcher   (default: launcher)
+ *   data-position        bottom-right | bottom-left | top-right | top-left | center-left | center-right
  *   data-api-base        API base URL (default: https://api.chatcraft.ai)
  *   data-app-base        App base URL (default: https://app.chatcraft.ai)
  *   data-hide-header     true — hide chat header in launcher
@@ -29,7 +29,14 @@
 
   var CHATBOT_ID   = currentScript.getAttribute("data-chatbot-id");
   var WIDGET_TOKEN = currentScript.getAttribute("data-widget-token");
-  var TYPE         = currentScript.getAttribute("data-type") || "launcher";
+  var AGENT_TOKEN  = currentScript.getAttribute("data-agent-token");
+  // "bubble" and "voice-launcher" are aliases from the agent embed code generator
+  var TYPE         = (function () {
+    var t = currentScript.getAttribute("data-type") || "launcher";
+    if (t === "bubble")         return "launcher";
+    if (t === "voice-launcher") return "voice";
+    return t;
+  })();
   var POSITION     = currentScript.getAttribute("data-position") || "bottom-right";
   var API_BASE     = currentScript.getAttribute("data-api-base") || "https://api.chatcraft.ai";
   var APP_BASE     = currentScript.getAttribute("data-app-base") || "https://app.chatcraft.ai";
@@ -37,8 +44,11 @@
   var THEME_OVERRIDE    = currentScript.getAttribute("data-theme") || "";
   var COLOR_OVERRIDE    = currentScript.getAttribute("data-primary-color") || "";
 
-  if (!CHATBOT_ID || !WIDGET_TOKEN) {
-    console.warn("[ChatCraft] Missing data-chatbot-id or data-widget-token.");
+  // Agent mode: driven by data-agent-token (share token from the Agent Builder)
+  var AGENT_MODE = !!AGENT_TOKEN && !CHATBOT_ID;
+
+  if (!AGENT_MODE && (!CHATBOT_ID || !WIDGET_TOKEN)) {
+    console.warn("[ChatCraft] Provide either data-agent-token, or both data-chatbot-id and data-widget-token.");
     return;
   }
 
@@ -104,18 +114,46 @@
       "bottom-left":  "bottom:20px;left:20px;",
       "top-right":    "top:20px;right:20px;",
       "top-left":     "top:20px;left:20px;",
+      // 28px = half the 56px bubble — keeps the bubble visually centred on the mid-line
+      "center-right": "top:calc(50% - 28px);right:20px;",
+      "center-left":  "top:calc(50% - 28px);left:20px;",
     };
     return map[pos] || map["bottom-right"];
   }
 
-  function panelPositionCSS(pos) {
+  // heightHalf: half the panel height in px (270 for chat, 290 for voice)
+  function panelPositionCSS(pos, heightHalf) {
+    heightHalf = heightHalf || 270;
+    // 86px = 20px (edge gap) + 56px (bubble) + 10px (clearance)
     var map = {
       "bottom-right": "bottom:80px;right:20px;",
       "bottom-left":  "bottom:80px;left:20px;",
       "top-right":    "top:80px;right:20px;",
       "top-left":     "top:80px;left:20px;",
+      "center-right": "top:calc(50% - " + heightHalf + "px);right:86px;",
+      "center-left":  "top:calc(50% - " + heightHalf + "px);left:86px;",
     };
     return map[pos] || map["bottom-right"];
+  }
+
+  // transform-origin for the panel scale animation
+  function panelTransformOrigin(pos) {
+    var map = {
+      "bottom-right": "bottom right",
+      "bottom-left":  "bottom left",
+      "top-right":    "top right",
+      "top-left":     "top left",
+      "center-right": "center right",
+      "center-left":  "center left",
+    };
+    return map[pos] || "bottom right";
+  }
+
+  // closed-state transform: slide in from the edge the panel sits next to
+  function panelClosedTransform(pos) {
+    if (pos === "center-right") return "scale(.95) translateX(8px)";
+    if (pos === "center-left")  return "scale(.95) translateX(-8px)";
+    return "scale(.95) translateY(8px)";
   }
 
   function _escape(str) {
@@ -133,6 +171,35 @@
     xhr.onload = function () {
       if (xhr.status === 200) {
         try { cb(null, JSON.parse(xhr.responseText).data); } catch (e) { cb(e); }
+      } else {
+        cb(new Error("HTTP " + xhr.status));
+      }
+    };
+    xhr.onerror = function () { cb(new Error("Network error")); };
+    xhr.send();
+  }
+
+  // Fetch public agent info and normalise to the same cfg shape buildWidget expects
+  function fetchAgentConfig(cb) {
+    var xhr = new XMLHttpRequest();
+    xhr.open("GET", API_BASE + "/api/public/agents/" + AGENT_TOKEN);
+    xhr.onload = function () {
+      if (xhr.status === 200) {
+        try {
+          var d = JSON.parse(xhr.responseText).data;
+          cb(null, {
+            name:              d.name             || "Agent",
+            primary_colour:    COLOR_OVERRIDE     || d.primary_colour  || "#6366f1",
+            dark_mode:         d.dark_mode        || false,
+            background_colour: d.dark_mode ? "#18181b" : "#ffffff",
+            bubble_style:      d.bubble_style     || "rounded",
+            font_family:       d.font_family      || "system-ui",
+            placeholder_text:  d.placeholder_text || "Type a message…",
+            logo_url:          d.logo_url         || null,
+            show_branding:     d.show_branding     != null ? d.show_branding : false,
+            welcome_message:   d.welcome_message  || "",
+          });
+        } catch (e) { cb(e); }
       } else {
         cb(new Error("HTTP " + xhr.status));
       }
@@ -160,7 +227,7 @@
       "  align-items:center;justify-content:center;box-shadow:0 4px 16px rgba(0,0,0,.2);",
       "  transition:transform .15s ease; }",
       "#vbubble:hover { transform:scale(1.08); }",
-      "#vframe { position:fixed;" + panelPositionCSS(POSITION),
+      "#vframe { position:fixed;" + panelPositionCSS(POSITION, 290),
       "  width:360px;height:580px;border:none;border-radius:16px;",
       "  box-shadow:0 8px 32px rgba(0,0,0,.15);display:none;z-index:2147483646; }",
       "</style>",
@@ -191,7 +258,9 @@
   }
 
   // ── launcher mode (default) ────────────────────────────────────────────────
-  function buildWidget(cfg) {
+  // opts.mode: "chatbot" | "agent"
+  function buildWidget(cfg, opts) {
+    opts = opts || { mode: "chatbot" };
     var primaryColor = COLOR_OVERRIDE || cfg.primary_colour;
     var isDark = THEME_OVERRIDE === "dark" || (!THEME_OVERRIDE && cfg.dark_mode);
     var bg         = isDark ? "#18181b" : (cfg.background_colour || "#ffffff");
@@ -218,12 +287,12 @@
       "  transition:transform .15s ease, box-shadow .15s ease; }",
       "#bubble:hover { transform:scale(1.07); box-shadow:0 6px 20px rgba(0,0,0,.25); }",
 
-      "#panel { position:fixed; " + panelPositionCSS(POSITION),
+      "#panel { position:fixed; " + panelPositionCSS(POSITION, 270),
       "  width:360px; height:540px; background:" + bg + "; border:1px solid " + borderColor + ";",
       "  border-radius:16px; box-shadow:0 8px 32px rgba(0,0,0,.15); display:flex; flex-direction:column;",
-      "  overflow:hidden; transform-origin:bottom right; transition:opacity .2s ease, transform .2s ease;",
-      "  opacity:0; transform:scale(.95) translateY(8px); pointer-events:none; }",
-      "#panel.open { opacity:1; transform:scale(1) translateY(0); pointer-events:all; }",
+      "  overflow:hidden; transform-origin:" + panelTransformOrigin(POSITION) + "; transition:opacity .2s ease, transform .2s ease;",
+      "  opacity:0; transform:" + panelClosedTransform(POSITION) + "; pointer-events:none; }",
+      "#panel.open { opacity:1; transform:scale(1); pointer-events:all; }",
 
       (HIDE_HEADER ? "#header { display:none; }" :
         "#header { background:" + primaryColor + "; padding:12px 14px; display:flex; align-items:center; gap:10px; }"),
@@ -317,6 +386,8 @@
     var isOpen = false;
     var isStreaming = false;
     var capReached = false;
+    // Agent mode: keep full conversation history for multi-turn context
+    var agentHistory = [];
 
     function chatIcon() {
       return '<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>';
@@ -351,68 +422,130 @@
       sendBtn.disabled = true;
 
       var xhr = new XMLHttpRequest();
-      xhr.open("POST", API_BASE + "/api/widget/" + CHATBOT_ID + "/chat");
-      xhr.setRequestHeader("Content-Type", "application/json");
-      xhr.setRequestHeader("X-Widget-Token", WIDGET_TOKEN);
-      xhr.setRequestHeader("X-Guest-ID", guestId());
-
       var buffer = "", botContent = "", botEl = null;
 
-      xhr.onreadystatechange = function () {
-        if (xhr.readyState < 3) return;
+      if (opts.mode === "agent") {
+        // ── Agent mode ────────────────────────────────────────────────────────
+        var historySnapshot = agentHistory.slice(); // snapshot before pushing user turn
+        agentHistory.push({ role: "user", content: text });
 
-        if (xhr.status === 429) {
-          typingEl.parentNode && typingEl.parentNode.removeChild(typingEl);
-          showCapNotice();
-          isStreaming = false;
-          sendBtn.disabled = false;
-          return;
-        }
+        xhr.open("POST", API_BASE + "/api/public/agents/" + AGENT_TOKEN + "/chat");
+        xhr.setRequestHeader("Content-Type", "application/json");
 
-        if (xhr.status >= 400) {
-          typingEl.className = "msg bot";
-          try {
-            var errBody = JSON.parse(xhr.responseText);
-            typingEl.textContent = "⚠️ " + (errBody.detail && errBody.detail.error ? errBody.detail.error : "Something went wrong.");
-          } catch (_) {
-            typingEl.textContent = "⚠️ Something went wrong. Please try again.";
+        xhr.onreadystatechange = function () {
+          if (xhr.readyState < 3) return;
+
+          if (xhr.status === 429) {
+            typingEl.parentNode && typingEl.parentNode.removeChild(typingEl);
+            showCapNotice();
+            isStreaming = false; sendBtn.disabled = false;
+            return;
           }
-          isStreaming = false;
-          sendBtn.disabled = false;
-          return;
-        }
+          if (xhr.status >= 400) {
+            typingEl.className = "msg bot";
+            typingEl.textContent = "⚠️ Something went wrong. Please try again.";
+            isStreaming = false; sendBtn.disabled = false;
+            return;
+          }
 
-        var newChunk = xhr.responseText.slice(buffer.length);
-        buffer = xhr.responseText;
+          var newChunk = xhr.responseText.slice(buffer.length);
+          buffer = xhr.responseText;
+          var parts = newChunk.split("\n\n");
+          for (var i = 0; i < parts.length; i++) {
+            var part = parts[i].trim();
+            if (!part) continue;
+            var line = part.startsWith("data: ") ? part.slice(6) : part;
+            try {
+              var ev = JSON.parse(line);
+              if (ev.type === "text") {
+                // First text chunk: replace typing indicator
+                if (!botEl) { typingEl.className = "msg bot"; typingEl.textContent = ""; botEl = typingEl; }
+                botContent += ev.content;
+                botEl.textContent = botContent;
+                scrollToBottom();
+              } else if (ev.type === "tool_call") {
+                // Show a subtle "thinking" state while tool runs
+                if (!botEl) { typingEl.className = "msg bot typing"; botEl = typingEl; }
+                botEl.textContent = "⏳ Using " + ev.tool + "…";
+              } else if (ev.type === "tool_result") {
+                // Clear thinking indicator; next "text" event will fill real content
+                botContent = "";
+                if (botEl) botEl.textContent = "…";
+              } else if (ev.type === "error") {
+                if (!botEl) { typingEl.className = "msg bot"; botEl = typingEl; }
+                botEl.textContent = "⚠️ " + (ev.content || "Error");
+              }
+            } catch (_) {}
+          }
 
-        var parts = newChunk.split("\n\n");
-        for (var i = 0; i < parts.length; i++) {
-          var part = parts[i].trim();
-          if (!part) continue;
-          var line = part.startsWith("data: ") ? part.slice(6) : part;
-          try {
-            var ev = JSON.parse(line);
-            if (ev.type === "delta") {
-              if (!botEl) { typingEl.className = "msg bot"; typingEl.textContent = ""; botEl = typingEl; }
-              botContent += ev.content;
-              botEl.textContent = botContent;
-              scrollToBottom();
-            } else if (ev.type === "done") {
-              if (ev.conversation_id) convId(ev.conversation_id);
-            } else if (ev.type === "error") {
-              if (botEl) botEl.textContent = "⚠️ " + ev.error;
+          if (xhr.readyState === 4) {
+            // Persist assistant turn in history for future context
+            if (botContent) agentHistory.push({ role: "assistant", content: botContent });
+            isStreaming = false; sendBtn.disabled = false;
+            scrollToBottom();
+          }
+        };
+
+        xhr.send(JSON.stringify({ message: text, conversation_history: historySnapshot }));
+
+      } else {
+        // ── Chatbot mode ──────────────────────────────────────────────────────
+        xhr.open("POST", API_BASE + "/api/widget/" + CHATBOT_ID + "/chat");
+        xhr.setRequestHeader("Content-Type", "application/json");
+        xhr.setRequestHeader("X-Widget-Token", WIDGET_TOKEN);
+        xhr.setRequestHeader("X-Guest-ID", guestId());
+
+        xhr.onreadystatechange = function () {
+          if (xhr.readyState < 3) return;
+
+          if (xhr.status === 429) {
+            typingEl.parentNode && typingEl.parentNode.removeChild(typingEl);
+            showCapNotice();
+            isStreaming = false; sendBtn.disabled = false;
+            return;
+          }
+          if (xhr.status >= 400) {
+            typingEl.className = "msg bot";
+            try {
+              var errBody = JSON.parse(xhr.responseText);
+              typingEl.textContent = "⚠️ " + (errBody.detail && errBody.detail.error ? errBody.detail.error : "Something went wrong.");
+            } catch (_) {
+              typingEl.textContent = "⚠️ Something went wrong. Please try again.";
             }
-          } catch (_) {}
-        }
+            isStreaming = false; sendBtn.disabled = false;
+            return;
+          }
 
-        if (xhr.readyState === 4) {
-          isStreaming = false;
-          sendBtn.disabled = false;
-          scrollToBottom();
-        }
-      };
+          var newChunk = xhr.responseText.slice(buffer.length);
+          buffer = xhr.responseText;
+          var parts = newChunk.split("\n\n");
+          for (var i = 0; i < parts.length; i++) {
+            var part = parts[i].trim();
+            if (!part) continue;
+            var line = part.startsWith("data: ") ? part.slice(6) : part;
+            try {
+              var ev = JSON.parse(line);
+              if (ev.type === "delta") {
+                if (!botEl) { typingEl.className = "msg bot"; typingEl.textContent = ""; botEl = typingEl; }
+                botContent += ev.content;
+                botEl.textContent = botContent;
+                scrollToBottom();
+              } else if (ev.type === "done") {
+                if (ev.conversation_id) convId(ev.conversation_id);
+              } else if (ev.type === "error") {
+                if (botEl) botEl.textContent = "⚠️ " + ev.error;
+              }
+            } catch (_) {}
+          }
 
-      xhr.send(JSON.stringify({ message: text, conversation_id: convId() }));
+          if (xhr.readyState === 4) {
+            isStreaming = false; sendBtn.disabled = false;
+            scrollToBottom();
+          }
+        };
+
+        xhr.send(JSON.stringify({ message: text, conversation_id: convId() }));
+      }
     }
 
     function appendMessage(cls, text) {
@@ -443,7 +576,16 @@
 
   // ── Init ───────────────────────────────────────────────────────────────────
   function init() {
-    if (TYPE === "voice") {
+    if (AGENT_MODE) {
+      fetchAgentConfig(function (err, cfg) {
+        if (err) { console.warn("[ChatCraft] Failed to load agent config:", err); return; }
+        if (TYPE === "voice") {
+          buildVoiceLauncher(cfg);
+        } else {
+          buildWidget(cfg, { mode: "agent" });
+        }
+      });
+    } else if (TYPE === "voice") {
       fetchConfig(function (err, cfg) {
         if (err) { console.warn("[ChatCraft] Failed to load config:", err); return; }
         buildVoiceLauncher(cfg);
@@ -451,7 +593,7 @@
     } else {
       fetchConfig(function (err, cfg) {
         if (err) { console.warn("[ChatCraft] Failed to load config:", err); return; }
-        buildWidget(cfg);
+        buildWidget(cfg, { mode: "chatbot" });
       });
     }
   }
