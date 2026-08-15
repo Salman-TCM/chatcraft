@@ -7,7 +7,7 @@ import {
   ArrowLeft, Save, Loader2, Check, Settings,
   Brain, Zap, Terminal, Webhook, Plug, ChevronDown,
   ChevronUp, RefreshCw, Trash2, Plus, ExternalLink,
-  AlertCircle, Globe, Wrench, Sparkles, BookOpen, MessageSquare,
+  AlertCircle, Globe, Wrench, Sparkles, BookOpen, MessageSquare, Palette,
 } from "lucide-react";
 import { TestChatDrawer } from "./TestChatDrawer";
 import { Button } from "@/components/ui/button";
@@ -247,6 +247,14 @@ export default function ConfigureAgentPage() {
     welcome_message: "",
     suggestions_enabled: false,
     tools: {} as Record<string, boolean>,
+    // Design
+    primary_colour: "#6366f1",
+    logo_url: "",
+    dark_mode: false,
+    show_branding: true,
+    font_family: "system-ui",
+    bubble_style: "rounded",
+    placeholder_text: "",
   });
 
   const isSelfHostedModel = form.model.startsWith(SELF_HOSTED_PREFIX);
@@ -267,6 +275,13 @@ export default function ConfigureAgentPage() {
         welcome_message: d.welcome_message || "",
         suggestions_enabled: d.suggestions_enabled || false,
         tools: d.tools || {},
+        primary_colour: d.primary_colour || "#6366f1",
+        logo_url: d.logo_url || "",
+        dark_mode: d.dark_mode || false,
+        show_branding: d.show_branding ?? true,
+        font_family: d.font_family || "system-ui",
+        bubble_style: d.bubble_style || "rounded",
+        placeholder_text: d.placeholder_text || "",
       });
     } catch {
       router.push("/dashboard/agents");
@@ -308,6 +323,13 @@ export default function ConfigureAgentPage() {
         welcome_message: form.welcome_message.trim() || null,
         suggestions_enabled: form.suggestions_enabled,
         tools: form.tools,
+        primary_colour: form.primary_colour || "#6366f1",
+        logo_url: form.logo_url.trim() || null,
+        dark_mode: form.dark_mode,
+        show_branding: form.show_branding,
+        font_family: form.font_family || "system-ui",
+        bubble_style: form.bubble_style || "rounded",
+        placeholder_text: form.placeholder_text.trim() || null,
       });
       setSaved(true);
       setTimeout(() => setSaved(false), 2500);
@@ -433,6 +455,11 @@ export default function ConfigureAgentPage() {
               {activeMcpCount > 0 && (
                 <Badge className="ml-1.5 text-[9px] px-1.5 py-0 h-4 bg-emerald-500">{activeMcpCount}</Badge>
               )}
+            </TabsTrigger>
+            <TabsTrigger value="design"    className="flex-1 text-xs sm:text-sm py-2 rounded-lg data-[state=active]:bg-background data-[state=active]:shadow-sm">
+              <Palette className="h-3.5 w-3.5 mr-1.5 shrink-0" />
+              <span className="hidden sm:inline">Design</span>
+              <span className="sm:hidden">🎨</span>
             </TabsTrigger>
             <TabsTrigger value="advanced"  className="flex-1 text-xs sm:text-sm py-2 rounded-lg data-[state=active]:bg-background data-[state=active]:shadow-sm">
               <Webhook className="h-3.5 w-3.5 mr-1.5 shrink-0" />
@@ -744,6 +771,173 @@ export default function ConfigureAgentPage() {
                 </p>
               </div>
             )}
+          </TabsContent>
+
+          {/* ── Design ──────────────────────────────────────────────────────── */}
+          <TabsContent value="design" className="space-y-5">
+            <SectionHeader
+              icon={<Palette className="h-4 w-4" />}
+              title="Design & Branding"
+              description="Customise colours, fonts, and appearance for your public agent page and widget"
+            />
+
+            <div className="space-y-4">
+              {/* Primary colour */}
+              <div className="space-y-1.5">
+                <Label>Primary Colour</Label>
+                <div className="flex items-center gap-3">
+                  <div className="relative h-9 w-9 shrink-0 rounded-lg border overflow-hidden cursor-pointer">
+                    <input
+                      type="color"
+                      value={form.primary_colour}
+                      onChange={e => set("primary_colour", e.target.value)}
+                      className="absolute inset-0 w-full h-full cursor-pointer opacity-0"
+                    />
+                    <div className="w-full h-full rounded-lg" style={{ backgroundColor: form.primary_colour }} />
+                  </div>
+                  <input
+                    type="text"
+                    value={form.primary_colour}
+                    onChange={e => set("primary_colour", e.target.value)}
+                    placeholder="#6366f1"
+                    maxLength={7}
+                    className="flex-1 border rounded-md px-3 py-2 text-sm font-mono bg-background"
+                  />
+                </div>
+                <p className="text-xs text-muted-foreground">Used for the header, user messages, and send button.</p>
+              </div>
+
+              {/* Logo URL */}
+              <div className="space-y-1.5">
+                <Label>Logo URL</Label>
+                <div className="flex items-center gap-3">
+                  {form.logo_url && (
+                    <img src={form.logo_url} alt="logo preview"
+                         className="h-9 w-9 rounded-lg object-cover shrink-0 border"
+                         onError={e => (e.currentTarget.style.display = "none")} />
+                  )}
+                  <input
+                    type="url"
+                    value={form.logo_url}
+                    onChange={e => set("logo_url", e.target.value)}
+                    placeholder="https://example.com/logo.png"
+                    className="flex-1 border rounded-md px-3 py-2 text-sm font-mono bg-background"
+                  />
+                </div>
+                <p className="text-xs text-muted-foreground">Shown in the chat header. Leave blank to use the bot icon.</p>
+              </div>
+
+              {/* Font family */}
+              <div className="space-y-1.5">
+                <Label>Font</Label>
+                <Select value={form.font_family} onValueChange={v => set("font_family", v)}>
+                  <SelectTrigger className="text-sm">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {["system-ui", "Inter", "Roboto", "Open Sans", "Lato", "Poppins", "Georgia", "monospace"].map(f => (
+                      <SelectItem key={f} value={f} className="text-sm" style={{ fontFamily: f }}>{f}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              {/* Bubble style */}
+              <div className="space-y-1.5">
+                <Label>Message Bubble Style</Label>
+                <div className="grid grid-cols-3 gap-2">
+                  {[
+                    { key: "rounded", label: "Rounded", style: "12px" },
+                    { key: "pill",    label: "Pill",    style: "9999px" },
+                    { key: "square",  label: "Square",  style: "4px" },
+                  ].map(({ key, label, style }) => (
+                    <button
+                      key={key}
+                      type="button"
+                      onClick={() => set("bubble_style", key)}
+                      className={`border rounded-lg p-3 flex flex-col items-center gap-2 transition-all ${
+                        form.bubble_style === key
+                          ? "border-primary bg-primary/5"
+                          : "border-border hover:border-muted-foreground/30"
+                      }`}
+                    >
+                      <div className="px-3 py-1.5 text-xs font-medium text-white"
+                           style={{ backgroundColor: form.primary_colour, borderRadius: style }}>
+                        Hello
+                      </div>
+                      <span className="text-xs font-medium">{label}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Placeholder text */}
+              <div className="space-y-1.5">
+                <Label>Input Placeholder</Label>
+                <input
+                  type="text"
+                  value={form.placeholder_text}
+                  onChange={e => set("placeholder_text", e.target.value)}
+                  placeholder="Type a message…"
+                  maxLength={200}
+                  className="w-full border rounded-md px-3 py-2 text-sm bg-background"
+                />
+              </div>
+
+              {/* Dark mode */}
+              <div className="flex items-center justify-between rounded-xl border p-4">
+                <div>
+                  <p className="text-sm font-medium">Dark Mode</p>
+                  <p className="text-xs text-muted-foreground mt-0.5">Use a dark background on the public chat page</p>
+                </div>
+                <Switch checked={form.dark_mode} onCheckedChange={v => set("dark_mode", v)} />
+              </div>
+
+              {/* Show branding */}
+              <div className="flex items-center justify-between rounded-xl border p-4">
+                <div>
+                  <p className="text-sm font-medium">Show "Powered by" Branding</p>
+                  <p className="text-xs text-muted-foreground mt-0.5">Display a small footer link on the public page</p>
+                </div>
+                <Switch checked={form.show_branding} onCheckedChange={v => set("show_branding", v)} />
+              </div>
+
+              {/* Live preview strip */}
+              <div className="rounded-xl border overflow-hidden">
+                <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider px-4 pt-3 pb-2">Preview</p>
+                <div className="p-4 space-y-2" style={{ backgroundColor: form.dark_mode ? "#18181b" : "#f4f4f5", fontFamily: form.font_family }}>
+                  {/* Bot bubble */}
+                  <div className="flex justify-start">
+                    <div className="px-3 py-2 text-xs max-w-[70%]"
+                         style={{
+                           backgroundColor: form.dark_mode ? "#27272a" : "#ffffff",
+                           color: form.dark_mode ? "#f4f4f5" : "#09090b",
+                           borderRadius: form.bubble_style === "pill" ? "9999px" : form.bubble_style === "square" ? "4px" : "12px",
+                           borderBottomLeftRadius: "2px",
+                         }}>
+                      Hi! How can I help you today?
+                    </div>
+                  </div>
+                  {/* User bubble */}
+                  <div className="flex justify-end">
+                    <div className="px-3 py-2 text-xs max-w-[70%]"
+                         style={{
+                           backgroundColor: form.primary_colour,
+                           color: (() => {
+                             const c = form.primary_colour.replace("#", "");
+                             if (c.length < 6) return "#fff";
+                             const r = parseInt(c.slice(0,2),16), g = parseInt(c.slice(2,4),16), b = parseInt(c.slice(4,6),16);
+                             return (0.299*r + 0.587*g + 0.114*b)/255 > 0.55 ? "#09090b" : "#ffffff";
+                           })(),
+                           borderRadius: form.bubble_style === "pill" ? "9999px" : form.bubble_style === "square" ? "4px" : "12px",
+                           borderBottomRightRadius: "2px",
+                         }}>
+                      {form.placeholder_text || "Type a message…"}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
           </TabsContent>
 
           {/* ── Advanced ────────────────────────────────────────────────────── */}
