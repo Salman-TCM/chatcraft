@@ -1,12 +1,13 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { Check, Copy, ThumbsDown, ThumbsUp } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { apiClient } from "@/lib/api";
-import { AudioPlayer } from "./audio-player";
+import { MarkdownContent } from "./markdown-content";
 import { RichContent, parseRichContent } from "./rich-content";
+import { TtsPlayer } from "./tts-player";
 import type { ChatMessage } from "./types";
 
 interface MessageBubbleProps {
@@ -93,7 +94,7 @@ export function MessageBubble({
                 : "bg-muted text-foreground rounded-tl-sm"
             )}
           >
-            {displayText}
+            {isUser ? displayText : <MarkdownContent content={displayText} />}
             {message.isStreaming && (
               <span className="ml-0.5 inline-block h-4 w-0.5 animate-pulse bg-current opacity-70" />
             )}
@@ -131,6 +132,7 @@ export function MessageBubble({
             apiBase={apiBase}
             accessToken={accessToken}
             autoPlay={autoPlayTts}
+            className="mt-1"
           />
         )}
 
@@ -203,59 +205,3 @@ function extractYouTubeIds(text: string): string[] {
   return ids;
 }
 
-// ── TTS Player sub-component ──────────────────────────────────────────────────
-
-function TtsPlayer({
-  text,
-  apiBase,
-  accessToken,
-  autoPlay,
-}: {
-  text: string;
-  apiBase: string;
-  accessToken?: string | null;
-  autoPlay: boolean;
-}) {
-  const [audioUrl, setAudioUrl] = useState<string | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [requested, setRequested] = useState(false);
-
-  // Auto-fetch on mount when autoPlay is enabled
-  useEffect(() => {
-    if (autoPlay && !requested) fetchAudio();
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
-
-  async function fetchAudio() {
-    if (loading || audioUrl) return;
-    setLoading(true);
-    setRequested(true);
-    try {
-      const headers: Record<string, string> = { "Content-Type": "application/json" };
-      if (accessToken) headers["Authorization"] = `Bearer ${accessToken}`;
-      const res = await fetch(`${apiBase}/api/voice/tts`, {
-        method: "POST",
-        headers,
-        body: JSON.stringify({ text, use_cache_url: false }),
-      });
-      if (!res.ok) return;
-      const blob = await res.blob();
-      setAudioUrl(URL.createObjectURL(blob));
-    } catch {}
-    finally { setLoading(false); }
-  }
-
-  if (!audioUrl && !loading) {
-    return (
-      <button
-        onClick={fetchAudio}
-        className="mt-1 text-[10px] text-muted-foreground hover:text-foreground underline-offset-2 hover:underline"
-      >
-        Listen
-      </button>
-    );
-  }
-  if (loading) {
-    return <p className="mt-1 text-[10px] text-muted-foreground">Generating audio…</p>;
-  }
-  return <AudioPlayer src={audioUrl!} autoPlay={autoPlay} className="mt-1 max-w-xs" />;
-}

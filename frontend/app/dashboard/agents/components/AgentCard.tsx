@@ -29,6 +29,8 @@ interface Agent {
   tools: Record<string, boolean>;
   instructions: string | null;
   webhook_url: string | null;
+  welcome_message: string | null;
+  suggestions_enabled: boolean;
   is_published: boolean;
   is_active: boolean;
   max_steps: number;

@@ -37,6 +37,8 @@ def process_document(self: EmbeddingTask, document_id: str) -> dict:
     6. Persist KnowledgeBaseChunk rows + update document counters
     7. Set status → ready  (or error on unrecoverable failure)
     """
+    from app.services.kb.embedder import NoEmbeddingProviderConfigured
+
     try:
         asyncio.run(_run_pipeline(document_id))
         return {"document_id": document_id, "status": "ready"}
@@ -48,6 +50,10 @@ def process_document(self: EmbeddingTask, document_id: str) -> dict:
         except Exception:
             pass
 
+        # A missing API key will never succeed on retry — fail immediately.
+        if isinstance(exc, NoEmbeddingProviderConfigured):
+            return {"document_id": document_id, "status": "error", "error": str(exc)}
+
         # Retry transient errors (network, rate limits)
         if self.request.retries < self.max_retries:
             raise self.retry(exc=exc, countdown=30 * (2**self.request.retries))
@@ -56,6 +62,7 @@ def process_document(self: EmbeddingTask, document_id: str) -> dict:
 
 async def _run_pipeline(document_id: str) -> None:
     from app.db.session import AsyncSessionLocal, engine
+    from app.models.chatbot_config import ChatbotConfig
     from app.models.knowledge_base import (
         DocumentStatus,
         KnowledgeBaseChunk,
@@ -63,8 +70,9 @@ async def _run_pipeline(document_id: str) -> None:
     )
     from app.services.kb.chunker import chunk_text
     from app.services.kb.cleaner import clean
-    from app.services.kb.embedder import embed_texts
+    from app.services.kb.embedder import embed_texts, resolve_embedding_provider
     from app.services.kb.extractor import extract_text_for_document
+    from app.services.llm.key_store import get_all_keys
 
     # Celery pre-forks workers. The module-level async engine's pool was created
     # in the parent process and holds connection refs bound to a different event
@@ -78,6 +86,10 @@ async def _run_pipeline(document_id: str) -> None:
         doc: KnowledgeBaseDocument | None = await db.get(KnowledgeBaseDocument, doc_uuid)
         if not doc:
             raise ValueError(f"Document {document_id} not found")
+
+        chatbot = await db.get(ChatbotConfig, doc.chatbot_id)
+        user_keys = await get_all_keys(chatbot.user_id, db) if chatbot else {}
+        embed_provider, embed_key = resolve_embedding_provider(user_keys)
 
         # ── 1. Mark as processing ─────────────────────────────────────────────
         doc.status = DocumentStatus.processing
@@ -108,7 +120,7 @@ async def _run_pipeline(document_id: str) -> None:
 
         # ── 5. Embed (batched) ────────────────────────────────────────────────
         texts = [c.content for c in chunks]
-        vectors = await embed_texts(texts)
+        vectors = await embed_texts(texts, embed_provider, embed_key)
 
         # ── 6. Persist chunks ─────────────────────────────────────────────────
         # Delete any stale chunks from a previous (failed) attempt
@@ -170,6 +182,8 @@ async def _mark_error(document_id: str, message: str) -> None:
 )
 def process_agent_document(self: EmbeddingTask, document_id: str) -> dict:
     """Same pipeline as process_document but for AgentKnowledgeDocument rows."""
+    from app.services.kb.embedder import NoEmbeddingProviderConfigured
+
     try:
         asyncio.run(_run_agent_pipeline(document_id))
         return {"document_id": document_id, "status": "ready"}
@@ -180,6 +194,9 @@ def process_agent_document(self: EmbeddingTask, document_id: str) -> dict:
         except Exception:
             pass
 
+        if isinstance(exc, NoEmbeddingProviderConfigured):
+            return {"document_id": document_id, "status": "error", "error": str(exc)}
+
         if self.request.retries < self.max_retries:
             raise self.retry(exc=exc, countdown=30 * (2**self.request.retries))
         return {"document_id": document_id, "status": "error", "error": str(exc)}
@@ -189,12 +206,14 @@ async def _run_agent_pipeline(document_id: str) -> None:
     from sqlalchemy import delete
 
     from app.db.session import AsyncSessionLocal, engine
+    from app.models.agent import Agent
     from app.models.agent_knowledge_base import AgentKnowledgeChunk, AgentKnowledgeDocument
     from app.models.knowledge_base import DocumentStatus
     from app.services.kb.chunker import chunk_text
     from app.services.kb.cleaner import clean
-    from app.services.kb.embedder import embed_texts
+    from app.services.kb.embedder import embed_texts, resolve_embedding_provider
     from app.services.kb.extractor import extract_text_for_document
+    from app.services.llm.key_store import get_all_keys
 
     await engine.dispose()  # See note in _run_pipeline about celery+asyncio pool
 
@@ -204,6 +223,10 @@ async def _run_agent_pipeline(document_id: str) -> None:
         doc: AgentKnowledgeDocument | None = await db.get(AgentKnowledgeDocument, doc_uuid)
         if not doc:
             raise ValueError(f"Agent document {document_id} not found")
+
+        agent = await db.get(Agent, doc.agent_id)
+        user_keys = await get_all_keys(agent.user_id, db) if agent else {}
+        embed_provider, embed_key = resolve_embedding_provider(user_keys)
 
         doc.status = DocumentStatus.processing
         doc.error_message = None
@@ -228,7 +251,7 @@ async def _run_agent_pipeline(document_id: str) -> None:
         logger.info(f"[AgentKB] Document {document_id} → {len(chunks)} chunks")
 
         texts = [c.content for c in chunks]
-        vectors = await embed_texts(texts)
+        vectors = await embed_texts(texts, embed_provider, embed_key)
 
         await db.execute(
             delete(AgentKnowledgeChunk).where(AgentKnowledgeChunk.document_id == doc_uuid)

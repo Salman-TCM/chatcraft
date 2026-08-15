@@ -7,7 +7,7 @@ import {
   Play, Loader2, Terminal, Code, Clock, Zap, AlertTriangle,
   Minimize2, Maximize2, PanelLeftClose, PanelLeftOpen,
   Check, X, ChevronDown, Globe, Search, FileText, Database,
-  Wrench, ChevronRight, Activity,
+  Wrench, ChevronRight, Activity, Paperclip,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -16,7 +16,21 @@ import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { apiClient } from "@/lib/api";
+import { getErrorMessage } from "@/lib/errors";
+import { toast } from "@/hooks/use-toast";
 import { getSession } from "next-auth/react";
+import { MarkdownContent } from "@/components/chat/markdown-content";
+import { TtsPlayer } from "@/components/chat/tts-player";
+import { VoiceRecorder } from "@/components/chat/voice-recorder";
+
+const ATTACHMENT_ACCEPT = ".pdf,.docx,.txt";
+const ATTACHMENT_MAX_BYTES = 10 * 1024 * 1024; // matches backend cap
+
+interface PendingAttachment {
+  filename: string;
+  text: string;
+  truncated: boolean;
+}
 
 interface Agent {
   id: string;
@@ -32,6 +46,7 @@ interface Agent {
 interface Message {
   role: "user" | "assistant" | "system" | "error";
   content: string;
+  attachmentName?: string;
   timestamp: Date;
 }
 
@@ -260,11 +275,22 @@ export default function AgentRunPage() {
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [expandedTools, setExpandedTools] = useState<Set<number>>(new Set());
 
+  const [accessToken, setAccessToken] = useState<string | null>(null);
+  const [pendingAttachment, setPendingAttachment] = useState<PendingAttachment | null>(null);
+  const [attachmentUploading, setAttachmentUploading] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const apiBase = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
 
   useEffect(() => { loadAgent(); }, [id]);
   useEffect(() => { messagesEndRef.current?.scrollIntoView({ behavior: "smooth" }); }, [messages]);
+  useEffect(() => {
+    getSession().then((session) => {
+      setAccessToken(session?.user?.accessToken ?? null);
+    });
+  }, []);
 
   const loadAgent = async () => {
     try {
@@ -274,6 +300,42 @@ export default function AgentRunPage() {
       router.push("/dashboard/agents");
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (file.size > ATTACHMENT_MAX_BYTES) {
+      toast({
+        variant: "destructive",
+        title: "File too large",
+        description: `${file.name} is ${(file.size / 1024 / 1024).toFixed(1)} MB — max 10 MB.`,
+      });
+      e.target.value = "";
+      return;
+    }
+    setAttachmentUploading(true);
+    const form = new FormData();
+    form.append("file", file);
+    try {
+      const { data } = await apiClient.post(`/api/v1/agents/${id}/attachments/extract`, form);
+      setPendingAttachment(data.data);
+      if (data.data.truncated) {
+        toast({
+          title: "File truncated",
+          description: `${file.name} was long, so only the first part will be sent as context.`,
+        });
+      }
+    } catch (err) {
+      toast({
+        variant: "destructive",
+        title: "Failed to read file",
+        description: getErrorMessage(err),
+      });
+    } finally {
+      setAttachmentUploading(false);
+      e.target.value = "";
     }
   };
 
@@ -301,8 +363,8 @@ export default function AgentRunPage() {
     setIsRunning(false);
   };
 
-  const addMessage = (role: Message["role"], content: string) => {
-    setMessages((prev) => [...prev, { role, content, timestamp: new Date() }]);
+  const addMessage = (role: Message["role"], content: string, attachmentName?: string) => {
+    setMessages((prev) => [...prev, { role, content, attachmentName, timestamp: new Date() }]);
   };
 
   const exportConversation = () => {
@@ -328,10 +390,18 @@ export default function AgentRunPage() {
     const userInput = input.trim();
     if (!userInput || isRunning || !agent) return;
 
+    const attachment = pendingAttachment;
+    const messageToSend = attachment
+      ? `${userInput}\n\n--- Attached file: ${attachment.filename}${
+          attachment.truncated ? " (truncated)" : ""
+        } ---\n${attachment.text}\n--- end attachment ---`
+      : userInput;
+
     setInput("");
+    setPendingAttachment(null);
     setIsRunning(true);
     setCurrentStep(0);
-    addMessage("user", userInput);
+    addMessage("user", userInput, attachment?.filename);
 
     let activeExecutionId = -1;
 
@@ -341,13 +411,12 @@ export default function AgentRunPage() {
       if (!token) { addMessage("error", "Authentication required. Please refresh the page."); return; }
 
       abortControllerRef.current = new AbortController();
-      const apiBase = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
       const response = await fetch(`${apiBase}/api/v1/agents/${id}/chat`, {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
         body: JSON.stringify({
-          message: userInput,
+          message: messageToSend,
           conversation_history: messages
             .filter((m) => m.role === "user" || m.role === "assistant")
             .map((m) => ({ role: m.role, content: m.content })),
@@ -545,8 +614,30 @@ export default function AgentRunPage() {
                         : "bg-muted"
                     }`}
                   >
-                    <div className="whitespace-pre-wrap text-sm">{message.content}</div>
-                    <div className="text-xs opacity-50 mt-2">{message.timestamp.toLocaleTimeString()}</div>
+                    {message.attachmentName && (
+                      <div className="flex items-center gap-1.5 text-xs opacity-75 mb-1.5">
+                        <Paperclip className="h-3 w-3" />
+                        <span className="truncate">{message.attachmentName}</span>
+                      </div>
+                    )}
+                    {message.role === "assistant" ? (
+                      <div className="text-sm">
+                        <MarkdownContent content={message.content} />
+                      </div>
+                    ) : (
+                      <div className="whitespace-pre-wrap text-sm">{message.content}</div>
+                    )}
+                    <div className="flex items-center gap-2 mt-2">
+                      <div className="text-xs opacity-50">{message.timestamp.toLocaleTimeString()}</div>
+                      {message.role === "assistant" && message.content && (
+                        <TtsPlayer
+                          text={message.content}
+                          apiBase={apiBase}
+                          accessToken={accessToken}
+                          className="text-xs opacity-70 hover:opacity-100"
+                        />
+                      )}
+                    </div>
                   </div>
                 </div>
               ))
@@ -568,7 +659,31 @@ export default function AgentRunPage() {
 
           {/* Input area */}
           <div className="border-t p-4 shrink-0">
+            {pendingAttachment && (
+              <div className="flex items-center gap-2 mb-2 rounded-md border bg-muted/40 px-2.5 py-1.5 text-xs w-fit max-w-full">
+                <Paperclip className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                <span className="truncate">{pendingAttachment.filename}</span>
+                {pendingAttachment.truncated && (
+                  <span className="text-muted-foreground shrink-0">(truncated)</span>
+                )}
+                <button
+                  onClick={() => setPendingAttachment(null)}
+                  className="text-muted-foreground hover:text-foreground shrink-0"
+                  title="Remove attachment"
+                >
+                  <X className="h-3.5 w-3.5" />
+                </button>
+              </div>
+            )}
+
             <div className="flex gap-2">
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept={ATTACHMENT_ACCEPT}
+                className="hidden"
+                onChange={handleFileSelect}
+              />
               <Textarea
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
@@ -579,6 +694,28 @@ export default function AgentRunPage() {
                 rows={1}
               />
               <div className="flex flex-col gap-2">
+                <div className="flex gap-1">
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-8 w-8"
+                    onClick={() => fileInputRef.current?.click()}
+                    disabled={isRunning || !agent.is_active || attachmentUploading}
+                    title="Attach a PDF, DOCX, or TXT file"
+                  >
+                    {attachmentUploading ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : (
+                      <Paperclip className="h-4 w-4" />
+                    )}
+                  </Button>
+                  <VoiceRecorder
+                    onTranscript={(text) => setInput((prev) => (prev ? `${prev} ${text}` : text))}
+                    onError={(msg) => toast({ variant: "destructive", title: "Voice input failed", description: msg })}
+                    accessToken={accessToken}
+                    disabled={isRunning || !agent.is_active}
+                  />
+                </div>
                 <Button
                   onClick={sendMessage}
                   disabled={!input.trim() || isRunning || !agent.is_active}

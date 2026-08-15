@@ -19,9 +19,10 @@ import {
   Globe, Code2, Link2, Mail, Smartphone, ShieldCheck, Bot,
   Loader2, Check, Brain, Zap, Settings, Plug,
   Webhook, RefreshCw, Trash2, Plus, ExternalLink,
-  AlertCircle, ChevronDown, ChevronUp, Wrench, Sheet, BookOpen,
+  AlertCircle, ChevronDown, ChevronUp, Wrench, Sheet, BookOpen, Scale,
 } from "lucide-react";
 import { apiClient } from "@/lib/api";
+import { AgentKnowledgeManager } from "./AgentKnowledgeManager";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -36,6 +37,8 @@ interface Agent {
   max_steps: number;
   is_active: boolean;
   webhook_url: string | null;
+  welcome_message: string | null;
+  suggestions_enabled: boolean;
 }
 
 interface MCPServer {
@@ -57,7 +60,10 @@ interface ProviderModels {
   label: string;
   available: boolean;
   models: { id: string; name: string; allowed?: boolean }[];
+  custom_model_input?: boolean;
 }
+
+const SELF_HOSTED_PREFIX = "self-hosted/";
 
 interface AgentConfigModalProps {
   agent: Agent;
@@ -81,6 +87,7 @@ const TOOLS: ToolConfig[] = [
   { key: "browser",      label: "Browser",        description: "Visit and extract content from web pages",    icon: Globe,       category: "research" },
   { key: "search_kb",    label: "Knowledge Base", description: "Search this agent's uploaded documents",      icon: BookOpen,    category: "research" },
   { key: "code",         label: "Code Execution", description: "Execute Python code for data processing",     icon: Code2,       category: "compute" },
+  { key: "faraid",       label: "Faraid Calculator", description: "Deterministic Islamic inheritance (Hanafi) share calculation", icon: Scale, category: "compute" },
   { key: "http",         label: "HTTP Requests",  description: "Make API calls to external services",         icon: Link2,       category: "integration" },
   { key: "sheets",       label: "Google Sheets",  description: "Read and write spreadsheet data",             icon: Sheet,       category: "integration" },
   { key: "email",        label: "Email",          description: "Send emails via configured service",          icon: Mail,        category: "communication" },
@@ -182,6 +189,8 @@ export function AgentConfigModal({ agent, open, onClose, onUpdate }: AgentConfig
     max_steps: agent.max_steps,
     is_active: agent.is_active,
     webhook_url: agent.webhook_url || "",
+    welcome_message: agent.welcome_message || "",
+    suggestions_enabled: agent.suggestions_enabled,
     tools: { ...agent.tools },
   });
   const [saving, setSaving]           = useState(false);
@@ -222,6 +231,8 @@ export function AgentConfigModal({ agent, open, onClose, onUpdate }: AgentConfig
         max_steps: agent.max_steps,
         is_active: agent.is_active,
         webhook_url: agent.webhook_url || "",
+        welcome_message: agent.welcome_message || "",
+        suggestions_enabled: agent.suggestions_enabled,
         tools: { ...agent.tools },
       });
       setErrors({});
@@ -256,6 +267,8 @@ export function AgentConfigModal({ agent, open, onClose, onUpdate }: AgentConfig
         max_steps: form.max_steps,
         is_active: form.is_active,
         webhook_url: form.webhook_url.trim() || null,
+        welcome_message: form.welcome_message.trim() || null,
+        suggestions_enabled: form.suggestions_enabled,
         tools: form.tools,
       });
       onUpdate(res.data.data);
@@ -315,6 +328,11 @@ export function AgentConfigModal({ agent, open, onClose, onUpdate }: AgentConfig
                 <Zap className="h-3.5 w-3.5 mr-1 shrink-0" />Tools
                 {enabledCount > 0 && <Badge className="ml-1 h-4 px-1 text-[9px]">{enabledCount}</Badge>}
               </TabsTrigger>
+              <TabsTrigger value="knowledge" className="flex-1 text-xs h-7 rounded-md data-[state=active]:bg-background data-[state=active]:shadow-sm">
+                <BookOpen className="h-3.5 w-3.5 mr-1 shrink-0" />
+                <span className="hidden sm:inline">Knowledge</span>
+                <span className="sm:hidden">KB</span>
+              </TabsTrigger>
               <TabsTrigger value="mcp"     className="flex-1 text-xs h-7 rounded-md data-[state=active]:bg-background data-[state=active]:shadow-sm">
                 <Plug className="h-3.5 w-3.5 mr-1 shrink-0" />MCP
                 {activeMcpCount > 0 && <Badge className="ml-1 h-4 px-1 text-[9px] bg-emerald-500">{activeMcpCount}</Badge>}
@@ -363,6 +381,21 @@ export function AgentConfigModal({ agent, open, onClose, onUpdate }: AgentConfig
                   rows={2}
                   className="text-sm resize-none"
                 />
+              </div>
+
+              <div className="space-y-1.5">
+                <Label className="text-xs">Welcome Message</Label>
+                <Textarea
+                  value={form.welcome_message}
+                  onChange={(e) => set("welcome_message", e.target.value)}
+                  placeholder="Hi! How can I help you today?"
+                  rows={2}
+                  maxLength={500}
+                  className="text-sm resize-none"
+                />
+                <p className="text-[11px] text-muted-foreground">
+                  Shown as the agent's first message when a chat starts.
+                </p>
               </div>
 
               <div className="space-y-1.5">
@@ -418,21 +451,29 @@ export function AgentConfigModal({ agent, open, onClose, onUpdate }: AgentConfig
                             <div className="px-2 py-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
                               {p.label}
                             </div>
-                            {p.models.map((m) => (
-                              <SelectItem
-                                key={m.id}
-                                value={m.id}
-                                disabled={m.allowed === false}
-                                className="text-sm"
-                              >
-                                {m.name}
-                                {m.allowed === false && (
-                                  <Badge variant="outline" className="ml-2 text-[10px] px-1 py-0">
-                                    Upgrade
-                                  </Badge>
-                                )}
-                              </SelectItem>
-                            ))}
+                            {p.custom_model_input ? (
+                              form.model.startsWith(SELF_HOSTED_PREFIX) && (
+                                <SelectItem value={form.model} className="text-sm font-mono">
+                                  {form.model.slice(SELF_HOSTED_PREFIX.length)}
+                                </SelectItem>
+                              )
+                            ) : (
+                              p.models.map((m) => (
+                                <SelectItem
+                                  key={m.id}
+                                  value={m.id}
+                                  disabled={m.allowed === false}
+                                  className="text-sm"
+                                >
+                                  {m.name}
+                                  {m.allowed === false && (
+                                    <Badge variant="outline" className="ml-2 text-[10px] px-1 py-0">
+                                      Upgrade
+                                    </Badge>
+                                  )}
+                                </SelectItem>
+                              ))
+                            )}
                           </div>
                         ))}
                     </SelectContent>
@@ -449,48 +490,58 @@ export function AgentConfigModal({ agent, open, onClose, onUpdate }: AgentConfig
                         <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-2">
                           {p.label}
                         </p>
-                        <div className="space-y-2">
-                          {p.models.map((m) => {
-                            const disabled = m.allowed === false;
-                            const selected = form.model === m.id;
-                            return (
-                              <button
-                                key={m.id}
-                                type="button"
-                                disabled={disabled}
-                                onClick={() => set("model", m.id)}
-                                className={`w-full flex items-center justify-between rounded-xl border px-4 py-3 text-left transition-colors ${
-                                  disabled
-                                    ? "opacity-50 cursor-not-allowed"
-                                    : selected
-                                    ? "border-primary bg-primary/5"
-                                    : "hover:bg-muted/40"
-                                }`}
-                              >
-                                <div className="min-w-0">
-                                  <p className={`text-sm font-medium truncate ${selected ? "text-primary" : ""}`}>
-                                    {m.name}
-                                  </p>
-                                  <p className="text-[10px] text-muted-foreground font-mono truncate">
-                                    {m.id}
-                                  </p>
-                                </div>
-                                <div className="flex items-center gap-2 shrink-0">
-                                  {disabled && (
-                                    <Badge variant="outline" className="text-[10px] px-1.5">
-                                      Upgrade
-                                    </Badge>
-                                  )}
-                                  <div className={`h-4 w-4 rounded-full border-2 flex items-center justify-center ${
-                                    selected ? "border-primary bg-primary" : "border-muted-foreground/30"
-                                  }`}>
-                                    {selected && <Check className="h-2.5 w-2.5 text-white" />}
+                        {p.custom_model_input ? (
+                          <Input
+                            type="text"
+                            placeholder="Model name on your server, e.g. llama3.1:8b"
+                            value={form.model.startsWith(SELF_HOSTED_PREFIX) ? form.model.slice(SELF_HOSTED_PREFIX.length) : ""}
+                            onChange={(e) => set("model", SELF_HOSTED_PREFIX + e.target.value)}
+                            className="text-sm font-mono"
+                          />
+                        ) : (
+                          <div className="space-y-2">
+                            {p.models.map((m) => {
+                              const disabled = m.allowed === false;
+                              const selected = form.model === m.id;
+                              return (
+                                <button
+                                  key={m.id}
+                                  type="button"
+                                  disabled={disabled}
+                                  onClick={() => set("model", m.id)}
+                                  className={`w-full flex items-center justify-between rounded-xl border px-4 py-3 text-left transition-colors ${
+                                    disabled
+                                      ? "opacity-50 cursor-not-allowed"
+                                      : selected
+                                      ? "border-primary bg-primary/5"
+                                      : "hover:bg-muted/40"
+                                  }`}
+                                >
+                                  <div className="min-w-0">
+                                    <p className={`text-sm font-medium truncate ${selected ? "text-primary" : ""}`}>
+                                      {m.name}
+                                    </p>
+                                    <p className="text-[10px] text-muted-foreground font-mono truncate">
+                                      {m.id}
+                                    </p>
                                   </div>
-                                </div>
-                              </button>
-                            );
-                          })}
-                        </div>
+                                  <div className="flex items-center gap-2 shrink-0">
+                                    {disabled && (
+                                      <Badge variant="outline" className="text-[10px] px-1.5">
+                                        Upgrade
+                                      </Badge>
+                                    )}
+                                    <div className={`h-4 w-4 rounded-full border-2 flex items-center justify-center ${
+                                      selected ? "border-primary bg-primary" : "border-muted-foreground/30"
+                                    }`}>
+                                      {selected && <Check className="h-2.5 w-2.5 text-white" />}
+                                    </div>
+                                  </div>
+                                </button>
+                              );
+                            })}
+                          </div>
+                        )}
                       </div>
                     ))}
                 </div>
@@ -515,6 +566,19 @@ export function AgentConfigModal({ agent, open, onClose, onUpdate }: AgentConfig
                   <p className="text-xs text-muted-foreground">Remember context across conversations</p>
                 </div>
                 <Switch checked={form.memory_enabled} onCheckedChange={(v) => set("memory_enabled", v)} />
+              </div>
+
+              <div className="flex items-center justify-between rounded-xl border p-3.5">
+                <div>
+                  <p className="text-sm font-medium">Suggested Reply Buttons</p>
+                  <p className="text-xs text-muted-foreground">
+                    After each response, show 3-4 tappable follow-up suggestions
+                  </p>
+                </div>
+                <Switch
+                  checked={form.suggestions_enabled}
+                  onCheckedChange={(v) => set("suggestions_enabled", v)}
+                />
               </div>
             </TabsContent>
 
@@ -560,6 +624,11 @@ export function AgentConfigModal({ agent, open, onClose, onUpdate }: AgentConfig
                   </div>
                 </div>
               ))}
+            </TabsContent>
+
+            {/* ── Knowledge ─────────────────────────────────────────────────── */}
+            <TabsContent value="knowledge" className="mt-0">
+              <AgentKnowledgeManager agentId={agent.id} showTestSearch={false} />
             </TabsContent>
 
             {/* ── MCP ───────────────────────────────────────────────────────── */}

@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { useParams } from "next/navigation";
 import { AlertCircle, Bot, Check, ChevronDown, ChevronUp, Loader2, Send, Zap } from "lucide-react";
 import { APP_NAME } from "@/lib/constants";
+import { MarkdownContent } from "@/components/chat/markdown-content";
 import { RichContent, parseRichContent } from "@/components/chat/rich-content";
 
 interface AgentDesign {
@@ -334,7 +335,11 @@ export default function PublicAgentPage() {
           return (
             <div key={i} className={`flex flex-col ${isUser ? "items-end" : "items-start"}`}>
               <div style={bubbleStyle}>
-                {rich ? rich.text : msg.content}
+                {msg.role === "assistant" ? (
+                  <MarkdownContent content={rich ? rich.text : msg.content} />
+                ) : (
+                  msg.content
+                )}
                 {msg.role === "assistant" && running && i === messages.length - 1 && (
                   <span className="inline-block w-1.5 h-4 animate-pulse ml-0.5 align-text-bottom rounded-sm"
                         style={{ backgroundColor: "currentColor" }} />

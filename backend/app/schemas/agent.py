@@ -23,6 +23,7 @@ class AgentToolsConfig(BaseModel):
     verification: bool = False
     agent_builder: bool = False
     search_kb: bool = False
+    faraid: bool = False
 
 
 _WEBHOOK_URL_RE = re.compile(r"^https?://[^\s]+$")
