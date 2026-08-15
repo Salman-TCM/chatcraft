@@ -166,6 +166,14 @@ async def get_public_agent(share_token: str, db: DBSession):
             "model": agent.model,
             "welcome_message": agent.welcome_message,
             "suggestions_enabled": agent.suggestions_enabled,
+            # Design fields
+            "primary_colour": getattr(agent, "primary_colour", "#6366f1") or "#6366f1",
+            "logo_url": getattr(agent, "logo_url", None),
+            "dark_mode": getattr(agent, "dark_mode", False),
+            "show_branding": getattr(agent, "show_branding", True),
+            "font_family": getattr(agent, "font_family", "system-ui") or "system-ui",
+            "bubble_style": getattr(agent, "bubble_style", "rounded") or "rounded",
+            "placeholder_text": getattr(agent, "placeholder_text", "Type a message…") or "Type a message…",
         },
     }
 
@@ -1607,6 +1615,26 @@ def _build_builtin_tools(tools_config: dict) -> list[dict]:
                             "type": "boolean",
                             "description": "Enable browser/URL tool",
                         },
+                        "tool_sheets": {
+                            "type": "boolean",
+                            "description": "Enable Google Sheets read/write tool",
+                        },
+                        "tool_verification": {
+                            "type": "boolean",
+                            "description": "Enable OTP send-and-verify tool (email/SMS)",
+                        },
+                        "tool_search_kb": {
+                            "type": "boolean",
+                            "description": "Enable knowledge base search tool",
+                        },
+                        "tool_agent_builder": {
+                            "type": "boolean",
+                            "description": "Enable agent-builder tool (lets this agent spawn new agents)",
+                        },
+                        "max_steps": {
+                            "type": "integer",
+                            "description": "Maximum reasoning turns (1–30, default 10)",
+                        },
                     },
                     "required": ["name", "model", "instructions"],
                 },
@@ -2163,7 +2191,7 @@ async def _tool_send_email_verification(inputs: dict, ctx: dict) -> str:
         f"Your {purpose} code is: {code}\n\n"
         f"This code expires in 10 minutes. Do not share it with anyone."
     )
-    result = await _tool_send_email({"to": email, "subject": subject, "body": body})
+    result = await _tool_send_email({"to": email, "subject": subject, "body": body}, ctx)
     if "sent" in result.lower():
         return f"Verification code sent to {email}. Ask the user to enter the 6-digit code."
     return result
@@ -2343,7 +2371,15 @@ async def _tool_create_agent(inputs: dict, ctx: dict) -> str:
         "code": bool(inputs.get("tool_code", False)),
         "sms": bool(inputs.get("tool_sms", False)),
         "browser": bool(inputs.get("tool_browser", False)),
+        "sheets": bool(inputs.get("tool_sheets", False)),
+        "verification": bool(inputs.get("tool_verification", False)),
+        "search_kb": bool(inputs.get("tool_search_kb", False)),
+        "agent_builder": bool(inputs.get("tool_agent_builder", False)),
     }
+    try:
+        max_steps = max(1, min(30, int(inputs.get("max_steps") or 10)))
+    except (TypeError, ValueError):
+        max_steps = 10
 
     from app.core.logging import logger as _logger
     from app.db.session import AsyncSessionLocal
@@ -2358,7 +2394,7 @@ async def _tool_create_agent(inputs: dict, ctx: dict) -> str:
                 instructions=instructions,
                 tools=tools,
                 memory_enabled=bool(inputs.get("memory_enabled", False)),
-                max_steps=10,
+                max_steps=max_steps,
             )
             session.add(new_agent)
             await session.commit()
