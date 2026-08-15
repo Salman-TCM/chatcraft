@@ -68,6 +68,27 @@ class Agent(TimestampMixin, Base):
         Boolean, nullable=False, default=False, server_default="false"
     )
 
+    # ── Design / branding fields ───────────────────────────────────────────────
+    primary_colour: Mapped[str] = mapped_column(
+        String(20), nullable=False, default="#6366f1", server_default="'#6366f1'"
+    )
+    logo_url: Mapped[str | None] = mapped_column(String(2048), nullable=True)
+    dark_mode: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default="false"
+    )
+    show_branding: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=True, server_default="true"
+    )
+    font_family: Mapped[str] = mapped_column(
+        String(100), nullable=False, default="system-ui", server_default="'system-ui'"
+    )
+    bubble_style: Mapped[str] = mapped_column(
+        String(20), nullable=False, default="rounded", server_default="'rounded'"
+    )
+    placeholder_text: Mapped[str] = mapped_column(
+        String(200), nullable=False, default="Type a message…", server_default="'Type a message…'"
+    )
+
     # Relationships
     user: Mapped["User"] = relationship("User")  # type: ignore[name-defined]
     chatbot: Mapped["ChatbotConfig | None"] = relationship("ChatbotConfig")  # type: ignore[name-defined]
