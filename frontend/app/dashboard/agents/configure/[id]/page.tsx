@@ -432,41 +432,45 @@ export default function ConfigureAgentPage() {
       {/* ── Content ─────────────────────────────────────────────────────────── */}
       <div className="flex-1 px-4 sm:px-6 py-6 max-w-4xl mx-auto w-full">
         <Tabs defaultValue="identity" className="space-y-6">
-          <TabsList className="flex w-full overflow-x-auto h-auto gap-1 p-1 rounded-xl bg-muted">
-            <TabsTrigger value="identity"  className="flex-1 text-xs sm:text-sm py-2 rounded-lg data-[state=active]:bg-background data-[state=active]:shadow-sm">
-              <Settings className="h-3.5 w-3.5 mr-1.5 shrink-0" />
-              <span className="hidden xs:inline">Identity</span>
-              <span className="xs:hidden">ID</span>
-            </TabsTrigger>
-            <TabsTrigger value="model"     className="flex-1 text-xs sm:text-sm py-2 rounded-lg data-[state=active]:bg-background data-[state=active]:shadow-sm">
-              <Brain className="h-3.5 w-3.5 mr-1.5 shrink-0" />
-              Model
-            </TabsTrigger>
-            <TabsTrigger value="tools"     className="flex-1 text-xs sm:text-sm py-2 rounded-lg data-[state=active]:bg-background data-[state=active]:shadow-sm">
-              <Zap className="h-3.5 w-3.5 mr-1.5 shrink-0" />
-              Tools
-              {enabledCount > 0 && (
-                <Badge className="ml-1.5 text-[9px] px-1.5 py-0 h-4">{enabledCount}</Badge>
-              )}
-            </TabsTrigger>
-            <TabsTrigger value="mcp"       className="flex-1 text-xs sm:text-sm py-2 rounded-lg data-[state=active]:bg-background data-[state=active]:shadow-sm">
-              <Plug className="h-3.5 w-3.5 mr-1.5 shrink-0" />
-              MCP
-              {activeMcpCount > 0 && (
-                <Badge className="ml-1.5 text-[9px] px-1.5 py-0 h-4 bg-emerald-500">{activeMcpCount}</Badge>
-              )}
-            </TabsTrigger>
-            <TabsTrigger value="design"    className="flex-1 text-xs sm:text-sm py-2 rounded-lg data-[state=active]:bg-background data-[state=active]:shadow-sm">
-              <Palette className="h-3.5 w-3.5 mr-1.5 shrink-0" />
-              <span className="hidden sm:inline">Design</span>
-              <span className="sm:hidden">🎨</span>
-            </TabsTrigger>
-            <TabsTrigger value="advanced"  className="flex-1 text-xs sm:text-sm py-2 rounded-lg data-[state=active]:bg-background data-[state=active]:shadow-sm">
-              <Webhook className="h-3.5 w-3.5 mr-1.5 shrink-0" />
-              <span className="hidden sm:inline">Advanced</span>
-              <span className="sm:hidden">Adv</span>
-            </TabsTrigger>
-          </TabsList>
+          {/* Row 1: Identity · Model · Tools · MCP */}
+          {/* Row 2: Design · Advanced — split so all tabs stay readable */}
+          <div className="space-y-1">
+            <TabsList className="flex w-full h-auto gap-1 p-1 rounded-xl bg-muted">
+              <TabsTrigger value="identity" className="flex-1 text-xs sm:text-sm py-2 rounded-lg data-[state=active]:bg-background data-[state=active]:shadow-sm">
+                <Settings className="h-3.5 w-3.5 mr-1.5 shrink-0" />
+                <span className="hidden xs:inline">Identity</span>
+                <span className="xs:hidden">ID</span>
+              </TabsTrigger>
+              <TabsTrigger value="model" className="flex-1 text-xs sm:text-sm py-2 rounded-lg data-[state=active]:bg-background data-[state=active]:shadow-sm">
+                <Brain className="h-3.5 w-3.5 mr-1.5 shrink-0" />
+                Model
+              </TabsTrigger>
+              <TabsTrigger value="tools" className="flex-1 text-xs sm:text-sm py-2 rounded-lg data-[state=active]:bg-background data-[state=active]:shadow-sm">
+                <Zap className="h-3.5 w-3.5 mr-1.5 shrink-0" />
+                Tools
+                {enabledCount > 0 && (
+                  <Badge className="ml-1.5 text-[9px] px-1.5 py-0 h-4">{enabledCount}</Badge>
+                )}
+              </TabsTrigger>
+              <TabsTrigger value="mcp" className="flex-1 text-xs sm:text-sm py-2 rounded-lg data-[state=active]:bg-background data-[state=active]:shadow-sm">
+                <Plug className="h-3.5 w-3.5 mr-1.5 shrink-0" />
+                MCP
+                {activeMcpCount > 0 && (
+                  <Badge className="ml-1.5 text-[9px] px-1.5 py-0 h-4 bg-emerald-500">{activeMcpCount}</Badge>
+                )}
+              </TabsTrigger>
+            </TabsList>
+            <TabsList className="flex w-full h-auto gap-1 p-1 rounded-xl bg-muted">
+              <TabsTrigger value="design" className="flex-1 text-xs sm:text-sm py-2 rounded-lg data-[state=active]:bg-background data-[state=active]:shadow-sm">
+                <Palette className="h-3.5 w-3.5 mr-1.5 shrink-0" />
+                Design &amp; Branding
+              </TabsTrigger>
+              <TabsTrigger value="advanced" className="flex-1 text-xs sm:text-sm py-2 rounded-lg data-[state=active]:bg-background data-[state=active]:shadow-sm">
+                <Webhook className="h-3.5 w-3.5 mr-1.5 shrink-0" />
+                Advanced
+              </TabsTrigger>
+            </TabsList>
+          </div>
 
           {/* ── Identity ────────────────────────────────────────────────────── */}
           <TabsContent value="identity" className="space-y-5">
