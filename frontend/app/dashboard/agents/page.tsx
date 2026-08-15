@@ -90,7 +90,16 @@ function modelBadgeColor(model: string) {
   return "bg-muted text-muted-foreground";
 }
 
-function getEmbedContent(agent: Agent, type: EmbedType): { title: string; description: string; code: string } | null {
+const POSITION_OPTIONS = [
+  { value: "bottom-right", label: "Bottom Right" },
+  { value: "bottom-left",  label: "Bottom Left"  },
+  { value: "top-right",    label: "Top Right"    },
+  { value: "top-left",     label: "Top Left"     },
+  { value: "center-right", label: "Center Right" },
+  { value: "center-left",  label: "Center Left"  },
+];
+
+function getEmbedContent(agent: Agent, type: EmbedType, position = "bottom-right"): { title: string; description: string; code: string } | null {
   const origin = typeof window !== "undefined" ? window.location.origin : "https://yourplatform.com";
 
   if (!agent.share_token || !agent.share_enabled) {
@@ -114,7 +123,7 @@ function getEmbedContent(agent: Agent, type: EmbedType): { title: string; descri
   src="${origin}/widget.js"
   data-agent-token="${agent.share_token}"
   data-type="bubble"
-  data-position="bottom-right">
+  data-position="${position}">
 </script>`,
       };
     case "sidetab":
@@ -136,7 +145,7 @@ function getEmbedContent(agent: Agent, type: EmbedType): { title: string; descri
   src="${origin}/widget.js"
   data-agent-token="${agent.share_token}"
   data-type="voice-launcher"
-  data-position="bottom-right">
+  data-position="${position}">
 </script>`,
       };
     case "iframe":
@@ -156,6 +165,8 @@ function getEmbedContent(agent: Agent, type: EmbedType): { title: string; descri
 
 // ─── Embed Modal ─────────────────────────────────────────────────────────────
 
+const POSITION_NEEDS_SELECTOR: EmbedType[] = ["bubble", "voice"];
+
 function EmbedDialog({
   modal,
   onClose,
@@ -163,8 +174,11 @@ function EmbedDialog({
   modal: EmbedModal;
   onClose: () => void;
 }) {
-  const [copied, setCopied] = useState(false);
-  const content = getEmbedContent(modal.agent, modal.type);
+  const [copied, setCopied]     = useState(false);
+  const [position, setPosition] = useState("bottom-right");
+
+  const showPositionPicker = POSITION_NEEDS_SELECTOR.includes(modal.type);
+  const content = getEmbedContent(modal.agent, modal.type, position);
 
   const copy = () => {
     if (!content) return;
@@ -184,6 +198,27 @@ function EmbedDialog({
         </DialogHeader>
         {content ? (
           <div className="space-y-3">
+            {showPositionPicker && (
+              <div className="space-y-1.5">
+                <p className="text-xs font-medium text-muted-foreground">Widget Position</p>
+                <div className="grid grid-cols-3 gap-1.5">
+                  {POSITION_OPTIONS.map(opt => (
+                    <button
+                      key={opt.value}
+                      type="button"
+                      onClick={() => setPosition(opt.value)}
+                      className={`rounded-lg border px-2.5 py-1.5 text-xs font-medium transition-colors ${
+                        position === opt.value
+                          ? "border-primary bg-primary/10 text-primary"
+                          : "border-border hover:border-muted-foreground/40 text-muted-foreground"
+                      }`}
+                    >
+                      {opt.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
             <pre className="rounded-lg bg-muted p-4 text-xs font-mono overflow-x-auto whitespace-pre-wrap break-all leading-relaxed">
               {content.code}
             </pre>
