@@ -17,7 +17,6 @@ import { Textarea } from "@/components/ui/textarea";
 import { Switch } from "@/components/ui/switch";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
@@ -227,6 +226,7 @@ export default function ConfigureAgentPage() {
   const [saved, setSaved]         = useState(false);
   const [error, setError]         = useState<string | null>(null);
   const [testChatOpen, setTestChatOpen] = useState(false);
+  const [activeTab, setActiveTab] = useState("identity");
 
   const [mcpServers, setMcpServers]       = useState<MCPServer[]>([]);
   const [mcpTools, setMcpTools]           = useState<Record<string, MCPTool[]>>({});
@@ -431,42 +431,42 @@ export default function ConfigureAgentPage() {
 
       {/* ── Content ─────────────────────────────────────────────────────────── */}
       <div className="flex-1 px-4 sm:px-6 py-6 max-w-4xl mx-auto w-full">
-        <Tabs defaultValue="identity" className="space-y-6">
-          <TabsList className="flex flex-wrap w-full h-auto gap-1 p-1 rounded-xl bg-muted">
-            <TabsTrigger value="identity" className="flex-1 min-w-[80px] text-xs sm:text-sm py-2 rounded-lg data-[state=active]:bg-background data-[state=active]:shadow-sm">
-              <Settings className="h-3.5 w-3.5 mr-1.5 shrink-0" />
-              Identity
-            </TabsTrigger>
-            <TabsTrigger value="model" className="flex-1 min-w-[80px] text-xs sm:text-sm py-2 rounded-lg data-[state=active]:bg-background data-[state=active]:shadow-sm">
-              <Brain className="h-3.5 w-3.5 mr-1.5 shrink-0" />
-              Model
-            </TabsTrigger>
-            <TabsTrigger value="tools" className="flex-1 min-w-[80px] text-xs sm:text-sm py-2 rounded-lg data-[state=active]:bg-background data-[state=active]:shadow-sm">
-              <Zap className="h-3.5 w-3.5 mr-1.5 shrink-0" />
-              Tools
-              {enabledCount > 0 && (
-                <Badge className="ml-1.5 text-[9px] px-1.5 py-0 h-4">{enabledCount}</Badge>
-              )}
-            </TabsTrigger>
-            <TabsTrigger value="mcp" className="flex-1 min-w-[80px] text-xs sm:text-sm py-2 rounded-lg data-[state=active]:bg-background data-[state=active]:shadow-sm">
-              <Plug className="h-3.5 w-3.5 mr-1.5 shrink-0" />
-              MCP
-              {activeMcpCount > 0 && (
-                <Badge className="ml-1.5 text-[9px] px-1.5 py-0 h-4 bg-emerald-500">{activeMcpCount}</Badge>
-              )}
-            </TabsTrigger>
-            <TabsTrigger value="design" className="flex-1 min-w-[120px] text-xs sm:text-sm py-2 rounded-lg data-[state=active]:bg-background data-[state=active]:shadow-sm">
-              <Palette className="h-3.5 w-3.5 mr-1.5 shrink-0" />
-              Design &amp; Branding
-            </TabsTrigger>
-            <TabsTrigger value="advanced" className="flex-1 min-w-[80px] text-xs sm:text-sm py-2 rounded-lg data-[state=active]:bg-background data-[state=active]:shadow-sm">
-              <Webhook className="h-3.5 w-3.5 mr-1.5 shrink-0" />
-              Advanced
-            </TabsTrigger>
-          </TabsList>
+        <div className="space-y-6">
+          {/* Custom tab bar — plain buttons, no Radix constraints */}
+          <div className="flex flex-wrap gap-1 p-1 rounded-xl bg-muted">
+            {[
+              { value: "identity", icon: <Settings className="h-3.5 w-3.5 shrink-0" />, label: "Identity" },
+              { value: "model",    icon: <Brain    className="h-3.5 w-3.5 shrink-0" />, label: "Model" },
+              { value: "tools",    icon: <Zap      className="h-3.5 w-3.5 shrink-0" />, label: "Tools",
+                badge: enabledCount > 0 ? enabledCount : null },
+              { value: "mcp",      icon: <Plug     className="h-3.5 w-3.5 shrink-0" />, label: "MCP",
+                badge: activeMcpCount > 0 ? activeMcpCount : null, badgeColor: "bg-emerald-500" },
+              { value: "design",   icon: <Palette  className="h-3.5 w-3.5 shrink-0" />, label: "Design & Branding" },
+              { value: "advanced", icon: <Webhook  className="h-3.5 w-3.5 shrink-0" />, label: "Advanced" },
+            ].map(tab => (
+              <button
+                key={tab.value}
+                type="button"
+                onClick={() => setActiveTab(tab.value)}
+                className={`flex-1 min-w-[80px] inline-flex items-center justify-center gap-1.5 rounded-lg px-3 py-2 text-xs sm:text-sm font-medium transition-all ${
+                  activeTab === tab.value
+                    ? "bg-background text-foreground shadow-sm"
+                    : "text-muted-foreground hover:text-foreground"
+                }`}
+              >
+                {tab.icon}
+                {tab.label}
+                {tab.badge != null && (
+                  <Badge className={`ml-0.5 text-[9px] px-1.5 py-0 h-4 ${(tab as any).badgeColor || ""}`}>
+                    {tab.badge}
+                  </Badge>
+                )}
+              </button>
+            ))}
+          </div>
 
           {/* ── Identity ────────────────────────────────────────────────────── */}
-          <TabsContent value="identity" className="space-y-5">
+          {activeTab === "identity" && <div className="space-y-5">
             <SectionHeader
               icon={<Settings className="h-4 w-4" />}
               title="Agent Identity"
@@ -554,10 +554,10 @@ export default function ConfigureAgentPage() {
                 </p>
               </div>
             </div>
-          </TabsContent>
+          </div>}
 
           {/* ── Model & Memory ──────────────────────────────────────────────── */}
-          <TabsContent value="model" className="space-y-5">
+          {activeTab === "model" && <div className="space-y-5">
             <SectionHeader
               icon={<Brain className="h-4 w-4" />}
               title="Model & Memory"
@@ -681,10 +681,10 @@ export default function ConfigureAgentPage() {
                 />
               </div>
             </div>
-          </TabsContent>
+          </div>}
 
           {/* ── Tools ───────────────────────────────────────────────────────── */}
-          <TabsContent value="tools" className="space-y-5">
+          {activeTab === "tools" && <div className="space-y-5">
             <SectionHeader
               icon={<Zap className="h-4 w-4" />}
               title="Built-in Tools"
@@ -707,10 +707,10 @@ export default function ConfigureAgentPage() {
                 No tools selected — this agent will respond from its knowledge only.
               </p>
             )}
-          </TabsContent>
+          </div>}
 
           {/* ── MCP Servers ─────────────────────────────────────────────────── */}
-          <TabsContent value="mcp" className="space-y-5">
+          {activeTab === "mcp" && <div className="space-y-5">
             <div className="flex items-start justify-between gap-3">
               <SectionHeader
                 icon={<Plug className="h-4 w-4" />}
@@ -768,10 +768,10 @@ export default function ConfigureAgentPage() {
                 </p>
               </div>
             )}
-          </TabsContent>
+          </div>}
 
           {/* ── Design ──────────────────────────────────────────────────────── */}
-          <TabsContent value="design" className="space-y-5">
+          {activeTab === "design" && <div className="space-y-5">
             <SectionHeader
               icon={<Palette className="h-4 w-4" />}
               title="Design & Branding"
@@ -935,10 +935,10 @@ export default function ConfigureAgentPage() {
                 </div>
               </div>
             </div>
-          </TabsContent>
+          </div>}
 
           {/* ── Advanced ────────────────────────────────────────────────────── */}
-          <TabsContent value="advanced" className="space-y-5">
+          {activeTab === "advanced" && <div className="space-y-5">
             <SectionHeader
               icon={<Webhook className="h-4 w-4" />}
               title="Advanced Settings"
@@ -983,8 +983,8 @@ export default function ConfigureAgentPage() {
                 </Button>
               </CardContent>
             </Card>
-          </TabsContent>
-        </Tabs>
+          </div>}
+        </div>
       </div>
 
       {/* ── Sticky bottom save bar (mobile) ─────────────────────────────────── */}
