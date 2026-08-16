@@ -11,7 +11,6 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Switch } from "@/components/ui/switch";
 import { Badge } from "@/components/ui/badge";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
@@ -19,7 +18,7 @@ import {
   Globe, Code2, Link2, Mail, Smartphone, ShieldCheck, Bot,
   Loader2, Check, Brain, Zap, Settings, Plug,
   Webhook, RefreshCw, Trash2, Plus, ExternalLink,
-  AlertCircle, ChevronDown, ChevronUp, Wrench, Sheet, BookOpen, Scale,
+  AlertCircle, ChevronDown, ChevronUp, Wrench, Sheet, BookOpen, Scale, Palette,
 } from "lucide-react";
 import { apiClient } from "@/lib/api";
 import { AgentKnowledgeManager } from "./AgentKnowledgeManager";
@@ -39,6 +38,13 @@ interface Agent {
   webhook_url: string | null;
   welcome_message: string | null;
   suggestions_enabled: boolean;
+  primary_colour?: string;
+  logo_url?: string | null;
+  dark_mode?: boolean;
+  show_branding?: boolean;
+  font_family?: string;
+  bubble_style?: string;
+  placeholder_text?: string;
 }
 
 interface MCPServer {
@@ -192,6 +198,13 @@ export function AgentConfigModal({ agent, open, onClose, onUpdate }: AgentConfig
     welcome_message: agent.welcome_message || "",
     suggestions_enabled: agent.suggestions_enabled,
     tools: { ...agent.tools },
+    primary_colour: agent.primary_colour || "#6366f1",
+    logo_url: agent.logo_url || "",
+    dark_mode: agent.dark_mode || false,
+    show_branding: agent.show_branding ?? true,
+    font_family: agent.font_family || "system-ui",
+    bubble_style: agent.bubble_style || "rounded",
+    placeholder_text: agent.placeholder_text || "",
   });
   const [saving, setSaving]           = useState(false);
   const [errors, setErrors]           = useState<Record<string, string>>({});
@@ -234,6 +247,13 @@ export function AgentConfigModal({ agent, open, onClose, onUpdate }: AgentConfig
         welcome_message: agent.welcome_message || "",
         suggestions_enabled: agent.suggestions_enabled,
         tools: { ...agent.tools },
+        primary_colour: agent.primary_colour || "#6366f1",
+        logo_url: agent.logo_url || "",
+        dark_mode: agent.dark_mode || false,
+        show_branding: agent.show_branding ?? true,
+        font_family: agent.font_family || "system-ui",
+        bubble_style: agent.bubble_style || "rounded",
+        placeholder_text: agent.placeholder_text || "",
       });
       setErrors({});
       setActiveTab("basic");
@@ -270,6 +290,13 @@ export function AgentConfigModal({ agent, open, onClose, onUpdate }: AgentConfig
         welcome_message: form.welcome_message.trim() || null,
         suggestions_enabled: form.suggestions_enabled,
         tools: form.tools,
+        primary_colour: form.primary_colour || "#6366f1",
+        logo_url: form.logo_url.trim() || null,
+        dark_mode: form.dark_mode,
+        show_branding: form.show_branding,
+        font_family: form.font_family || "system-ui",
+        bubble_style: form.bubble_style || "rounded",
+        placeholder_text: form.placeholder_text.trim() || null,
       });
       onUpdate(res.data.data);
       onClose();
@@ -315,41 +342,46 @@ export function AgentConfigModal({ agent, open, onClose, onUpdate }: AgentConfig
         </DialogHeader>
 
         {/* Tabs */}
-        <Tabs value={activeTab} onValueChange={setActiveTab} className="flex flex-col flex-1 overflow-hidden mt-4">
+        <div className="flex flex-col flex-1 overflow-hidden mt-4">
           <div className="px-5 shrink-0">
-            <TabsList className="w-full h-9 gap-0.5 bg-muted p-1 rounded-lg overflow-x-auto flex">
-              <TabsTrigger value="basic"    className="flex-1 text-xs h-7 rounded-md data-[state=active]:bg-background data-[state=active]:shadow-sm">
-                <Settings className="h-3.5 w-3.5 mr-1 shrink-0" />Basic
-              </TabsTrigger>
-              <TabsTrigger value="model"   className="flex-1 text-xs h-7 rounded-md data-[state=active]:bg-background data-[state=active]:shadow-sm">
-                <Brain className="h-3.5 w-3.5 mr-1 shrink-0" />Model
-              </TabsTrigger>
-              <TabsTrigger value="tools"   className="flex-1 text-xs h-7 rounded-md data-[state=active]:bg-background data-[state=active]:shadow-sm">
-                <Zap className="h-3.5 w-3.5 mr-1 shrink-0" />Tools
-                {enabledCount > 0 && <Badge className="ml-1 h-4 px-1 text-[9px]">{enabledCount}</Badge>}
-              </TabsTrigger>
-              <TabsTrigger value="knowledge" className="flex-1 text-xs h-7 rounded-md data-[state=active]:bg-background data-[state=active]:shadow-sm">
-                <BookOpen className="h-3.5 w-3.5 mr-1 shrink-0" />
-                <span className="hidden sm:inline">Knowledge</span>
-                <span className="sm:hidden">KB</span>
-              </TabsTrigger>
-              <TabsTrigger value="mcp"     className="flex-1 text-xs h-7 rounded-md data-[state=active]:bg-background data-[state=active]:shadow-sm">
-                <Plug className="h-3.5 w-3.5 mr-1 shrink-0" />MCP
-                {activeMcpCount > 0 && <Badge className="ml-1 h-4 px-1 text-[9px] bg-emerald-500">{activeMcpCount}</Badge>}
-              </TabsTrigger>
-              <TabsTrigger value="advanced" className="flex-1 text-xs h-7 rounded-md data-[state=active]:bg-background data-[state=active]:shadow-sm">
-                <Webhook className="h-3.5 w-3.5 mr-1 shrink-0" />
-                <span className="hidden sm:inline">Advanced</span>
-                <span className="sm:hidden">Adv</span>
-              </TabsTrigger>
-            </TabsList>
+            <div className="flex flex-wrap gap-0.5 bg-muted p-1 rounded-lg">
+              {[
+                { v: "basic",     icon: <Settings  className="h-3.5 w-3.5 shrink-0" />, label: "Basic" },
+                { v: "model",     icon: <Brain     className="h-3.5 w-3.5 shrink-0" />, label: "Model" },
+                { v: "tools",     icon: <Zap       className="h-3.5 w-3.5 shrink-0" />, label: "Tools",
+                  badge: enabledCount > 0 ? enabledCount : null },
+                { v: "knowledge", icon: <BookOpen  className="h-3.5 w-3.5 shrink-0" />, label: "Knowledge" },
+                { v: "mcp",       icon: <Plug      className="h-3.5 w-3.5 shrink-0" />, label: "MCP",
+                  badge: activeMcpCount > 0 ? activeMcpCount : null, badgeGreen: true },
+                { v: "design",    icon: <Palette   className="h-3.5 w-3.5 shrink-0" />, label: "Design" },
+                { v: "advanced",  icon: <Webhook   className="h-3.5 w-3.5 shrink-0" />, label: "Advanced" },
+              ].map(tab => (
+                <button
+                  key={tab.v}
+                  type="button"
+                  onClick={() => setActiveTab(tab.v)}
+                  className={`flex-1 min-w-[60px] inline-flex items-center justify-center gap-1 rounded-md px-2 py-1.5 text-xs font-medium transition-all ${
+                    activeTab === tab.v
+                      ? "bg-background text-foreground shadow-sm"
+                      : "text-muted-foreground hover:text-foreground"
+                  }`}
+                >
+                  {tab.icon}{tab.label}
+                  {tab.badge != null && (
+                    <Badge className={`ml-0.5 h-4 px-1 text-[9px] ${(tab as any).badgeGreen ? "bg-emerald-500" : ""}`}>
+                      {tab.badge}
+                    </Badge>
+                  )}
+                </button>
+              ))}
+            </div>
           </div>
 
           {/* Tab bodies — scrollable */}
           <div className="flex-1 overflow-y-auto px-5 py-4 min-h-0">
 
             {/* ── Basic ─────────────────────────────────────────────────────── */}
-            <TabsContent value="basic" className="mt-0 space-y-4">
+            {activeTab === "basic" && <div className="mt-0 space-y-4">
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div className="space-y-1.5">
                   <Label className="text-xs">Name <span className="text-destructive">*</span></Label>
@@ -411,10 +443,10 @@ export function AgentConfigModal({ agent, open, onClose, onUpdate }: AgentConfig
                   Define the agent's persona, goals, and how it should use its tools.
                 </p>
               </div>
-            </TabsContent>
+            </div>}
 
             {/* ── Model ─────────────────────────────────────────────────────── */}
-            <TabsContent value="model" className="mt-0 space-y-4">
+            {activeTab === "model" && <div className="mt-0 space-y-4">
               <div className="space-y-1.5">
                 <Label className="text-xs">AI Model</Label>
                 {modelsLoading ? (
@@ -580,10 +612,10 @@ export function AgentConfigModal({ agent, open, onClose, onUpdate }: AgentConfig
                   onCheckedChange={(v) => set("suggestions_enabled", v)}
                 />
               </div>
-            </TabsContent>
+            </div>}
 
             {/* ── Tools ─────────────────────────────────────────────────────── */}
-            <TabsContent value="tools" className="mt-0 space-y-4">
+            {activeTab === "tools" && <div className="mt-0 space-y-4">
               {enabledCount === 0 && (
                 <div className="flex items-center gap-2 rounded-lg bg-amber-50 border border-amber-200 px-3 py-2.5 text-xs text-amber-700 dark:bg-amber-950/20 dark:border-amber-900 dark:text-amber-400">
                   <AlertCircle className="h-3.5 w-3.5 shrink-0" />
@@ -624,15 +656,15 @@ export function AgentConfigModal({ agent, open, onClose, onUpdate }: AgentConfig
                   </div>
                 </div>
               ))}
-            </TabsContent>
+            </div>}
 
             {/* ── Knowledge ─────────────────────────────────────────────────── */}
-            <TabsContent value="knowledge" className="mt-0">
+            {activeTab === "knowledge" && <div className="mt-0">
               <AgentKnowledgeManager agentId={agent.id} showTestSearch={false} />
-            </TabsContent>
+            </div>}
 
             {/* ── MCP ───────────────────────────────────────────────────────── */}
-            <TabsContent value="mcp" className="mt-0 space-y-4">
+            {activeTab === "mcp" && <div className="mt-0 space-y-4">
               <div className="flex items-center justify-between">
                 <div>
                   <p className="text-sm font-medium">MCP Servers</p>
@@ -687,10 +719,100 @@ export function AgentConfigModal({ agent, open, onClose, onUpdate }: AgentConfig
                   </p>
                 </div>
               )}
-            </TabsContent>
+            </div>}
 
             {/* ── Advanced ──────────────────────────────────────────────────── */}
-            <TabsContent value="advanced" className="mt-0 space-y-4">
+            {/* ── Design ────────────────────────────────────────────────────── */}
+            {activeTab === "design" && <div className="mt-0 space-y-4">
+              {/* Primary colour */}
+              <div className="space-y-1.5">
+                <Label className="text-xs">Primary Colour</Label>
+                <div className="flex items-center gap-2">
+                  <div className="relative h-8 w-8 shrink-0 rounded-lg border overflow-hidden cursor-pointer">
+                    <input type="color" value={form.primary_colour}
+                      onChange={e => set("primary_colour", e.target.value)}
+                      className="absolute inset-0 w-full h-full cursor-pointer opacity-0" />
+                    <div className="w-full h-full rounded-lg" style={{ backgroundColor: form.primary_colour }} />
+                  </div>
+                  <Input value={form.primary_colour} onChange={e => set("primary_colour", e.target.value)}
+                    placeholder="#6366f1" maxLength={7} className="text-xs font-mono flex-1" />
+                </div>
+              </div>
+
+              {/* Logo URL */}
+              <div className="space-y-1.5">
+                <Label className="text-xs">Logo URL</Label>
+                <div className="flex items-center gap-2">
+                  {form.logo_url && (
+                    <img src={form.logo_url} alt="logo" className="h-8 w-8 rounded-lg object-cover shrink-0 border"
+                      onError={e => (e.currentTarget.style.display = "none")} />
+                  )}
+                  <Input value={form.logo_url} onChange={e => set("logo_url", e.target.value)}
+                    placeholder="https://example.com/logo.png" className="text-xs font-mono flex-1" />
+                </div>
+              </div>
+
+              {/* Font */}
+              <div className="space-y-1.5">
+                <Label className="text-xs">Font</Label>
+                <Select value={form.font_family} onValueChange={v => set("font_family", v)}>
+                  <SelectTrigger className="text-xs"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    {["system-ui","Inter","Roboto","Open Sans","Lato","Poppins","Georgia","monospace"].map(f => (
+                      <SelectItem key={f} value={f} className="text-xs">{f}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              {/* Bubble style */}
+              <div className="space-y-1.5">
+                <Label className="text-xs">Message Bubble Style</Label>
+                <div className="grid grid-cols-3 gap-1.5">
+                  {[
+                    { key: "rounded", label: "Rounded", r: "12px" },
+                    { key: "pill",    label: "Pill",    r: "9999px" },
+                    { key: "square",  label: "Square",  r: "4px" },
+                  ].map(({ key, label, r }) => (
+                    <button key={key} type="button" onClick={() => set("bubble_style", key)}
+                      className={`border rounded-lg p-2 flex flex-col items-center gap-1.5 transition-all ${
+                        form.bubble_style === key ? "border-primary bg-primary/5" : "border-border hover:border-muted-foreground/30"
+                      }`}>
+                      <div className="px-2.5 py-1 text-[10px] font-medium text-white"
+                        style={{ backgroundColor: form.primary_colour, borderRadius: r }}>Hi</div>
+                      <span className="text-[10px] font-medium">{label}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Placeholder */}
+              <div className="space-y-1.5">
+                <Label className="text-xs">Input Placeholder</Label>
+                <Input value={form.placeholder_text} onChange={e => set("placeholder_text", e.target.value)}
+                  placeholder="Type a message…" maxLength={200} className="text-xs" />
+              </div>
+
+              {/* Dark mode */}
+              <div className="flex items-center justify-between rounded-xl border p-3">
+                <div>
+                  <p className="text-xs font-medium">Dark Mode</p>
+                  <p className="text-[11px] text-muted-foreground">Use dark background on public page</p>
+                </div>
+                <Switch checked={form.dark_mode} onCheckedChange={v => set("dark_mode", v)} />
+              </div>
+
+              {/* Show branding */}
+              <div className="flex items-center justify-between rounded-xl border p-3">
+                <div>
+                  <p className="text-xs font-medium">Show "Powered by" Branding</p>
+                  <p className="text-[11px] text-muted-foreground">Display footer link on public page</p>
+                </div>
+                <Switch checked={form.show_branding} onCheckedChange={v => set("show_branding", v)} />
+              </div>
+            </div>}
+
+            {activeTab === "advanced" && <div className="mt-0 space-y-4">
               <div className="space-y-1.5">
                 <Label className="text-xs">Webhook URL</Label>
                 <Input
@@ -720,7 +842,7 @@ export function AgentConfigModal({ agent, open, onClose, onUpdate }: AgentConfig
                   <Trash2 className="h-3.5 w-3.5 mr-1.5" />Delete Agent
                 </Button>
               </div>
-            </TabsContent>
+            </div>}
           </div>
 
           {/* Footer */}
@@ -734,7 +856,7 @@ export function AgentConfigModal({ agent, open, onClose, onUpdate }: AgentConfig
                 : <><Check className="h-3.5 w-3.5 mr-1.5" />Save Changes</>}
             </Button>
           </div>
-        </Tabs>
+        </div>
       </DialogContent>
     </Dialog>
   );
