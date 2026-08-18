@@ -18,6 +18,15 @@
 
 services:
 
+  # The base compose defines a `backend` service for local dev (hot-reload,
+  # no blue/green). In production it is replaced by backend_blue/backend_green.
+  # Scale to 0 replicas so Docker Compose never starts it even if the base
+  # service definition is present.
+  backend:
+    deploy:
+      replicas: 0
+
+
   # ---------------------------------------------------------------------------
   # Nginx — the only container with published ports. TLS termination,
   # security headers, and the blue/green upstream switch (see nginx/conf.d).
