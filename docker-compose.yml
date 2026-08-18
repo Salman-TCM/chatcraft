@@ -317,6 +317,11 @@ networks:
     # Production overlay adds internal: true to cut this network off from
     # the internet. In development it is a plain bridge so services can
     # still reach the outside world (package downloads, API calls, etc.).
+  edge:
+    driver: bridge
+    # Public-facing network used by nginx, cloudflared, and internet-bound
+    # services (celery, clamav). Defined here so the staging overlay's
+    # cloudflared service can reference it without needing docker-compose.prod.yml.
 
 volumes:
   postgres_data:
