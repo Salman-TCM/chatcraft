@@ -129,7 +129,7 @@ const FUNCTION_TEMPLATES: {
   },
 ];
 
-const EMPTY_FUNCTION_FORM = { name: "", description: "", webhook_method: "POST", webhook_url: "" };
+const EMPTY_FUNCTION_FORM = { name: "", description: "", webhook_method: "POST", webhook_url: "", credential_id: "" };
 const EMPTY_RAW_SCHEMA = '{\n  "type": "object",\n  "properties": {},\n  "required": []\n}';
 
 function schemaFromParamRows(rows: ParamRow[]) {
@@ -617,7 +617,7 @@ export function AgentConfigModal({ agent, open, onClose, onUpdate }: AgentConfig
 
   const applyTemplate = (t: (typeof FUNCTION_TEMPLATES)[number]) => {
     setFunctionForm({
-      name: t.name, description: t.description, webhook_method: t.webhook_method, webhook_url: "",
+      name: t.name, description: t.description, webhook_method: t.webhook_method, webhook_url: "", credential_id: "",
     });
     setParamRows(t.params.map((p) => ({ ...p })));
     setAdvancedJson(false);
@@ -631,6 +631,7 @@ export function AgentConfigModal({ agent, open, onClose, onUpdate }: AgentConfig
     setFunctionForm({
       name: fn.name, description: fn.description,
       webhook_method: fn.webhook_method, webhook_url: fn.webhook_url,
+      credential_id: (fn as any).credential_id || "",
     });
     const rows = paramRowsFromSchema(fn.parameters_schema);
     if (rows) {
@@ -673,6 +674,7 @@ export function AgentConfigModal({ agent, open, onClose, onUpdate }: AgentConfig
         webhook_method: functionForm.webhook_method,
         webhook_url: functionForm.webhook_url.trim(),
         parameters_schema,
+        credential_id: functionForm.credential_id || null,
       };
       if (Object.keys(webhook_headers).length) payload.webhook_headers = webhook_headers;
 
@@ -1156,7 +1158,7 @@ export function AgentConfigModal({ agent, open, onClose, onUpdate }: AgentConfig
                     <div className="grid grid-cols-2 gap-2">
                       <div className="space-y-1">
                         <Label className="text-[11px]">Tool name</Label>
-                        <Input className="h-8 text-xs font-mono" placeholder="book_service"
+                        <Input className="h-8 text-xs font-mono" placeholder="add_to_cart"
                           value={functionForm.name}
                           onChange={(e) => setFunctionForm((p) => ({ ...p, name: e.target.value }))} />
                       </div>
@@ -1166,45 +1168,68 @@ export function AgentConfigModal({ agent, open, onClose, onUpdate }: AgentConfig
                           onValueChange={(v) => setFunctionForm((p) => ({ ...p, webhook_method: v }))}>
                           <SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger>
                           <SelectContent>
-                            <SelectItem value="POST">POST</SelectItem>
                             <SelectItem value="GET">GET</SelectItem>
+                            <SelectItem value="POST">POST</SelectItem>
+                            <SelectItem value="PUT">PUT</SelectItem>
+                            <SelectItem value="PATCH">PATCH</SelectItem>
+                            <SelectItem value="DELETE">DELETE</SelectItem>
                           </SelectContent>
                         </Select>
                       </div>
                     </div>
-                    <p className="text-[10px] text-muted-foreground -mt-1.5">
-                      list_products, buy_product, and check_order_status are reserved for the
-                      built-in store above.
-                    </p>
                     <div className="space-y-1">
-                      <Label className="text-[11px]">Description (tells the model when to use it)</Label>
-                      <Input className="h-8 text-xs" placeholder="Book an appointment for a service"
+                      <Label className="text-[11px]">Description <span className="text-muted-foreground font-normal">(tells the model when to call this)</span></Label>
+                      <Input className="h-8 text-xs" placeholder="Add a product to the customer's cart"
                         value={functionForm.description}
                         onChange={(e) => setFunctionForm((p) => ({ ...p, description: e.target.value }))} />
                     </div>
                     <div className="space-y-1">
-                      <Label className="text-[11px]">Webhook URL</Label>
-                      <Input className="h-8 text-xs font-mono" placeholder="https://your-api.example.com/bookings"
+                      <Label className="text-[11px]">URL <span className="text-muted-foreground font-normal">(use {"{param}"} for path variables)</span></Label>
+                      <Input className="h-8 text-xs font-mono" placeholder="https://api.mystore.com/cart/{id}/"
                         value={functionForm.webhook_url}
                         onChange={(e) => setFunctionForm((p) => ({ ...p, webhook_url: e.target.value }))} />
+                      <p className="text-[10px] text-muted-foreground">
+                        Path variables like {"{id}"} are substituted automatically from the model's inputs.
+                      </p>
                     </div>
+
+                    {/* Credential picker */}
+                    <div className="space-y-1">
+                      <Label className="text-[11px] flex items-center gap-1"><Key className="h-3 w-3" />Credential <span className="text-muted-foreground font-normal">(auto-injects auth header)</span></Label>
+                      <Select value={functionForm.credential_id || "__none__"}
+                        onValueChange={(v) => setFunctionForm((p) => ({ ...p, credential_id: v === "__none__" ? "" : v }))}>
+                        <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="None" /></SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="__none__" className="text-xs">None (no authentication)</SelectItem>
+                          {credentials.map(c => (
+                            <SelectItem key={c.id} value={c.id} className="text-xs">{c.name} ({c.auth_type})</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      {credentials.length === 0 && (
+                        <p className="text-[10px] text-muted-foreground">
+                          No credentials yet — add one in the <button type="button" className="underline" onClick={() => setActiveTab("integrations")}>APIs tab</button>.
+                        </p>
+                      )}
+                    </div>
+
                     <div className="space-y-1">
                       <div className="flex items-center justify-between">
-                        <Label className="text-[11px]">Headers (e.g. Authorization)</Label>
+                        <Label className="text-[11px]">Custom headers <span className="text-muted-foreground font-normal">(optional — use credential above for auth)</span></Label>
                         <Button type="button" size="sm" variant="ghost" className="h-6 text-[11px] px-2" onClick={addHeaderRow}>
-                          <Plus className="h-2.5 w-2.5 mr-1" />Header
+                          <Plus className="h-2.5 w-2.5 mr-1" />Add
                         </Button>
                       </div>
                       {editingFunctionId && headerRows.length === 0 && (
                         <p className="text-[10px] text-muted-foreground">
-                          Leave blank to keep the saved credentials — add a row to replace them.
+                          Leave empty to keep existing headers. Add a row to replace them.
                         </p>
                       )}
                       {headerRows.map((row, i) => (
                         <div key={i} className="flex items-center gap-1.5">
-                          <Input className="h-7 text-[11px] font-mono" placeholder="Authorization"
+                          <Input className="h-7 text-[11px] font-mono" placeholder="X-Custom-Header"
                             value={row.key} onChange={(e) => updateHeaderRow(i, "key", e.target.value)} />
-                          <Input className="h-7 text-[11px] font-mono" placeholder="Bearer ..." type="password"
+                          <Input className="h-7 text-[11px] font-mono" placeholder="value" type="password"
                             value={row.value} onChange={(e) => updateHeaderRow(i, "value", e.target.value)} />
                           <Button size="icon" variant="ghost" className="h-6 w-6 shrink-0" onClick={() => removeHeaderRow(i)}>
                             <X className="h-3 w-3" />
@@ -1436,407 +1461,112 @@ export function AgentConfigModal({ agent, open, onClose, onUpdate }: AgentConfig
             {/* ── Integrations (APIs) ───────────────────────────────────────── */}
             {activeTab === "integrations" && <div className="mt-0 space-y-3">
 
-              {/* Lazy-load integrations when this tab is first opened */}
+              {/* Header */}
+              <div className="rounded-xl border bg-muted/30 p-3 space-y-1">
+                <p className="text-xs font-medium flex items-center gap-1.5"><Key className="h-3.5 w-3.5 text-primary" />API Credentials</p>
+                <p className="text-[11px] text-muted-foreground">
+                  Store API keys and tokens here. Select them in <button type="button" className="underline font-medium" onClick={() => setActiveTab("tools")}>Custom Tools</button> to auto-inject auth on every request — the value is encrypted and never exposed to the model.
+                </p>
+              </div>
+
+              {/* Credential list */}
               {loadingIntg
-                ? <div className="flex items-center justify-center py-10 text-muted-foreground text-xs gap-2">
-                    <Loader2 className="h-4 w-4 animate-spin" />Loading integrations…
+                ? <div className="flex items-center justify-center py-8 text-muted-foreground text-xs gap-2">
+                    <Loader2 className="h-4 w-4 animate-spin" />Loading…
                   </div>
                 : <>
-                  {integrations.length === 0 && !intgDraft && (
+                  {credentials.length === 0 && !intgDraft && (
                     <div className="flex flex-col items-center gap-2 py-8 text-center text-muted-foreground">
-                      <Store className="h-8 w-8 opacity-20" />
-                      <p className="text-xs">No API integrations yet.</p>
-                      <p className="text-[11px]">Connect your e-commerce store to give this agent access to products, orders, and more.</p>
+                      <Key className="h-8 w-8 opacity-20" />
+                      <p className="text-xs">No credentials yet.</p>
+                      <p className="text-[11px]">Add one to use in your Custom Tools.</p>
                     </div>
                   )}
 
-                  {/* Existing integration cards */}
-                  {integrations.map(intg => {
-                    const isExpanded = expandedIntg === intg.id;
-                    const isEditing  = intgDraft?.id === intg.id;
-                    const groups     = INTEGRATION_TOOL_GROUPS[intg.integration_type] || [];
-                    return (
-                      <div key={intg.id} className={`rounded-xl border transition-colors ${
-                        intg.is_active ? "border-primary/20 bg-primary/5" : "border-border bg-muted/20"
-                      }`}>
-                        {/* Card header */}
-                        <div className="flex items-center gap-3 p-3">
-                          <div className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg ${
-                            intg.is_active ? "bg-primary/10 text-primary" : "bg-muted text-muted-foreground"
-                          }`}>
-                            <Store className="h-3.5 w-3.5" />
-                          </div>
-                          <div className="flex-1 min-w-0">
-                            <div className="flex items-center gap-1.5 flex-wrap">
-                              <p className="text-sm font-medium truncate">{intg.name}</p>
-                              {healthDot(intg.health_status)}
-                              <Badge variant="outline" className="text-[10px] px-1 h-4">
-                                {intg.integration_type === "ecom_customer" ? "Customer" : "Admin"}
-                              </Badge>
-                              {intg.allow_destructive && (
-                                <Badge variant="outline" className="text-[10px] px-1 h-4 border-amber-400 text-amber-600">
-                                  <TriangleAlert className="h-2.5 w-2.5 mr-0.5" />destructive on
-                                </Badge>
-                              )}
-                            </div>
-                            <p className="text-[11px] text-muted-foreground font-mono truncate">{intg.base_url}</p>
-                          </div>
-                          <div className="flex items-center gap-1 shrink-0">
-                            <Button size="icon" variant="ghost" className="h-6 w-6"
-                              disabled={testingIntgId === intg.id}
-                              onClick={async () => {
-                                setTestingIntgId(intg.id);
-                                try {
-                                  const res = await apiClient.post(`/api/v1/agents/${agent.id}/integrations/${intg.id}/test`);
-                                  setIntegrations(prev => prev.map(i => i.id === intg.id ? res.data.data : i));
-                                } catch {}
-                                setTestingIntgId(null);
-                              }}
-                              title="Test connection">
-                              <TestTube2 className={`h-3 w-3 ${testingIntgId === intg.id ? "animate-pulse" : ""}`} />
-                            </Button>
-                            <Button size="icon" variant="ghost" className="h-6 w-6"
-                              onClick={() => {
-                                if (isEditing) { setIntgDraft(null); setExpandedIntg(null); return; }
-                                setIntgDraft({
-                                  id: intg.id,
-                                  name: intg.name,
-                                  integration_type: intg.integration_type,
-                                  base_url: intg.base_url,
-                                  credential_id: intg.credential_id || "",
-                                  new_cred_name: "",
-                                  new_cred_auth_type: "bearer",
-                                  new_cred_auth_header: "",
-                                  new_cred_value: "",
-                                  enabled_tool_groups: intg.enabled_tool_groups || [],
-                                  allow_destructive: intg.allow_destructive,
-                                });
-                                setExpandedIntg(intg.id);
-                                setIntgError("");
-                              }}>
-                              {isExpanded ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
-                            </Button>
-                            <Button size="icon" variant="ghost" className="h-6 w-6 text-destructive hover:text-destructive"
-                              onClick={async () => {
-                                if (!confirm("Delete this integration?")) return;
-                                await apiClient.delete(`/api/v1/agents/${agent.id}/integrations/${intg.id}`);
-                                setIntegrations(prev => prev.filter(i => i.id !== intg.id));
-                                if (intgDraft?.id === intg.id) setIntgDraft(null);
-                              }}>
-                              <Trash2 className="h-3 w-3" />
-                            </Button>
-                          </div>
-                        </div>
-
-                        {/* Expanded edit form */}
-                        {isEditing && intgDraft && (
-                          <div className="border-t px-3 pb-3 pt-3 space-y-3">
-                            {intgError && (
-                              <div className="text-xs text-destructive bg-destructive/5 rounded-lg p-2">{intgError}</div>
-                            )}
-                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                              <div className="space-y-1">
-                                <Label className="text-[11px]">Name</Label>
-                                <Input value={intgDraft.name} onChange={e => setIntgDraft(d => d && ({...d, name: e.target.value}))}
-                                  className="text-xs h-8" placeholder="My Store" />
-                              </div>
-                              <div className="space-y-1">
-                                <Label className="text-[11px]">Type</Label>
-                                <Select value={intgDraft.integration_type}
-                                  onValueChange={v => setIntgDraft(d => d && ({...d, integration_type: v as "ecom_customer"|"ecom_admin", enabled_tool_groups: []}))}>
-                                  <SelectTrigger className="text-xs h-8"><SelectValue /></SelectTrigger>
-                                  <SelectContent>
-                                    <SelectItem value="ecom_customer" className="text-xs">E-commerce — Customer</SelectItem>
-                                    <SelectItem value="ecom_admin"   className="text-xs">E-commerce — Admin</SelectItem>
-                                  </SelectContent>
-                                </Select>
-                              </div>
-                            </div>
-
-                            <div className="space-y-1">
-                              <Label className="text-[11px]">Base URL <span className="text-muted-foreground">(must be https://)</span></Label>
-                              <Input value={intgDraft.base_url} onChange={e => setIntgDraft(d => d && ({...d, base_url: e.target.value}))}
-                                className="text-xs h-8 font-mono" placeholder="https://api.mystore.com" />
-                            </div>
-
-                            {/* Credential */}
-                            <div className="space-y-1.5 rounded-xl border p-2.5">
-                              <Label className="text-[11px] flex items-center gap-1"><Key className="h-3 w-3" />Credential</Label>
-                              <Select value={intgDraft.credential_id || "__new__"}
-                                onValueChange={v => setIntgDraft(d => d && ({...d, credential_id: v === "__new__" ? "" : v}))}>
-                                <SelectTrigger className="text-xs h-8"><SelectValue placeholder="Select or create…" /></SelectTrigger>
-                                <SelectContent>
-                                  <SelectItem value="__none__" className="text-xs">None (no authentication)</SelectItem>
-                                  {credentials.map(c => (
-                                    <SelectItem key={c.id} value={c.id} className="text-xs">{c.name} ({c.auth_type})</SelectItem>
-                                  ))}
-                                  <SelectItem value="__new__" className="text-xs font-medium text-primary">+ Create new credential</SelectItem>
-                                </SelectContent>
-                              </Select>
-                              {(intgDraft.credential_id === "" || intgDraft.credential_id === "__new__") && (
-                                <div className="space-y-1.5 mt-1.5 pt-1.5 border-t">
-                                  <Input value={intgDraft.new_cred_name}
-                                    onChange={e => setIntgDraft(d => d && ({...d, new_cred_name: e.target.value}))}
-                                    className="text-xs h-8" placeholder="Credential name (e.g. My Store API Key)" />
-                                  <div className="grid grid-cols-2 gap-1.5">
-                                    <Select value={intgDraft.new_cred_auth_type}
-                                      onValueChange={v => setIntgDraft(d => d && ({...d, new_cred_auth_type: v as "none"|"api_key"|"bearer"|"basic"}))}>
-                                      <SelectTrigger className="text-xs h-8"><SelectValue /></SelectTrigger>
-                                      <SelectContent>
-                                        <SelectItem value="none"    className="text-xs">No Auth</SelectItem>
-                                        <SelectItem value="bearer"  className="text-xs">Bearer Token</SelectItem>
-                                        <SelectItem value="api_key" className="text-xs">API Key (header)</SelectItem>
-                                        <SelectItem value="basic"   className="text-xs">Basic Auth</SelectItem>
-                                      </SelectContent>
-                                    </Select>
-                                    {intgDraft.new_cred_auth_type === "api_key" && (
-                                      <Input value={intgDraft.new_cred_auth_header}
-                                        onChange={e => setIntgDraft(d => d && ({...d, new_cred_auth_header: e.target.value}))}
-                                        className="text-xs h-8" placeholder="Header name (e.g. X-Api-Key)" />
-                                    )}
-                                  </div>
-                                  {intgDraft.new_cred_auth_type !== "none" && (
-                                    <Input type="password" value={intgDraft.new_cred_value}
-                                      onChange={e => setIntgDraft(d => d && ({...d, new_cred_value: e.target.value}))}
-                                      className="text-xs h-8 font-mono" placeholder="Token / key / user:password" />
-                                  )}
-                                </div>
-                              )}
-                            </div>
-
-                            {/* Tool groups */}
-                            <div className="space-y-1.5">
-                              <Label className="text-[11px]">Enabled Tool Groups</Label>
-                              <div className="grid grid-cols-2 gap-1">
-                                {(INTEGRATION_TOOL_GROUPS[intgDraft.integration_type] || []).map(g => {
-                                  const on = intgDraft.enabled_tool_groups.includes(g.key);
-                                  return (
-                                    <button key={g.key} type="button"
-                                      onClick={() => setIntgDraft(d => {
-                                        if (!d) return d;
-                                        const cur = d.enabled_tool_groups;
-                                        return { ...d, enabled_tool_groups: on ? cur.filter(x => x !== g.key) : [...cur, g.key] };
-                                      })}
-                                      className={`flex items-center justify-between rounded-lg border px-2.5 py-1.5 text-[11px] transition-all text-left ${
-                                        on ? "border-primary bg-primary/5 text-primary font-medium" : "border-border text-muted-foreground hover:border-muted-foreground/30"
-                                      }`}>
-                                      <span>{g.label}</span>
-                                      <Badge variant="outline" className={`text-[9px] px-1 h-3.5 ${on ? "border-primary/30 text-primary" : ""}`}>{g.count}</Badge>
-                                    </button>
-                                  );
-                                })}
-                              </div>
-                            </div>
-
-                            {/* Destructive permission */}
-                            <div className={`flex items-center justify-between rounded-xl border p-2.5 ${
-                              intgDraft.allow_destructive ? "border-amber-400/50 bg-amber-50/50" : ""
-                            }`}>
-                              <div>
-                                <p className="text-[11px] font-medium flex items-center gap-1">
-                                  <TriangleAlert className="h-3 w-3 text-amber-500" />Allow destructive actions
-                                </p>
-                                <p className="text-[10px] text-muted-foreground">Enables delete, cancel order, and refund tools</p>
-                              </div>
-                              <Switch checked={intgDraft.allow_destructive}
-                                onCheckedChange={v => setIntgDraft(d => d && ({...d, allow_destructive: v}))} />
-                            </div>
-
-                            {/* Actions */}
-                            <div className="flex gap-1.5 pt-0.5">
-                              <Button size="sm" className="flex-1 text-xs h-8" disabled={savingIntg}
-                                onClick={async () => {
-                                  if (!intgDraft) return;
-                                  setIntgError("");
-                                  setSavingIntg(true);
-                                  try {
-                                    let credId = intgDraft.credential_id || null;
-                                    if (!credId && intgDraft.new_cred_value && intgDraft.new_cred_auth_type !== "none") {
-                                      const cr = await apiClient.post(`/api/v1/agents/${agent.id}/credentials`, {
-                                        name: intgDraft.new_cred_name || intgDraft.name,
-                                        auth_type: intgDraft.new_cred_auth_type,
-                                        auth_header: intgDraft.new_cred_auth_header || null,
-                                        auth_value: intgDraft.new_cred_value,
-                                      });
-                                      credId = cr.data.data.id;
-                                      setCredentials(c => [...c, cr.data.data]);
-                                    }
-                                    const payload = {
-                                      name: intgDraft.name,
-                                      base_url: intgDraft.base_url,
-                                      credential_id: credId,
-                                      enabled_tool_groups: intgDraft.enabled_tool_groups,
-                                      allow_destructive: intgDraft.allow_destructive,
-                                    };
-                                    const res = await apiClient.put(`/api/v1/agents/${agent.id}/integrations/${intgDraft.id}`, payload);
-                                    setIntegrations(prev => prev.map(i => i.id === res.data.data.id ? res.data.data : i));
-                                    setIntgDraft(null);
-                                    setExpandedIntg(null);
-                                  } catch (e: any) {
-                                    setIntgError(e?.response?.data?.detail || "Failed to save integration");
-                                  }
-                                  setSavingIntg(false);
-                                }}>
-                                {savingIntg ? <Loader2 className="h-3 w-3 animate-spin mr-1" /> : <Check className="h-3 w-3 mr-1" />}
-                                Save
-                              </Button>
-                              <Button size="sm" variant="outline" className="text-xs h-8"
-                                onClick={() => { setIntgDraft(null); setExpandedIntg(null); setIntgError(""); }}>
-                                Cancel
-                              </Button>
-                            </div>
-                          </div>
-                        )}
+                  {credentials.map(cred => (
+                    <div key={cred.id} className="flex items-center gap-3 rounded-xl border px-3 py-2.5">
+                      <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-primary/10">
+                        <Key className="h-3.5 w-3.5 text-primary" />
                       </div>
-                    );
-                  })}
+                      <div className="flex-1 min-w-0">
+                        <p className="text-xs font-medium truncate">{cred.name}</p>
+                        <p className="text-[10px] text-muted-foreground">
+                          {cred.auth_type === "bearer" ? "Bearer token" :
+                           cred.auth_type === "api_key" ? `API key — ${cred.auth_header || "X-Api-Key"}` :
+                           cred.auth_type === "basic" ? "Basic auth" : "No auth"} · ••••••••
+                        </p>
+                      </div>
+                      <Button size="icon" variant="ghost" className="h-6 w-6 text-destructive hover:text-destructive shrink-0"
+                        onClick={async () => {
+                          if (!confirm(`Delete credential "${cred.name}"?`)) return;
+                          await apiClient.delete(`/api/v1/agents/${agent.id}/credentials/${cred.id}`);
+                          setCredentials(prev => prev.filter(c => c.id !== cred.id));
+                        }}>
+                        <Trash2 className="h-3 w-3" />
+                      </Button>
+                    </div>
+                  ))}
 
-                  {/* New integration form */}
-                  {intgDraft && !intgDraft.id && (
-                    <div className="rounded-xl border-2 border-dashed border-primary/30 p-3 space-y-3">
-                      <p className="text-xs font-medium text-primary">New Integration</p>
-                      {intgError && (
-                        <div className="text-xs text-destructive bg-destructive/5 rounded-lg p-2">{intgError}</div>
-                      )}
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  {/* Add credential form */}
+                  {intgDraft && (
+                    <div className="rounded-xl border-2 border-dashed border-primary/30 p-3 space-y-2.5">
+                      <p className="text-xs font-medium text-primary">New Credential</p>
+                      {intgError && <div className="text-xs text-destructive bg-destructive/5 rounded-lg p-2">{intgError}</div>}
+                      <div className="space-y-1">
+                        <Label className="text-[11px]">Name</Label>
+                        <Input value={intgDraft.new_cred_name}
+                          onChange={e => setIntgDraft(d => d && ({...d, new_cred_name: e.target.value}))}
+                          className="text-xs h-8" placeholder="My Store Bearer Token" />
+                      </div>
+                      <div className="grid grid-cols-2 gap-1.5">
                         <div className="space-y-1">
-                          <Label className="text-[11px]">Name</Label>
-                          <Input value={intgDraft.name} onChange={e => setIntgDraft(d => d && ({...d, name: e.target.value}))}
-                            className="text-xs h-8" placeholder="My Store" />
-                        </div>
-                        <div className="space-y-1">
-                          <Label className="text-[11px]">Type</Label>
-                          <Select value={intgDraft.integration_type}
-                            onValueChange={v => setIntgDraft(d => d && ({...d, integration_type: v as "ecom_customer"|"ecom_admin", enabled_tool_groups: []}))}>
+                          <Label className="text-[11px]">Auth type</Label>
+                          <Select value={intgDraft.new_cred_auth_type}
+                            onValueChange={v => setIntgDraft(d => d && ({...d, new_cred_auth_type: v as "none"|"api_key"|"bearer"|"basic"}))}>
                             <SelectTrigger className="text-xs h-8"><SelectValue /></SelectTrigger>
                             <SelectContent>
-                              <SelectItem value="ecom_customer" className="text-xs">E-commerce — Customer</SelectItem>
-                              <SelectItem value="ecom_admin"   className="text-xs">E-commerce — Admin</SelectItem>
+                              <SelectItem value="bearer"  className="text-xs">Bearer Token</SelectItem>
+                              <SelectItem value="api_key" className="text-xs">API Key (header)</SelectItem>
+                              <SelectItem value="basic"   className="text-xs">Basic Auth</SelectItem>
                             </SelectContent>
                           </Select>
                         </div>
-                      </div>
-                      <div className="space-y-1">
-                        <Label className="text-[11px]">Base URL <span className="text-muted-foreground">(must be https://)</span></Label>
-                        <Input value={intgDraft.base_url} onChange={e => setIntgDraft(d => d && ({...d, base_url: e.target.value}))}
-                          className="text-xs h-8 font-mono" placeholder="https://api.mystore.com" />
-                      </div>
-
-                      <div className="space-y-1.5 rounded-xl border p-2.5">
-                        <Label className="text-[11px] flex items-center gap-1"><Key className="h-3 w-3" />Credential</Label>
-                        <Select value={intgDraft.credential_id || "__new__"}
-                          onValueChange={v => setIntgDraft(d => d && ({...d, credential_id: v === "__new__" ? "" : v}))}>
-                          <SelectTrigger className="text-xs h-8"><SelectValue placeholder="Select or create…" /></SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="__none__" className="text-xs">None (no authentication)</SelectItem>
-                            {credentials.map(c => (
-                              <SelectItem key={c.id} value={c.id} className="text-xs">{c.name} ({c.auth_type})</SelectItem>
-                            ))}
-                            <SelectItem value="__new__" className="text-xs font-medium text-primary">+ Create new credential</SelectItem>
-                          </SelectContent>
-                        </Select>
-                        {(intgDraft.credential_id === "" || intgDraft.credential_id === "__new__") && (
-                          <div className="space-y-1.5 mt-1.5 pt-1.5 border-t">
-                            <Input value={intgDraft.new_cred_name}
-                              onChange={e => setIntgDraft(d => d && ({...d, new_cred_name: e.target.value}))}
-                              className="text-xs h-8" placeholder="Credential name" />
-                            <div className="grid grid-cols-2 gap-1.5">
-                              <Select value={intgDraft.new_cred_auth_type}
-                                onValueChange={v => setIntgDraft(d => d && ({...d, new_cred_auth_type: v as "none"|"api_key"|"bearer"|"basic"}))}>
-                                <SelectTrigger className="text-xs h-8"><SelectValue /></SelectTrigger>
-                                <SelectContent>
-                                  <SelectItem value="none"    className="text-xs">No Auth</SelectItem>
-                                  <SelectItem value="bearer"  className="text-xs">Bearer Token</SelectItem>
-                                  <SelectItem value="api_key" className="text-xs">API Key (header)</SelectItem>
-                                  <SelectItem value="basic"   className="text-xs">Basic Auth</SelectItem>
-                                </SelectContent>
-                              </Select>
-                              {intgDraft.new_cred_auth_type === "api_key" && (
-                                <Input value={intgDraft.new_cred_auth_header}
-                                  onChange={e => setIntgDraft(d => d && ({...d, new_cred_auth_header: e.target.value}))}
-                                  className="text-xs h-8" placeholder="Header name" />
-                              )}
-                            </div>
-                            {intgDraft.new_cred_auth_type !== "none" && (
-                              <Input type="password" value={intgDraft.new_cred_value}
-                                onChange={e => setIntgDraft(d => d && ({...d, new_cred_value: e.target.value}))}
-                                className="text-xs h-8 font-mono" placeholder="Token / key / user:password" />
-                            )}
+                        {intgDraft.new_cred_auth_type === "api_key" && (
+                          <div className="space-y-1">
+                            <Label className="text-[11px]">Header name</Label>
+                            <Input value={intgDraft.new_cred_auth_header}
+                              onChange={e => setIntgDraft(d => d && ({...d, new_cred_auth_header: e.target.value}))}
+                              className="text-xs h-8" placeholder="X-Api-Key" />
                           </div>
                         )}
                       </div>
-
-                      <div className="space-y-1.5">
-                        <Label className="text-[11px]">Enabled Tool Groups</Label>
-                        <div className="grid grid-cols-2 gap-1">
-                          {(INTEGRATION_TOOL_GROUPS[intgDraft.integration_type] || []).map(g => {
-                            const on = intgDraft.enabled_tool_groups.includes(g.key);
-                            return (
-                              <button key={g.key} type="button"
-                                onClick={() => setIntgDraft(d => {
-                                  if (!d) return d;
-                                  const cur = d.enabled_tool_groups;
-                                  return { ...d, enabled_tool_groups: on ? cur.filter(x => x !== g.key) : [...cur, g.key] };
-                                })}
-                                className={`flex items-center justify-between rounded-lg border px-2.5 py-1.5 text-[11px] transition-all text-left ${
-                                  on ? "border-primary bg-primary/5 text-primary font-medium" : "border-border text-muted-foreground hover:border-muted-foreground/30"
-                                }`}>
-                                <span>{g.label}</span>
-                                <Badge variant="outline" className={`text-[9px] px-1 h-3.5 ${on ? "border-primary/30 text-primary" : ""}`}>{g.count}</Badge>
-                              </button>
-                            );
-                          })}
-                        </div>
+                      <div className="space-y-1">
+                        <Label className="text-[11px]">Value</Label>
+                        <Input type="password" value={intgDraft.new_cred_value}
+                          onChange={e => setIntgDraft(d => d && ({...d, new_cred_value: e.target.value}))}
+                          className="text-xs h-8 font-mono" placeholder="Token / key / username:password" />
                       </div>
-
-                      <div className={`flex items-center justify-between rounded-xl border p-2.5 ${
-                        intgDraft.allow_destructive ? "border-amber-400/50 bg-amber-50/50" : ""
-                      }`}>
-                        <div>
-                          <p className="text-[11px] font-medium flex items-center gap-1">
-                            <TriangleAlert className="h-3 w-3 text-amber-500" />Allow destructive actions
-                          </p>
-                          <p className="text-[10px] text-muted-foreground">Enables delete, cancel order, and refund tools</p>
-                        </div>
-                        <Switch checked={intgDraft.allow_destructive}
-                          onCheckedChange={v => setIntgDraft(d => d && ({...d, allow_destructive: v}))} />
-                      </div>
-
                       <div className="flex gap-1.5">
                         <Button size="sm" className="flex-1 text-xs h-8" disabled={savingIntg}
                           onClick={async () => {
-                            if (!intgDraft) return;
-                            setIntgError("");
-                            setSavingIntg(true);
+                            if (!intgDraft?.new_cred_name || !intgDraft.new_cred_value) return;
+                            setIntgError(""); setSavingIntg(true);
                             try {
-                              let credId: string | null = intgDraft.credential_id || null;
-                              if (!credId && intgDraft.new_cred_value && intgDraft.new_cred_auth_type !== "none") {
-                                const cr = await apiClient.post(`/api/v1/agents/${agent.id}/credentials`, {
-                                  name: intgDraft.new_cred_name || intgDraft.name,
-                                  auth_type: intgDraft.new_cred_auth_type,
-                                  auth_header: intgDraft.new_cred_auth_header || null,
-                                  auth_value: intgDraft.new_cred_value,
-                                });
-                                credId = cr.data.data.id;
-                                setCredentials(c => [...c, cr.data.data]);
-                              }
-                              const res = await apiClient.post(`/api/v1/agents/${agent.id}/integrations`, {
-                                name: intgDraft.name,
-                                integration_type: intgDraft.integration_type,
-                                base_url: intgDraft.base_url,
-                                credential_id: credId,
-                                enabled_tool_groups: intgDraft.enabled_tool_groups,
-                                allow_destructive: intgDraft.allow_destructive,
+                              const res = await apiClient.post(`/api/v1/agents/${agent.id}/credentials`, {
+                                name: intgDraft.new_cred_name,
+                                auth_type: intgDraft.new_cred_auth_type,
+                                auth_header: intgDraft.new_cred_auth_header || null,
+                                auth_value: intgDraft.new_cred_value,
                               });
-                              setIntegrations(prev => [...prev, res.data.data]);
+                              setCredentials(c => [...c, res.data.data]);
                               setIntgDraft(null);
                             } catch (e: any) {
-                              setIntgError(e?.response?.data?.detail || "Failed to create integration");
+                              setIntgError(e?.response?.data?.detail || "Failed to save credential");
                             }
                             setSavingIntg(false);
                           }}>
-                          {savingIntg ? <Loader2 className="h-3 w-3 animate-spin mr-1" /> : <Plus className="h-3 w-3 mr-1" />}
-                          Create Integration
+                          {savingIntg ? <Loader2 className="h-3 w-3 animate-spin mr-1" /> : <Check className="h-3 w-3 mr-1" />}
+                          Save Credential
                         </Button>
                         <Button size="sm" variant="outline" className="text-xs h-8"
                           onClick={() => { setIntgDraft(null); setIntgError(""); }}>
@@ -1846,20 +1576,20 @@ export function AgentConfigModal({ agent, open, onClose, onUpdate }: AgentConfig
                     </div>
                   )}
 
-                  {/* Add button — only if not already adding */}
                   {!intgDraft && (
                     <Button size="sm" variant="outline" className="w-full text-xs h-8 border-dashed"
                       onClick={() => {
-                        if (integrations.length === 0) loadIntegrations();
+                        if (credentials.length === 0) loadIntegrations();
                         setIntgDraft({ ...BLANK_DRAFT });
                         setIntgError("");
                       }}>
-                      <Plus className="h-3.5 w-3.5 mr-1.5" />Add Integration
+                      <Plus className="h-3.5 w-3.5 mr-1.5" />Add Credential
                     </Button>
                   )}
                 </>
               }
             </div>}
+
 
             {activeTab === "advanced" && <div className="mt-0 space-y-4">
               <div className="space-y-1.5">

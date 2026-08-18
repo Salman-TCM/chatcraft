@@ -2447,32 +2447,81 @@ async def _tool_http(inputs: dict) -> str:
 async def _tool_custom_webhook(fn: AgentFunction, inputs: dict) -> str:
     """Fire a user-defined custom tool (app.models.agent_function.AgentFunction).
 
-    Re-validates SSRF safety at fire time (not just at save time — see
-    app.services.net_security), and never surfaces the decrypted headers or raw
-    exception details back to the model, since a header commonly carries the
-    owner's own API credentials for their external system.
+    Features:
+    - URL template substitution: {param} in the URL is replaced with the
+      matching input value so /api/cart/{id}/ works automatically.
+    - Credential injection: if credential_id is set, the stored credential's
+      auth header is added automatically without exposing the value to the model.
+    - HTTP method routing: remaining inputs go to query string (GET/DELETE) or
+      JSON body (POST/PUT/PATCH).
+    - SSRF re-validated at fire time on the final resolved URL.
     """
+    import re as _re
     from app.services.llm.key_store import decrypt_key
+    from app.services.integrations.credential_store import decrypt_credential
 
-    if not _is_ssrf_safe(fn.webhook_url):
+    # ── 1. URL template substitution ─────────────────────────────────────────
+    url = fn.webhook_url
+    remaining = dict(inputs)
+    for match in _re.findall(r"\{(\w+)\}", url):
+        value = remaining.pop(match, "")
+        url = url.replace(f"{{{match}}}", str(value))
+
+    if not _is_ssrf_safe(url):
         return "Error: this tool's webhook URL is no longer allowed."
 
-    headers: dict[str, str] = {}
+    # ── 2. Build headers ──────────────────────────────────────────────────────
+    headers: dict[str, str] = {"Content-Type": "application/json"}
+
+    # Manual headers (encrypted JSON blob)
     if fn.webhook_headers_encrypted:
         try:
-            headers = json.loads(decrypt_key(fn.webhook_headers_encrypted))
+            headers.update(json.loads(decrypt_key(fn.webhook_headers_encrypted)))
         except Exception:
             return "Error: this tool's stored credentials could not be read."
 
+    # Credential-based auth (auto-injected)
+    cred_id = getattr(fn, "credential_id", None)
+    if cred_id:
+        try:
+            from app.db.session import AsyncSessionLocal
+            from app.models.agent_integration import IntegrationCredential
+            async with AsyncSessionLocal() as _db:
+                cred = await _db.get(IntegrationCredential, cred_id)
+            if cred and cred.encrypted_value:
+                value = decrypt_credential(cred.encrypted_value)
+                if cred.auth_type == "bearer":
+                    headers["Authorization"] = f"Bearer {value}"
+                elif cred.auth_type == "api_key":
+                    headers[cred.auth_header or "X-Api-Key"] = value
+                elif cred.auth_type == "basic":
+                    import base64
+                    headers["Authorization"] = "Basic " + base64.b64encode(value.encode()).decode()
+        except Exception:
+            return "Error: could not load the credential for this tool."
+
+    # ── 3. Execute ────────────────────────────────────────────────────────────
+    method = (fn.webhook_method or "POST").upper()
     try:
-        async with httpx.AsyncClient(timeout=20, follow_redirects=False) as client:
-            if fn.webhook_method == "POST":
-                resp = await client.post(fn.webhook_url, headers=headers, json=inputs)
-            else:
-                resp = await client.get(fn.webhook_url, headers=headers, params=inputs)
+        async with httpx.AsyncClient(timeout=30, follow_redirects=False) as client:
+            if method in ("POST", "PUT", "PATCH"):
+                resp = await client.request(method, url, headers=headers, json=remaining)
+            elif method == "DELETE":
+                resp = await client.delete(url, headers=headers, params=remaining or None)
+            else:  # GET
+                resp = await client.get(url, headers=headers, params=remaining or None)
     except Exception:
         return f"Error: could not reach the '{fn.name}' service."
 
+    # ── 4. Normalise response ─────────────────────────────────────────────────
+    if resp.status_code >= 500:
+        return f"The '{fn.name}' service returned a server error (HTTP {resp.status_code}). Please try again."
+    if resp.status_code == 401:
+        return f"Authentication failed for '{fn.name}' — the stored credential may be expired."
+    if resp.status_code == 403:
+        return f"Access denied by '{fn.name}' — the credential does not have permission."
+    if resp.status_code == 404:
+        return f"'{fn.name}' returned 404 — the requested resource was not found."
     try:
         return json.dumps(resp.json(), indent=2)[:3000]
     except Exception:

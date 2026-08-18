@@ -22,7 +22,7 @@ def upgrade() -> None:
             "welcome_suggestions",
             postgresql.JSONB(),
             nullable=False,
-            server_default="'[]'",
+            server_default=sa.text("'[]'::jsonb"),
         ),
     )
 

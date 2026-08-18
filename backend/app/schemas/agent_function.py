@@ -68,13 +68,17 @@ def _validate_headers(headers: dict[str, str] | None) -> dict[str, str] | None:
     return headers
 
 
+HttpMethod = Literal["GET", "POST", "PUT", "PATCH", "DELETE"]
+
+
 class CreateAgentFunctionRequest(BaseModel):
     name: str = Field(min_length=1, max_length=64)
     description: str = Field("", max_length=2000)
     parameters_schema: dict = Field(default_factory=dict)
     webhook_url: str = Field(min_length=1, max_length=2048)
-    webhook_method: Literal["GET", "POST"] = "POST"
+    webhook_method: HttpMethod = "POST"
     webhook_headers: dict[str, str] | None = None
+    credential_id: uuid.UUID | None = None
 
     _v_name = field_validator("name")(_validate_name)
     _v_url = field_validator("webhook_url")(_validate_webhook_url)
@@ -89,8 +93,9 @@ class UpdateAgentFunctionRequest(BaseModel):
     description: str | None = Field(None, max_length=2000)
     parameters_schema: dict | None = None
     webhook_url: str | None = Field(None, min_length=1, max_length=2048)
-    webhook_method: Literal["GET", "POST"] | None = None
+    webhook_method: HttpMethod | None = None
     webhook_headers: dict[str, str] | None = None
+    credential_id: uuid.UUID | None = None
     is_active: bool | None = None
 
     @field_validator("name")
@@ -118,4 +123,5 @@ class AgentFunctionOut(BaseModel):
     webhook_url: str
     webhook_method: str
     has_headers: bool
+    credential_id: uuid.UUID | None
     is_active: bool
