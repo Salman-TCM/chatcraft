@@ -6,6 +6,7 @@ services:
   postgres:
     image: pgvector/pgvector:pg16
     restart: unless-stopped
+    networks: [data]
     environment:
       POSTGRES_USER:     ${POSTGRES_USER:-chatcraft}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-chatcraft}
@@ -27,6 +28,7 @@ services:
   redis:
     image: redis:7-alpine
     restart: unless-stopped
+    networks: [data]
     command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
     ports:
       - "${REDIS_HOST_PORT:-6379}:6379"
@@ -47,6 +49,7 @@ services:
   minio:
     image: minio/minio:latest
     restart: unless-stopped
+    networks: [data]
     command: server /data --console-address ":9001"
     ports:
       - "${MINIO_API_PORT:-9000}:9000"
@@ -71,6 +74,7 @@ services:
       context: ./backend
       dockerfile: Dockerfile
     restart: unless-stopped
+    networks: [data]
     command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload --reload-dir app
     ports:
       - "${BACKEND_PORT:-8000}:8000"
@@ -157,6 +161,7 @@ services:
       context: ./backend
       dockerfile: Dockerfile
     restart: unless-stopped
+    networks: [data]
     entrypoint: []
     command: celery -A app.workers.celery_app worker --loglevel=info --concurrency=4
     volumes:
@@ -211,6 +216,7 @@ services:
       context: ./backend
       dockerfile: Dockerfile
     restart: unless-stopped
+    networks: [data]
     entrypoint: []
     command: celery -A app.workers.celery_app beat --loglevel=info --scheduler celery.beat.PersistentScheduler --schedule /tmp/celerybeat-schedule
     volumes:
@@ -241,6 +247,7 @@ services:
   clamav:
     image: clamav/clamav:stable
     restart: unless-stopped
+    networks: [data]
     ports:
       - "${CLAMAV_HOST_PORT:-3310}:3310"
     volumes:
@@ -263,6 +270,7 @@ services:
       dockerfile: frontend/Dockerfile
       target: deps
     restart: unless-stopped
+    networks: [data]
     command: sh -c "cd frontend && npm run dev"
     ports:
       - "${FRONTEND_PORT:-3000}:3000"
@@ -302,6 +310,13 @@ services:
       retries: 3
       start_period: 60s
 
+
+networks:
+  data:
+    driver: bridge
+    # Production overlay adds internal: true to cut this network off from
+    # the internet. In development it is a plain bridge so services can
+    # still reach the outside world (package downloads, API calls, etc.).
 
 volumes:
   postgres_data:
