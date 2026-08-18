@@ -135,7 +135,7 @@ services:
       resources:
         limits:
           cpus: "1"
-          memory: 1536M  # clamd needs ~700-800 MB resident + headroom during DB reload
+          memory: 1G
 
   # celery_worker/beat need `edge` too — they call Anthropic/OpenAI/Stripe/
   # Resend directly (see docker-compose.yml env vars), all internet-bound.
