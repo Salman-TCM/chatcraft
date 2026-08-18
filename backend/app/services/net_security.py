@@ -1,11 +1,18 @@
 """
 SSRF-safety helpers shared between the schema layer (validate at save time) and
 the runtime (block at fire time). Kept in one place so both agree on the rules.
+
+Two levels of protection:
+- is_ssrf_safe()          — fast, synchronous, URL-syntax check. Used at save time.
+- is_ssrf_safe_resolved() — async, resolves DNS to catch rebinding attacks.
+                            Use this at execution time for any outbound HTTP call.
 """
 
 from __future__ import annotations
 
+import asyncio
 import ipaddress
+import socket
 from urllib.parse import urlparse
 
 _PRIVATE_NETS = [
@@ -79,6 +86,48 @@ def is_ssrf_safe(url: str) -> bool:
             return not any(ip in net for net in _PRIVATE_NETS)
         except ValueError:
             pass  # not an IP literal — dotted hostname is OK
+        return True
+    except Exception:
+        return False
+
+
+async def is_ssrf_safe_resolved(url: str) -> bool:
+    """Async SSRF check that resolves DNS — prevents DNS rebinding attacks.
+
+    DNS rebinding: attacker owns a domain that initially resolves to a public IP
+    (passes is_ssrf_safe), then flips the DNS record to 169.254.169.254 or
+    10.x.x.x before the actual HTTP connection. Resolving here and re-checking
+    every returned IP closes that window.
+
+    Call this at execution time (in tool implementations), not at save time
+    where is_ssrf_safe() is sufficient.
+    """
+    if not is_ssrf_safe(url):
+        return False
+    try:
+        parsed = urlparse(url)
+        host = (parsed.hostname or "").lower().rstrip(".")
+        if not host:
+            return False
+        # If host is already an IP literal, is_ssrf_safe() already validated it.
+        try:
+            ipaddress.ip_address(host)
+            return True
+        except ValueError:
+            pass
+        # Resolve hostname → check every returned address.
+        loop = asyncio.get_event_loop()
+        infos = await loop.run_in_executor(
+            None, socket.getaddrinfo, host, None, socket.AF_UNSPEC, socket.SOCK_STREAM
+        )
+        for _, _, _, _, sockaddr in infos:
+            ip_str = sockaddr[0]
+            try:
+                ip = ipaddress.ip_address(ip_str)
+                if any(ip in net for net in _PRIVATE_NETS):
+                    return False
+            except ValueError:
+                return False
         return True
     except Exception:
         return False
