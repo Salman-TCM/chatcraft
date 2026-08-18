@@ -19,6 +19,7 @@ import {
   Loader2, Check, Brain, Zap, Settings, Plug,
   Webhook, RefreshCw, Trash2, Plus, ExternalLink,
   AlertCircle, ChevronDown, ChevronUp, Wrench, Sheet, BookOpen, Scale, Palette,
+  ShoppingCart, X,
 } from "lucide-react";
 import { apiClient } from "@/lib/api";
 import { AgentKnowledgeManager } from "./AgentKnowledgeManager";
@@ -61,6 +62,23 @@ interface MCPTool {
   description?: string;
 }
 
+interface Store {
+  id: string;
+  name: string;
+  slug: string;
+  agent_id: string | null;
+}
+
+interface AgentFunction {
+  id: string;
+  name: string;
+  description: string;
+  webhook_url: string;
+  webhook_method: string;
+  has_headers: boolean;
+  is_active: boolean;
+}
+
 interface ProviderModels {
   provider: string;
   label: string;
@@ -96,6 +114,7 @@ const TOOLS: ToolConfig[] = [
   { key: "faraid",       label: "Faraid Calculator", description: "Deterministic Islamic inheritance (Hanafi) share calculation", icon: Scale, category: "compute" },
   { key: "http",         label: "HTTP Requests",  description: "Make API calls to external services",         icon: Link2,       category: "integration" },
   { key: "sheets",       label: "Google Sheets",  description: "Read and write spreadsheet data",             icon: Sheet,       category: "integration" },
+  { key: "commerce",     label: "Commerce",       description: "List products and hand out checkout links from a linked store", icon: ShoppingCart, category: "integration" },
   { key: "email",        label: "Email",          description: "Send emails via configured service",          icon: Mail,        category: "communication" },
   { key: "sms",          label: "SMS",            description: "Send text messages via Twilio",               icon: Smartphone,  category: "communication" },
   { key: "verification", label: "Verification",   description: "Send and verify OTP codes",                   icon: ShieldCheck, category: "communication" },
@@ -217,6 +236,19 @@ export function AgentConfigModal({ agent, open, onClose, onUpdate }: AgentConfig
   const [providers, setProviders]           = useState<ProviderModels[]>([]);
   const [modelsLoading, setModelsLoading]   = useState(true);
 
+  const [stores, setStores]                 = useState<Store[]>([]);
+  const [linkingStore, setLinkingStore]     = useState(false);
+
+  const [customFunctions, setCustomFunctions] = useState<AgentFunction[]>([]);
+  const [showAddFunction, setShowAddFunction] = useState(false);
+  const [savingFunction, setSavingFunction]   = useState(false);
+  const [functionForm, setFunctionForm] = useState({
+    name: "", description: "", webhook_method: "POST", webhook_url: "",
+    parameters_schema: '{\n  "type": "object",\n  "properties": {},\n  "required": []\n}',
+  });
+  const [headerRows, setHeaderRows] = useState<{ key: string; value: string }[]>([]);
+  const [functionError, setFunctionError] = useState("");
+
   const loadMcp = useCallback(async () => {
     try {
       const res = await apiClient.get("/api/v1/mcp-servers");
@@ -232,6 +264,20 @@ export function AgentConfigModal({ agent, open, onClose, onUpdate }: AgentConfig
     } catch {}
     setModelsLoading(false);
   }, []);
+
+  const loadStores = useCallback(async () => {
+    try {
+      const res = await apiClient.get("/api/v1/stores");
+      setStores(res.data.data || []);
+    } catch {}
+  }, []);
+
+  const loadFunctions = useCallback(async () => {
+    try {
+      const res = await apiClient.get(`/api/agents/${agent.id}/functions`);
+      setCustomFunctions(res.data.data || []);
+    } catch {}
+  }, [agent.id]);
 
   useEffect(() => {
     if (open) {
@@ -257,10 +303,19 @@ export function AgentConfigModal({ agent, open, onClose, onUpdate }: AgentConfig
       });
       setErrors({});
       setActiveTab("basic");
+      setShowAddFunction(false);
+      setFunctionForm({
+        name: "", description: "", webhook_method: "POST", webhook_url: "",
+        parameters_schema: '{\n  "type": "object",\n  "properties": {},\n  "required": []\n}',
+      });
+      setHeaderRows([]);
+      setFunctionError("");
       loadMcp();
       loadModels();
+      loadStores();
+      loadFunctions();
     }
-  }, [agent, open, loadMcp, loadModels]);
+  }, [agent, open, loadMcp, loadModels, loadStores, loadFunctions]);
 
   const set = (field: string, value: unknown) => {
     setForm((p) => ({ ...p, [field]: value }));
@@ -322,6 +377,73 @@ export function AgentConfigModal({ agent, open, onClose, onUpdate }: AgentConfig
       setMcpTools((t) => ({ ...t, [id]: res.data.data || [] }));
     } catch {}
     setLoadingMcpId(null);
+  };
+
+  const linkedStore = stores.find((s) => s.agent_id === agent.id) || null;
+
+  const linkStore = async (storeId: string) => {
+    setLinkingStore(true);
+    try {
+      if (linkedStore) await apiClient.patch(`/api/v1/stores/${linkedStore.id}`, { agent_id: null });
+      if (storeId) await apiClient.patch(`/api/v1/stores/${storeId}`, { agent_id: agent.id });
+      await loadStores();
+    } catch {}
+    setLinkingStore(false);
+  };
+
+  const addHeaderRow = () => setHeaderRows((r) => [...r, { key: "", value: "" }]);
+  const removeHeaderRow = (i: number) => setHeaderRows((r) => r.filter((_, idx) => idx !== i));
+  const updateHeaderRow = (i: number, field: "key" | "value", val: string) =>
+    setHeaderRows((r) => r.map((row, idx) => (idx === i ? { ...row, [field]: val } : row)));
+
+  const createFunction = async () => {
+    setFunctionError("");
+    if (!functionForm.name.trim() || !functionForm.webhook_url.trim()) return;
+    let parameters_schema: unknown;
+    try {
+      parameters_schema = JSON.parse(functionForm.parameters_schema);
+    } catch {
+      setFunctionError("Parameters schema must be valid JSON.");
+      return;
+    }
+    setSavingFunction(true);
+    try {
+      const webhook_headers = headerRows.reduce<Record<string, string>>((acc, r) => {
+        if (r.key.trim()) acc[r.key.trim()] = r.value;
+        return acc;
+      }, {});
+      await apiClient.post(`/api/agents/${agent.id}/functions`, {
+        name: functionForm.name.trim(),
+        description: functionForm.description.trim(),
+        webhook_method: functionForm.webhook_method,
+        webhook_url: functionForm.webhook_url.trim(),
+        parameters_schema,
+        ...(Object.keys(webhook_headers).length ? { webhook_headers } : {}),
+      });
+      setFunctionForm({
+        name: "", description: "", webhook_method: "POST", webhook_url: "",
+        parameters_schema: '{\n  "type": "object",\n  "properties": {},\n  "required": []\n}',
+      });
+      setHeaderRows([]);
+      setShowAddFunction(false);
+      await loadFunctions();
+    } catch (err) {
+      const msg = (err as { response?: { data?: { detail?: { error?: string } } } })
+        ?.response?.data?.detail?.error;
+      setFunctionError(msg || "Could not save this tool.");
+    }
+    setSavingFunction(false);
+  };
+
+  const toggleFunction = async (fn: AgentFunction) => {
+    await apiClient.post(`/api/agents/${agent.id}/functions/${fn.id}/toggle`);
+    loadFunctions();
+  };
+
+  const deleteFunction = async (id: string) => {
+    if (!confirm("Remove this custom tool?")) return;
+    await apiClient.delete(`/api/agents/${agent.id}/functions/${id}`);
+    loadFunctions();
   };
 
   const enabledCount   = Object.values(form.tools).filter(Boolean).length;
@@ -656,6 +778,153 @@ export function AgentConfigModal({ agent, open, onClose, onUpdate }: AgentConfig
                   </div>
                 </div>
               ))}
+
+              {/* Commerce store link */}
+              {form.tools.commerce && (
+                <div className="rounded-xl border p-3.5 space-y-2">
+                  <div>
+                    <p className="text-sm font-medium">Linked Store</p>
+                    <p className="text-[11px] text-muted-foreground mt-0.5">
+                      list_products / buy_product will use this store&apos;s catalog.
+                    </p>
+                  </div>
+                  <Select
+                    value={linkedStore?.id || "none"}
+                    onValueChange={(v) => linkStore(v === "none" ? "" : v)}
+                    disabled={linkingStore}
+                  >
+                    <SelectTrigger className="h-8 text-xs">
+                      <SelectValue placeholder="No store linked" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="none">No store linked</SelectItem>
+                      {stores.map((s) => (
+                        <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  {stores.length === 0 && (
+                    <p className="text-[11px] text-muted-foreground">
+                      No stores yet —{" "}
+                      <Link href="/dashboard/stores" onClick={onClose} className="underline">
+                        create one
+                      </Link>.
+                    </p>
+                  )}
+                </div>
+              )}
+
+              {/* Custom webhook tools */}
+              <div className="rounded-xl border p-3.5 space-y-3">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-sm font-medium">Custom Tools</p>
+                    <p className="text-[11px] text-muted-foreground mt-0.5">
+                      Point a tool like book_service at your own API. Runs only in authenticated
+                      chats — never on a public share link.
+                    </p>
+                  </div>
+                  <Button size="sm" variant="outline" className="text-xs h-7 shrink-0"
+                    onClick={() => setShowAddFunction((v) => !v)}>
+                    <Plus className="h-3 w-3 mr-1" />Add
+                  </Button>
+                </div>
+
+                {customFunctions.length > 0 && (
+                  <div className="space-y-1.5">
+                    {customFunctions.map((fn) => (
+                      <div key={fn.id} className={`flex items-center gap-2 rounded-lg border px-2.5 py-2 ${
+                        fn.is_active ? "" : "opacity-50"
+                      }`}>
+                        <Webhook className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                        <div className="flex-1 min-w-0">
+                          <p className="text-[11px] font-mono font-semibold truncate">{fn.name}</p>
+                          <p className="text-[10px] text-muted-foreground truncate">
+                            {fn.webhook_method} {fn.webhook_url}
+                          </p>
+                        </div>
+                        <Switch checked={fn.is_active} onCheckedChange={() => toggleFunction(fn)} />
+                        <Button size="icon" variant="ghost" className="h-6 w-6 text-destructive hover:text-destructive"
+                          onClick={() => deleteFunction(fn.id)}>
+                          <Trash2 className="h-3 w-3" />
+                        </Button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {showAddFunction && (
+                  <div className="rounded-lg bg-muted/30 border p-3 space-y-2.5">
+                    <div className="grid grid-cols-2 gap-2">
+                      <div className="space-y-1">
+                        <Label className="text-[11px]">Tool name</Label>
+                        <Input className="h-8 text-xs font-mono" placeholder="book_service"
+                          value={functionForm.name}
+                          onChange={(e) => setFunctionForm((p) => ({ ...p, name: e.target.value }))} />
+                      </div>
+                      <div className="space-y-1">
+                        <Label className="text-[11px]">Method</Label>
+                        <Select value={functionForm.webhook_method}
+                          onValueChange={(v) => setFunctionForm((p) => ({ ...p, webhook_method: v }))}>
+                          <SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="POST">POST</SelectItem>
+                            <SelectItem value="GET">GET</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    </div>
+                    <div className="space-y-1">
+                      <Label className="text-[11px]">Description (tells the model when to use it)</Label>
+                      <Input className="h-8 text-xs" placeholder="Book an appointment for a service"
+                        value={functionForm.description}
+                        onChange={(e) => setFunctionForm((p) => ({ ...p, description: e.target.value }))} />
+                    </div>
+                    <div className="space-y-1">
+                      <Label className="text-[11px]">Webhook URL</Label>
+                      <Input className="h-8 text-xs font-mono" placeholder="https://your-api.example.com/bookings"
+                        value={functionForm.webhook_url}
+                        onChange={(e) => setFunctionForm((p) => ({ ...p, webhook_url: e.target.value }))} />
+                    </div>
+                    <div className="space-y-1">
+                      <div className="flex items-center justify-between">
+                        <Label className="text-[11px]">Headers (e.g. Authorization)</Label>
+                        <Button size="sm" variant="ghost" className="h-6 text-[11px] px-2" onClick={addHeaderRow}>
+                          <Plus className="h-2.5 w-2.5 mr-1" />Header
+                        </Button>
+                      </div>
+                      {headerRows.map((row, i) => (
+                        <div key={i} className="flex items-center gap-1.5">
+                          <Input className="h-7 text-[11px] font-mono" placeholder="Authorization"
+                            value={row.key} onChange={(e) => updateHeaderRow(i, "key", e.target.value)} />
+                          <Input className="h-7 text-[11px] font-mono" placeholder="Bearer ..." type="password"
+                            value={row.value} onChange={(e) => updateHeaderRow(i, "value", e.target.value)} />
+                          <Button size="icon" variant="ghost" className="h-6 w-6 shrink-0" onClick={() => removeHeaderRow(i)}>
+                            <X className="h-3 w-3" />
+                          </Button>
+                        </div>
+                      ))}
+                    </div>
+                    <div className="space-y-1">
+                      <Label className="text-[11px]">Parameters (JSON schema)</Label>
+                      <Textarea className="text-[11px] font-mono min-h-[80px]"
+                        value={functionForm.parameters_schema}
+                        onChange={(e) => setFunctionForm((p) => ({ ...p, parameters_schema: e.target.value }))} />
+                    </div>
+                    {functionError && (
+                      <p className="text-[11px] text-destructive">{functionError}</p>
+                    )}
+                    <div className="flex justify-end gap-2 pt-1">
+                      <Button size="sm" variant="ghost" className="text-xs h-7"
+                        onClick={() => setShowAddFunction(false)}>Cancel</Button>
+                      <Button size="sm" className="text-xs h-7" onClick={createFunction} disabled={savingFunction}>
+                        {savingFunction ? <Loader2 className="h-3 w-3 mr-1 animate-spin" /> : null}
+                        Save tool
+                      </Button>
+                    </div>
+                  </div>
+                )}
+              </div>
             </div>}
 
             {/* ── Knowledge ─────────────────────────────────────────────────── */}
