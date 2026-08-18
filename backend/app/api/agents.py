@@ -169,6 +169,7 @@ async def get_public_agent(share_token: str, db: DBSession):
             "model": agent.model,
             "welcome_message": agent.welcome_message,
             "suggestions_enabled": agent.suggestions_enabled,
+            "welcome_suggestions": getattr(agent, "welcome_suggestions", None) or [],
             # Design fields
             "primary_colour": getattr(agent, "primary_colour", "#6366f1") or "#6366f1",
             "logo_url": getattr(agent, "logo_url", None),
