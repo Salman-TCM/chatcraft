@@ -141,6 +141,7 @@ services:
       ADMIN_PASSWORD:           ${ADMIN_PASSWORD:-}
       ADMIN_NAME:               ${ADMIN_NAME:-Admin}
       ADMIN_ROLE:               ${ADMIN_ROLE:-superadmin}
+      INTEGRATION_ENCRYPTION_KEY: ${INTEGRATION_ENCRYPTION_KEY:-}
     depends_on:
       postgres:
         condition: service_healthy

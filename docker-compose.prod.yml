@@ -210,6 +210,7 @@ services:
       MINIO_PUBLIC_URL: ${MINIO_PUBLIC_URL}
       CLAMAV_HOST: clamav
       CLAMAV_PORT: "3310"
+      INTEGRATION_ENCRYPTION_KEY: ${INTEGRATION_ENCRYPTION_KEY:?INTEGRATION_ENCRYPTION_KEY must be set in .env}
     depends_on:
       postgres:
         condition: service_healthy
