@@ -35,7 +35,7 @@ class Agent(TimestampMixin, Base):
     )
 
     # Tool toggles: {"web_search": bool, "browser": bool, "code": bool,
-    #                "http": bool, "sheets": bool, "email": bool}
+    #                "http": bool, "sheets": bool, "email": bool, "commerce": bool}
     tools: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict, server_default="{}")
 
     memory_enabled: Mapped[bool] = mapped_column(
