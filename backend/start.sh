@@ -1,6 +1,37 @@
 #!/bin/bash
 set -e
 
+# ---------------------------------------------------------------------------
+# Wait for postgres to be reachable at the TCP level before running alembic.
+#
+# depends_on: condition: service_healthy guarantees postgres is up, but
+# Docker's embedded DNS can still return EAI_AGAIN (errno -3) for a brief
+# window after container start. A TCP connection check bypasses DNS caching
+# issues and confirms the port is actually accepting connections.
+# ---------------------------------------------------------------------------
+DB_HOST=$(python3 -c "
+import os, re
+url = os.environ.get('DATABASE_URL', '')
+m = re.search(r'@([^:/]+)', url)
+print(m.group(1) if m else 'postgres')
+")
+DB_PORT=5432
+MAX_ATTEMPTS=30
+
+echo "[entrypoint] Waiting for postgres at ${DB_HOST}:${DB_PORT}..."
+for i in $(seq 1 $MAX_ATTEMPTS); do
+  if python3 -c "import socket; socket.create_connection(('${DB_HOST}', ${DB_PORT}), timeout=2).close()" 2>/dev/null; then
+    echo "[entrypoint] Postgres reachable (attempt ${i})."
+    break
+  fi
+  if [ "$i" -eq "$MAX_ATTEMPTS" ]; then
+    echo "[entrypoint] ERROR: postgres not reachable after ${MAX_ATTEMPTS} attempts. Aborting."
+    exit 1
+  fi
+  echo "[entrypoint] Attempt ${i}/${MAX_ATTEMPTS} — not ready yet, retrying in 2s..."
+  sleep 2
+done
+
 echo "[entrypoint] Running database migrations..."
 alembic upgrade head
 echo "[entrypoint] Migrations complete."
