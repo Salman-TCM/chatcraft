@@ -61,6 +61,7 @@ def _out(fn: AgentFunction) -> dict:
         webhook_url=fn.webhook_url,
         webhook_method=fn.webhook_method,
         has_headers=bool(fn.webhook_headers_encrypted),
+        credential_id=getattr(fn, "credential_id", None),
         is_active=fn.is_active,
     ).model_dump(mode="json")
 
@@ -133,6 +134,7 @@ async def create_agent_function(
         webhook_headers_encrypted=(
             encrypt_key(json.dumps(body.webhook_headers)) if body.webhook_headers else None
         ),
+        credential_id=body.credential_id,
     )
     db.add(fn)
     await db.commit()

@@ -1,6 +1,6 @@
 import uuid
 
-from sqlalchemy import Boolean, ForeignKey, Integer, String, Text
+from sqlalchemy import Boolean, ForeignKey, Integer, String, Text, text
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -71,7 +71,7 @@ class Agent(TimestampMixin, Base):
     # Static quick-reply chips shown below the welcome message before the
     # first user message (max 4). Stored as a JSON array of strings.
     welcome_suggestions: Mapped[list] = mapped_column(
-        JSONB, nullable=False, default=list, server_default="'[]'"
+        JSONB, nullable=False, default=list, server_default=text("'[]'::jsonb")
     )
 
     # ── Design / branding fields ───────────────────────────────────────────────

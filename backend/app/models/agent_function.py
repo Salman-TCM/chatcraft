@@ -52,6 +52,15 @@ class AgentFunction(TimestampMixin, Base):
     # Decrypted only at fire time, server-side — never returned to the client.
     webhook_headers_encrypted: Mapped[str | None] = mapped_column(Text, nullable=True)
 
+    # Optional: reference a stored credential (integration_credentials table).
+    # When set, the credential's auth header is injected automatically at
+    # execution time — the user never needs to paste tokens into the tool form.
+    credential_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("integration_credentials.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+
     is_active: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=True, server_default="true"
     )
