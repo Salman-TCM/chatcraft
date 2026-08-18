@@ -1692,6 +1692,38 @@ async def _build_tools_with_mcp(
         except Exception:
             pass
 
+    # Load integration tools for this agent.
+    try:
+        from app.models.agent_integration import AgentIntegration as _AgentIntegration
+        from app.services.integrations.executor import build_integration_tool_schemas
+
+        intg_result = await db.execute(
+            select(_AgentIntegration).where(
+                _AgentIntegration.agent_id == agent.id,
+                _AgentIntegration.user_id == user_id,
+                _AgentIntegration.is_active == True,  # noqa: E712
+            )
+        )
+        agent_integrations = intg_result.scalars().all()
+        intg_dicts = [
+            {
+                "id": i.id,
+                "integration_type": i.integration_type,
+                "base_url": i.base_url,
+                "auth_type": i.auth_type,
+                "auth_header": i.auth_header,
+                "encrypted_credential": i.encrypted_credential,
+                "enabled_tool_groups": i.enabled_tool_groups or [],
+                "enabled_tools": i.enabled_tools,
+                "is_active": i.is_active,
+                "allow_destructive": i.allow_destructive,
+            }
+            for i in agent_integrations
+        ]
+        tools.extend(build_integration_tool_schemas(intg_dicts))
+    except Exception:
+        pass  # Never break agent runs due to integration loading errors
+
     return tools, mcp_map
 
 
@@ -2107,6 +2139,52 @@ async def _execute_tool(name: str, inputs: dict, mcp_map: dict, ctx: dict | None
     if allowed is not None and name not in allowed and name not in mcp_map:
         return f"Tool '{name}' is not available in this context."
     try:
+        # Integration tool (intg::{integration_id}::{tool_key})
+        from app.services.integrations.executor import (
+            execute_integration_tool as _exec_intg,
+            is_integration_tool as _is_intg,
+        )
+        if _is_intg(name):
+            from app.db.session import AsyncSessionLocal
+            from app.models.agent_integration import AgentIntegration as _AgentIntegration
+
+            agent_id_str = (ctx or {}).get("agent_id", "")
+            user_id_str = (ctx or {}).get("user_id", "")
+            integrations_data: list = []
+            if agent_id_str and user_id_str:
+                try:
+                    async with AsyncSessionLocal() as _db:
+                        _r = await _db.execute(
+                            select(_AgentIntegration).where(
+                                _AgentIntegration.agent_id == uuid.UUID(agent_id_str),
+                                _AgentIntegration.user_id == uuid.UUID(user_id_str),
+                                _AgentIntegration.is_active == True,  # noqa: E712
+                            )
+                        )
+                        integrations_data = [
+                            {
+                                "id": i.id,
+                                "integration_type": i.integration_type,
+                                "base_url": i.base_url,
+                                "auth_type": i.auth_type,
+                                "auth_header": i.auth_header,
+                                "encrypted_credential": i.encrypted_credential,
+                                "enabled_tool_groups": i.enabled_tool_groups or [],
+                                "enabled_tools": i.enabled_tools,
+                                "is_active": i.is_active,
+                                "allow_destructive": i.allow_destructive,
+                            }
+                            for i in _r.scalars().all()
+                        ]
+                except Exception:
+                    pass
+            return await _exec_intg(
+                name,
+                inputs,
+                integrations_data,
+                agent_id=agent_id_str,
+                conversation_id="",
+            )
         route = mcp_map.get(name)
         if route is not None:
             kind = route.get("kind")
