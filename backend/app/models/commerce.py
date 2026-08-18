@@ -48,6 +48,11 @@ class CommerceStore(TimestampMixin, Base):
         ForeignKey("chatbot_configs.id", ondelete="SET NULL"),
         nullable=True,
     )
+    agent_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("agents.id", ondelete="SET NULL"),
+        nullable=True,
+    )
 
 
 class CommerceProduct(TimestampMixin, Base):

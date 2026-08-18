@@ -33,8 +33,10 @@ from app.core.features import AGENT_BUILDER
 from app.core.rate_limit import limiter
 from app.models.agent import Agent
 from app.models.agent_conversation import AgentConversation
+from app.models.agent_function import AgentFunction
 from app.models.agent_knowledge_base import AgentKnowledgeDocument
 from app.models.chatbot_config import ChatbotConfig
+from app.models.commerce import CommerceProduct, CommerceStore
 from app.models.knowledge_base import DocumentStatus
 from app.models.mcp import MCPServerConfig
 from app.models.usage_log import UsageLog
@@ -231,9 +233,9 @@ _FARAID_SELF_COMPUTE_CORRECTION = (
 
 # Tools an anonymous visitor to a shared agent may invoke. Everything not in this
 # set — send_email, send_sms, http_request, google_sheets, create_agent,
-# list_available_models, verification tools, run_code, and all MCP tools — runs
-# under the agent owner's identity or on shared infrastructure and must NOT be
-# exposed on public shares.
+# list_available_models, verification tools, run_code, custom webhook tools
+# (AgentFunction), and all MCP tools — runs under the agent owner's identity or
+# on shared infrastructure and must NOT be exposed on public shares.
 #
 # ⚠️  run_code intentionally NOT here. _tool_run_code is not a real sandbox: it
 # allows __import__, so `import os`, subprocess, and socket are all reachable.
@@ -242,11 +244,25 @@ _FARAID_SELF_COMPUTE_CORRECTION = (
 # this to anonymous visitors is a network-reachable RCE. Do NOT add run_code
 # back until it's behind a real isolation boundary (Pyodide, gVisor, ephemeral
 # container, or firejail with seccomp).
+#
+# Custom webhook tools (book_service, create_account, ...) are deliberately
+# excluded even though they're the whole point of a customer-facing commerce
+# agent: each one POSTs model-chosen JSON to a URL the owner configured, often
+# carrying the owner's own API credentials, with no way for us to vet what that
+# endpoint does with anonymous, untrusted input. list_products/buy_product are
+# safe to admit here specifically because buy_product never touches payment
+# data or fires a charge — it only ever returns a link to the store's own
+# hosted checkout page. check_order_status is safe because it requires BOTH
+# the (unguessable) order id and the matching email before returning anything —
+# a bare id is not accepted as proof of ownership.
 _PUBLIC_SHARE_TOOL_ALLOWLIST = {
     "browse_url",
     "search_kb",
     "web_search",  # billed to owner but read-only and rate-limited
     "calculate_faraid",  # pure calculation, no DB/network access, no owner cost
+    "list_products",  # read-only, already public via /api/public/stores/{slug}/products
+    "buy_product",  # only ever returns a checkout link, never touches payment data
+    "check_order_status",  # requires order id + matching email, not id alone
 }
 
 
@@ -272,10 +288,13 @@ async def public_agent_chat(
     tools, mcp_map = await _build_tools_with_mcp(agent, agent.user_id, db)
     # SECURITY: anonymous share visitors must not be able to invoke tools that
     # mutate the owner's account (create_agent, send_email, send_sms, sheets,
-    # http_request, MCP) or reveal owner secrets (list_available_models).
-    # Only read-only, per-request-scoped tools survive on the public route.
+    # http_request, MCP, custom webhook tools) or reveal owner secrets
+    # (list_available_models). Only read-only, per-request-scoped tools survive
+    # on the public route. Filtering mcp_map the same way (rather than clearing
+    # it) keeps routing info for the allowlisted commerce tools while still
+    # dropping every MCP/custom-webhook route.
     tools = [t for t in tools if t["name"] in _PUBLIC_SHARE_TOOL_ALLOWLIST]
-    mcp_map = {}
+    mcp_map = {k: v for k, v in mcp_map.items() if k in _PUBLIC_SHARE_TOOL_ALLOWLIST}
     _, api_key, base_url = await _resolve_api_key(
         agent.user_id, agent.model or "claude-sonnet-4-6", db
     )
@@ -1496,8 +1515,12 @@ async def _build_tools_with_mcp(
     agent: Agent, user_id: uuid.UUID, db: DBSession
 ) -> tuple[list[dict], dict[str, Any]]:
     """
-    Returns (tools_list_for_anthropic, mcp_server_map).
-    mcp_server_map: {tool_name -> MCPServerConfig} for routing tool calls back to MCP servers.
+    Returns (tools_list_for_anthropic, tool_route_map).
+    tool_route_map: {tool_name -> {"kind": ..., ...}} — routing info _execute_tool
+    uses to dispatch a call to the right backend (MCP server, custom webhook,
+    or the agent's linked commerce store). All lookups here (MCP servers, custom
+    tools, commerce products) are pre-fetched once, up front, since no DB session
+    is threaded into the streaming loop that later calls _execute_tool.
     """
     tools = _build_builtin_tools(agent.tools or {})
     mcp_map: dict[str, Any] = {}
@@ -1525,11 +1548,149 @@ async def _build_tools_with_mcp(
                             ),
                         }
                     )
-                    mcp_map[tool_name] = {"server": server, "original_name": tool["name"]}
+                    mcp_map[tool_name] = {
+                        "kind": "mcp",
+                        "server": server,
+                        "original_name": tool["name"],
+                    }
             except Exception:
                 pass  # Skip unreachable MCP servers silently
     except Exception:
         pass
+
+    # Custom webhook tools the owner defined for this agent (e.g. book_service,
+    # create_account against their own external API). Never exposed on public
+    # shares — see _PUBLIC_SHARE_TOOL_ALLOWLIST.
+    try:
+        result = await db.execute(
+            select(AgentFunction).where(
+                AgentFunction.agent_id == agent.id,
+                AgentFunction.is_active == True,  # noqa: E712
+            )
+        )
+        for fn in result.scalars().all():
+            tools.append(
+                {
+                    "name": fn.name,
+                    "description": fn.description,
+                    "input_schema": fn.parameters_schema or {"type": "object", "properties": {}},
+                }
+            )
+            mcp_map[fn.name] = {"kind": "custom_webhook", "function": fn}
+    except Exception:
+        pass
+
+    # Commerce: list_products / buy_product for the store linked to this agent.
+    # Safe to expose on public shares — buy_product only ever returns a link to
+    # the store's own hosted checkout page, it never touches payment data or
+    # fires a charge itself.
+    if (agent.tools or {}).get("commerce"):
+        try:
+            store = (
+                await db.execute(
+                    select(CommerceStore).where(
+                        CommerceStore.agent_id == agent.id,
+                        CommerceStore.is_active == True,  # noqa: E712
+                    )
+                )
+            ).scalar_one_or_none()
+            if store:
+                products = (
+                    (
+                        await db.execute(
+                            select(CommerceProduct).where(
+                                CommerceProduct.store_id == store.id,
+                                CommerceProduct.in_stock == True,  # noqa: E712
+                            )
+                        )
+                    )
+                    .scalars()
+                    .all()
+                )
+                tools.append(
+                    {
+                        "name": "list_products",
+                        "description": (
+                            f"List products for sale in the '{store.name}' store. Optionally "
+                            "filter by category or a name/description search term — use this "
+                            "for larger catalogs instead of dumping everything."
+                        ),
+                        "input_schema": {
+                            "type": "object",
+                            "properties": {
+                                "category": {
+                                    "type": "string",
+                                    "description": "Only return products in this category",
+                                },
+                                "query": {
+                                    "type": "string",
+                                    "description": "Only return products whose name or "
+                                    "description contains this text",
+                                },
+                            },
+                        },
+                    }
+                )
+                tools.append(
+                    {
+                        "name": "buy_product",
+                        "description": (
+                            "Get a checkout link for a product so the customer can complete "
+                            "payment themselves. Never ask the customer for card details in "
+                            "chat — this tool hands back a link to the store's own secure "
+                            "checkout page."
+                        ),
+                        "input_schema": {
+                            "type": "object",
+                            "properties": {
+                                "product_id": {
+                                    "type": "string",
+                                    "description": "The id of the product to buy",
+                                }
+                            },
+                            "required": ["product_id"],
+                        },
+                    }
+                )
+                tools.append(
+                    {
+                        "name": "check_order_status",
+                        "description": (
+                            "Look up an order's status. Requires BOTH the order id and the "
+                            "email used to place it — ask the customer for both, never guess."
+                        ),
+                        "input_schema": {
+                            "type": "object",
+                            "properties": {
+                                "order_id": {
+                                    "type": "string",
+                                    "description": "The order/payment id",
+                                },
+                                "email": {
+                                    "type": "string",
+                                    "description": "The email used to place the order",
+                                },
+                            },
+                            "required": ["order_id", "email"],
+                        },
+                    }
+                )
+                mcp_map["list_products"] = {
+                    "kind": "commerce_list_products",
+                    "store": store,
+                    "products": products,
+                }
+                mcp_map["buy_product"] = {
+                    "kind": "commerce_buy_product",
+                    "store": store,
+                    "products": products,
+                }
+                mcp_map["check_order_status"] = {
+                    "kind": "commerce_order_status",
+                    "store": store,
+                }
+        except Exception:
+            pass
 
     return tools, mcp_map
 
@@ -1946,9 +2107,19 @@ async def _execute_tool(name: str, inputs: dict, mcp_map: dict, ctx: dict | None
     if allowed is not None and name not in allowed and name not in mcp_map:
         return f"Tool '{name}' is not available in this context."
     try:
-        # MCP tool
-        if name in mcp_map:
-            return await _tool_mcp(mcp_map[name]["server"], mcp_map[name]["original_name"], inputs)
+        route = mcp_map.get(name)
+        if route is not None:
+            kind = route.get("kind")
+            if kind == "mcp":
+                return await _tool_mcp(route["server"], route["original_name"], inputs)
+            if kind == "custom_webhook":
+                return await _tool_custom_webhook(route["function"], inputs)
+            if kind == "commerce_list_products":
+                return _tool_list_products(route["store"], route["products"], inputs)
+            if kind == "commerce_buy_product":
+                return _tool_buy_product(route["store"], route["products"], inputs)
+            if kind == "commerce_order_status":
+                return await _tool_check_order_status(route["store"], inputs)
         # Built-in tools
         if name == "web_search":
             return await _tool_web_search(inputs.get("query", ""), ctx or {})
@@ -2192,6 +2363,123 @@ async def _tool_http(inputs: dict) -> str:
         return json.dumps(resp.json(), indent=2)[:3000]
     except Exception:
         return resp.text[:3000]
+
+
+async def _tool_custom_webhook(fn: AgentFunction, inputs: dict) -> str:
+    """Fire a user-defined custom tool (app.models.agent_function.AgentFunction).
+
+    Re-validates SSRF safety at fire time (not just at save time — see
+    app.services.net_security), and never surfaces the decrypted headers or raw
+    exception details back to the model, since a header commonly carries the
+    owner's own API credentials for their external system.
+    """
+    from app.services.llm.key_store import decrypt_key
+
+    if not _is_ssrf_safe(fn.webhook_url):
+        return "Error: this tool's webhook URL is no longer allowed."
+
+    headers: dict[str, str] = {}
+    if fn.webhook_headers_encrypted:
+        try:
+            headers = json.loads(decrypt_key(fn.webhook_headers_encrypted))
+        except Exception:
+            return "Error: this tool's stored credentials could not be read."
+
+    try:
+        async with httpx.AsyncClient(timeout=20, follow_redirects=False) as client:
+            if fn.webhook_method == "POST":
+                resp = await client.post(fn.webhook_url, headers=headers, json=inputs)
+            else:
+                resp = await client.get(fn.webhook_url, headers=headers, params=inputs)
+    except Exception:
+        return f"Error: could not reach the '{fn.name}' service."
+
+    try:
+        return json.dumps(resp.json(), indent=2)[:3000]
+    except Exception:
+        return resp.text[:3000]
+
+
+def _tool_list_products(store: CommerceStore, products: list[CommerceProduct], inputs: dict) -> str:
+    category = (inputs.get("category") or "").strip().lower()
+    query = (inputs.get("query") or "").strip().lower()
+    filtered = products
+    if category:
+        filtered = [p for p in filtered if (p.category or "").lower() == category]
+    if query:
+        filtered = [
+            p
+            for p in filtered
+            if query in p.name.lower() or query in (p.description or "").lower()
+        ]
+    if not filtered:
+        return f"No products found in the '{store.name}' store matching that filter."
+    listing = [
+        {
+            "product_id": str(p.id),
+            "name": p.name,
+            "price": float(p.price),
+            "currency": store.currency,
+            "category": p.category,
+            "description": p.description or "",
+        }
+        for p in filtered
+    ]
+    return json.dumps(listing, indent=2)[:3000]
+
+
+async def _tool_check_order_status(store: CommerceStore, inputs: dict) -> str:
+    """Look up one order by id + email. Both must match — this is the only proof
+    of ownership an anonymous chat visitor can offer, so a bare order id is not
+    enough to return another customer's order details."""
+    from app.db.session import AsyncSessionLocal
+    from app.models.commerce import CommercePayment
+
+    order_id = str(inputs.get("order_id", "")).strip()
+    email = str(inputs.get("email", "")).strip().lower()
+    if not order_id or not email:
+        return "Error: both order_id and email are required."
+    try:
+        order_uuid = uuid.UUID(order_id)
+    except ValueError:
+        return "No matching order found."
+
+    async with AsyncSessionLocal() as db:
+        payment = (
+            await db.execute(
+                select(CommercePayment).where(
+                    CommercePayment.id == order_uuid,
+                    CommercePayment.store_id == store.id,
+                )
+            )
+        ).scalar_one_or_none()
+
+    if not payment or (payment.customer_email or "").strip().lower() != email:
+        return "No matching order found."
+
+    return json.dumps(
+        {
+            "order_id": str(payment.id),
+            "status": payment.status,
+            "amount": float(payment.amount),
+            "currency": payment.currency,
+            "items": payment.items,
+        },
+        indent=2,
+    )[:3000]
+
+
+def _tool_buy_product(store: CommerceStore, products: list[CommerceProduct], inputs: dict) -> str:
+    product_id = str(inputs.get("product_id", ""))
+    match = next((p for p in products if str(p.id) == product_id), None)
+    if not match:
+        return "Error: unknown or out-of-stock product_id. Call list_products first."
+    checkout_url = f"{settings.frontend_url}/store/{store.slug}?product={match.id}"
+    return (
+        f"Checkout link for '{match.name}' ({store.currency} {float(match.price):.2f}): "
+        f"{checkout_url}\nShare this link with the customer to complete payment securely — "
+        "do not collect card details in chat."
+    )
 
 
 def _tool_run_code(code: str) -> str:

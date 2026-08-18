@@ -20,6 +20,7 @@ class StoreCreate(BaseModel):
     payment_provider: str = Field("stripe", max_length=50)
     google_sheet_id: str | None = Field(None, max_length=255)
     chatbot_id: uuid.UUID | None = None
+    agent_id: uuid.UUID | None = None
 
 
 class StoreUpdate(BaseModel):
@@ -32,6 +33,7 @@ class StoreUpdate(BaseModel):
     payment_provider: str | None = Field(None, max_length=50)
     google_sheet_id: str | None = Field(None, max_length=255)
     chatbot_id: uuid.UUID | None = None
+    agent_id: uuid.UUID | None = None
 
 
 # ── Products ───────────────────────────────────────────────────────────────────
