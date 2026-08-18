@@ -27,6 +27,7 @@ from fastapi import APIRouter, HTTPException, Query, status
 from sqlalchemy import func, select
 
 from app.core.dependencies import CurrentUser, DBSession
+from app.models.agent import Agent
 from app.models.commerce import CommercePayment, CommerceProduct, CommerceStore
 from app.schemas.commerce import (
     PaymentConfirm,
@@ -63,6 +64,7 @@ def _store_dict(s: CommerceStore) -> dict:
         "payment_provider": s.payment_provider,
         "google_sheet_id": s.google_sheet_id,
         "chatbot_id": str(s.chatbot_id) if s.chatbot_id else None,
+        "agent_id": str(s.agent_id) if s.agent_id else None,
         "created_at": s.created_at.isoformat(),
         "updated_at": s.updated_at.isoformat(),
     }
@@ -144,8 +146,20 @@ async def list_stores(
     return {"success": True, "data": [_store_dict(s) for s in stores], "total": total}
 
 
+async def _assert_owns_agent(agent_id: uuid.UUID | None, user_id: uuid.UUID, db) -> None:
+    if agent_id is None:
+        return
+    agent = await db.get(Agent, agent_id)
+    if not agent or agent.user_id != user_id:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"success": False, "error": "Agent not found", "code": "NOT_FOUND"},
+        )
+
+
 @router.post("/api/v1/stores", response_model=dict, status_code=status.HTTP_201_CREATED)
 async def create_store(body: StoreCreate, user: CurrentUser, db: DBSession) -> dict:
+    await _assert_owns_agent(body.agent_id, user.id, db)
     name = body.name.strip()
 
     base_slug = _slugify(name)
@@ -170,6 +184,7 @@ async def create_store(body: StoreCreate, user: CurrentUser, db: DBSession) -> d
         payment_provider=body.payment_provider,
         google_sheet_id=body.google_sheet_id,
         chatbot_id=body.chatbot_id,
+        agent_id=body.agent_id,
     )
     db.add(store)
     await db.commit()
@@ -188,7 +203,10 @@ async def update_store(
     store_id: uuid.UUID, body: StoreUpdate, user: CurrentUser, db: DBSession
 ) -> dict:
     store = await _get_store(store_id, user.id, db)
-    for field, value in body.model_dump(exclude_unset=True).items():
+    updates = body.model_dump(exclude_unset=True)
+    if "agent_id" in updates:
+        await _assert_owns_agent(updates["agent_id"], user.id, db)
+    for field, value in updates.items():
         setattr(store, field, value)
     await db.commit()
     await db.refresh(store)
