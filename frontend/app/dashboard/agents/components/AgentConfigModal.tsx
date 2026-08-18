@@ -73,10 +73,100 @@ interface AgentFunction {
   id: string;
   name: string;
   description: string;
+  parameters_schema: { type?: string; properties?: Record<string, unknown>; required?: string[] };
   webhook_url: string;
   webhook_method: string;
   has_headers: boolean;
   is_active: boolean;
+}
+
+interface ParamRow {
+  name: string;
+  type: "string" | "number" | "boolean";
+  description: string;
+  required: boolean;
+}
+
+const FUNCTION_TEMPLATES: {
+  label: string; name: string; description: string; webhook_method: string; params: ParamRow[];
+}[] = [
+  {
+    label: "Book a service",
+    name: "book_service",
+    description: "Book an appointment for a service at a given date and time.",
+    webhook_method: "POST",
+    params: [
+      { name: "service", type: "string", description: "Which service to book", required: true },
+      { name: "date", type: "string", description: "Preferred date (YYYY-MM-DD)", required: true },
+      { name: "time", type: "string", description: "Preferred time", required: true },
+      { name: "customer_name", type: "string", description: "Customer's full name", required: true },
+      { name: "customer_email", type: "string", description: "Customer's email", required: true },
+    ],
+  },
+  {
+    label: "Create account",
+    name: "create_account",
+    description: "Create a new customer account.",
+    webhook_method: "POST",
+    params: [
+      { name: "name", type: "string", description: "Full name", required: true },
+      { name: "email", type: "string", description: "Email address", required: true },
+      { name: "phone", type: "string", description: "Phone number", required: false },
+    ],
+  },
+  {
+    label: "Sell from external store",
+    name: "purchase_product",
+    description: "Buy a product from our store and start checkout. Use this instead of the "
+      + "built-in commerce tools when products live on a separate platform.",
+    webhook_method: "POST",
+    params: [
+      { name: "product_name", type: "string", description: "Name or SKU of the product", required: true },
+      { name: "quantity", type: "number", description: "How many to buy", required: false },
+      { name: "customer_email", type: "string", description: "Customer's email for the order", required: true },
+    ],
+  },
+];
+
+const EMPTY_FUNCTION_FORM = { name: "", description: "", webhook_method: "POST", webhook_url: "" };
+const EMPTY_RAW_SCHEMA = '{\n  "type": "object",\n  "properties": {},\n  "required": []\n}';
+
+function schemaFromParamRows(rows: ParamRow[]) {
+  const properties: Record<string, unknown> = {};
+  const required: string[] = [];
+  rows.forEach((r) => {
+    const name = r.name.trim();
+    if (!name) return;
+    properties[name] = { type: r.type, description: r.description };
+    if (r.required) required.push(name);
+  });
+  return { type: "object", properties, ...(required.length ? { required } : {}) };
+}
+
+/** Best-effort reverse of schemaFromParamRows. Returns null for any schema
+ * shape the visual builder can't represent (nested objects, enums, arrays,
+ * ...) so the caller falls back to raw-JSON editing instead of silently
+ * dropping fields. */
+function paramRowsFromSchema(schema: unknown): ParamRow[] | null {
+  if (!schema || typeof schema !== "object") return null;
+  const s = schema as { type?: string; properties?: Record<string, unknown>; required?: string[] };
+  if (s.type !== "object" || !s.properties || typeof s.properties !== "object") return null;
+  const required = Array.isArray(s.required) ? s.required : [];
+  const rows: ParamRow[] = [];
+  for (const [name, raw] of Object.entries(s.properties)) {
+    if (!raw || typeof raw !== "object") return null;
+    const v = raw as Record<string, unknown>;
+    const extraKeys = Object.keys(v).filter((k) => k !== "type" && k !== "description");
+    if (extraKeys.length > 0) return null;
+    if (v.type !== "string" && v.type !== "number" && v.type !== "boolean") return null;
+    rows.push({
+      name,
+      type: v.type,
+      description: typeof v.description === "string" ? v.description : "",
+      required: required.includes(name),
+    });
+  }
+  return rows;
 }
 
 interface ProviderModels {
@@ -242,12 +332,13 @@ export function AgentConfigModal({ agent, open, onClose, onUpdate }: AgentConfig
   const [customFunctions, setCustomFunctions] = useState<AgentFunction[]>([]);
   const [showAddFunction, setShowAddFunction] = useState(false);
   const [savingFunction, setSavingFunction]   = useState(false);
-  const [functionForm, setFunctionForm] = useState({
-    name: "", description: "", webhook_method: "POST", webhook_url: "",
-    parameters_schema: '{\n  "type": "object",\n  "properties": {},\n  "required": []\n}',
-  });
-  const [headerRows, setHeaderRows] = useState<{ key: string; value: string }[]>([]);
-  const [functionError, setFunctionError] = useState("");
+  const [editingFunctionId, setEditingFunctionId] = useState<string | null>(null);
+  const [functionForm, setFunctionForm]       = useState(EMPTY_FUNCTION_FORM);
+  const [paramRows, setParamRows]             = useState<ParamRow[]>([]);
+  const [advancedJson, setAdvancedJson]       = useState(false);
+  const [rawSchema, setRawSchema]             = useState(EMPTY_RAW_SCHEMA);
+  const [headerRows, setHeaderRows]           = useState<{ key: string; value: string }[]>([]);
+  const [functionError, setFunctionError]     = useState("");
 
   const loadMcp = useCallback(async () => {
     try {
@@ -304,10 +395,11 @@ export function AgentConfigModal({ agent, open, onClose, onUpdate }: AgentConfig
       setErrors({});
       setActiveTab("basic");
       setShowAddFunction(false);
-      setFunctionForm({
-        name: "", description: "", webhook_method: "POST", webhook_url: "",
-        parameters_schema: '{\n  "type": "object",\n  "properties": {},\n  "required": []\n}',
-      });
+      setEditingFunctionId(null);
+      setFunctionForm(EMPTY_FUNCTION_FORM);
+      setParamRows([]);
+      setAdvancedJson(false);
+      setRawSchema(EMPTY_RAW_SCHEMA);
       setHeaderRows([]);
       setFunctionError("");
       loadMcp();
@@ -396,15 +488,69 @@ export function AgentConfigModal({ agent, open, onClose, onUpdate }: AgentConfig
   const updateHeaderRow = (i: number, field: "key" | "value", val: string) =>
     setHeaderRows((r) => r.map((row, idx) => (idx === i ? { ...row, [field]: val } : row)));
 
-  const createFunction = async () => {
+  const addParamRow = () =>
+    setParamRows((r) => [...r, { name: "", type: "string", description: "", required: false }]);
+  const removeParamRow = (i: number) => setParamRows((r) => r.filter((_, idx) => idx !== i));
+  const updateParamRow = <K extends keyof ParamRow>(i: number, field: K, val: ParamRow[K]) =>
+    setParamRows((r) => r.map((row, idx) => (idx === i ? { ...row, [field]: val } : row)));
+
+  const resetFunctionForm = () => {
+    setFunctionForm(EMPTY_FUNCTION_FORM);
+    setParamRows([]);
+    setAdvancedJson(false);
+    setRawSchema(EMPTY_RAW_SCHEMA);
+    setHeaderRows([]);
+    setFunctionError("");
+    setEditingFunctionId(null);
+  };
+
+  const openAddForm = () => { resetFunctionForm(); setShowAddFunction(true); };
+
+  const applyTemplate = (t: (typeof FUNCTION_TEMPLATES)[number]) => {
+    setFunctionForm({
+      name: t.name, description: t.description, webhook_method: t.webhook_method, webhook_url: "",
+    });
+    setParamRows(t.params.map((p) => ({ ...p })));
+    setAdvancedJson(false);
+    setHeaderRows([]);
+    setFunctionError("");
+    setEditingFunctionId(null);
+    setShowAddFunction(true);
+  };
+
+  const startEdit = (fn: AgentFunction) => {
+    setFunctionForm({
+      name: fn.name, description: fn.description,
+      webhook_method: fn.webhook_method, webhook_url: fn.webhook_url,
+    });
+    const rows = paramRowsFromSchema(fn.parameters_schema);
+    if (rows) {
+      setParamRows(rows);
+      setAdvancedJson(false);
+    } else {
+      setParamRows([]);
+      setAdvancedJson(true);
+      setRawSchema(JSON.stringify(fn.parameters_schema ?? {}, null, 2));
+    }
+    setHeaderRows([]);
+    setFunctionError("");
+    setEditingFunctionId(fn.id);
+    setShowAddFunction(true);
+  };
+
+  const saveFunction = async () => {
     setFunctionError("");
     if (!functionForm.name.trim() || !functionForm.webhook_url.trim()) return;
     let parameters_schema: unknown;
-    try {
-      parameters_schema = JSON.parse(functionForm.parameters_schema);
-    } catch {
-      setFunctionError("Parameters schema must be valid JSON.");
-      return;
+    if (advancedJson) {
+      try {
+        parameters_schema = JSON.parse(rawSchema);
+      } catch {
+        setFunctionError("Parameters schema must be valid JSON.");
+        return;
+      }
+    } else {
+      parameters_schema = schemaFromParamRows(paramRows);
     }
     setSavingFunction(true);
     try {
@@ -412,19 +558,24 @@ export function AgentConfigModal({ agent, open, onClose, onUpdate }: AgentConfig
         if (r.key.trim()) acc[r.key.trim()] = r.value;
         return acc;
       }, {});
-      await apiClient.post(`/api/agents/${agent.id}/functions`, {
+      const payload: Record<string, unknown> = {
         name: functionForm.name.trim(),
         description: functionForm.description.trim(),
         webhook_method: functionForm.webhook_method,
         webhook_url: functionForm.webhook_url.trim(),
         parameters_schema,
-        ...(Object.keys(webhook_headers).length ? { webhook_headers } : {}),
-      });
-      setFunctionForm({
-        name: "", description: "", webhook_method: "POST", webhook_url: "",
-        parameters_schema: '{\n  "type": "object",\n  "properties": {},\n  "required": []\n}',
-      });
-      setHeaderRows([]);
+      };
+      // Only sent when the user actually added/edited a header row this
+      // session — omitting the key on an edit leaves the saved (encrypted,
+      // never re-displayed) headers untouched.
+      if (Object.keys(webhook_headers).length) payload.webhook_headers = webhook_headers;
+
+      if (editingFunctionId) {
+        await apiClient.put(`/api/agents/${agent.id}/functions/${editingFunctionId}`, payload);
+      } else {
+        await apiClient.post(`/api/agents/${agent.id}/functions`, payload);
+      }
+      resetFunctionForm();
       setShowAddFunction(false);
       await loadFunctions();
     } catch (err) {
@@ -783,9 +934,12 @@ export function AgentConfigModal({ agent, open, onClose, onUpdate }: AgentConfig
               {form.tools.commerce && (
                 <div className="rounded-xl border p-3.5 space-y-2">
                   <div>
-                    <p className="text-sm font-medium">Linked Store</p>
+                    <p className="text-sm font-medium">Built-in Store</p>
                     <p className="text-[11px] text-muted-foreground mt-0.5">
-                      list_products / buy_product will use this store&apos;s catalog.
+                      Link one of your ChatCraft stores and the agent gets list_products,
+                      buy_product, and check_order_status for free. Selling on a different
+                      platform instead? Skip this and add a custom tool below — try the
+                      &quot;Sell from external store&quot; quick start.
                     </p>
                   </div>
                   <Select
@@ -820,13 +974,15 @@ export function AgentConfigModal({ agent, open, onClose, onUpdate }: AgentConfig
                   <div>
                     <p className="text-sm font-medium">Custom Tools</p>
                     <p className="text-[11px] text-muted-foreground mt-0.5">
-                      Point a tool like book_service at your own API. Runs only in authenticated
-                      chats — never on a public share link.
+                      Point a tool at your own API — a booking system, CRM, or an external
+                      store. Runs only in authenticated chats, never on a public share link.
                     </p>
                   </div>
                   <Button size="sm" variant="outline" className="text-xs h-7 shrink-0"
-                    onClick={() => setShowAddFunction((v) => !v)}>
-                    <Plus className="h-3 w-3 mr-1" />Add
+                    onClick={() => (showAddFunction ? setShowAddFunction(false) : openAddForm())}>
+                    {showAddFunction
+                      ? "Cancel"
+                      : <><Plus className="h-3 w-3 mr-1" />Add</>}
                   </Button>
                 </div>
 
@@ -837,12 +993,12 @@ export function AgentConfigModal({ agent, open, onClose, onUpdate }: AgentConfig
                         fn.is_active ? "" : "opacity-50"
                       }`}>
                         <Webhook className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-                        <div className="flex-1 min-w-0">
+                        <button type="button" className="flex-1 min-w-0 text-left" onClick={() => startEdit(fn)}>
                           <p className="text-[11px] font-mono font-semibold truncate">{fn.name}</p>
                           <p className="text-[10px] text-muted-foreground truncate">
                             {fn.webhook_method} {fn.webhook_url}
                           </p>
-                        </div>
+                        </button>
                         <Switch checked={fn.is_active} onCheckedChange={() => toggleFunction(fn)} />
                         <Button size="icon" variant="ghost" className="h-6 w-6 text-destructive hover:text-destructive"
                           onClick={() => deleteFunction(fn.id)}>
@@ -854,7 +1010,20 @@ export function AgentConfigModal({ agent, open, onClose, onUpdate }: AgentConfig
                 )}
 
                 {showAddFunction && (
-                  <div className="rounded-lg bg-muted/30 border p-3 space-y-2.5">
+                  <div className="rounded-lg bg-muted/30 border p-3 space-y-3">
+                    {!editingFunctionId && (
+                      <div className="space-y-1">
+                        <Label className="text-[11px]">Quick start</Label>
+                        <div className="flex flex-wrap gap-1.5">
+                          {FUNCTION_TEMPLATES.map((t) => (
+                            <Button key={t.name} type="button" size="sm" variant="outline"
+                              className="h-6 text-[11px] px-2" onClick={() => applyTemplate(t)}>
+                              {t.label}
+                            </Button>
+                          ))}
+                        </div>
+                      </div>
+                    )}
                     <div className="grid grid-cols-2 gap-2">
                       <div className="space-y-1">
                         <Label className="text-[11px]">Tool name</Label>
@@ -874,6 +1043,10 @@ export function AgentConfigModal({ agent, open, onClose, onUpdate }: AgentConfig
                         </Select>
                       </div>
                     </div>
+                    <p className="text-[10px] text-muted-foreground -mt-1.5">
+                      list_products, buy_product, and check_order_status are reserved for the
+                      built-in store above.
+                    </p>
                     <div className="space-y-1">
                       <Label className="text-[11px]">Description (tells the model when to use it)</Label>
                       <Input className="h-8 text-xs" placeholder="Book an appointment for a service"
@@ -889,10 +1062,15 @@ export function AgentConfigModal({ agent, open, onClose, onUpdate }: AgentConfig
                     <div className="space-y-1">
                       <div className="flex items-center justify-between">
                         <Label className="text-[11px]">Headers (e.g. Authorization)</Label>
-                        <Button size="sm" variant="ghost" className="h-6 text-[11px] px-2" onClick={addHeaderRow}>
+                        <Button type="button" size="sm" variant="ghost" className="h-6 text-[11px] px-2" onClick={addHeaderRow}>
                           <Plus className="h-2.5 w-2.5 mr-1" />Header
                         </Button>
                       </div>
+                      {editingFunctionId && headerRows.length === 0 && (
+                        <p className="text-[10px] text-muted-foreground">
+                          Leave blank to keep the saved credentials — add a row to replace them.
+                        </p>
+                      )}
                       {headerRows.map((row, i) => (
                         <div key={i} className="flex items-center gap-1.5">
                           <Input className="h-7 text-[11px] font-mono" placeholder="Authorization"
@@ -905,11 +1083,56 @@ export function AgentConfigModal({ agent, open, onClose, onUpdate }: AgentConfig
                         </div>
                       ))}
                     </div>
-                    <div className="space-y-1">
-                      <Label className="text-[11px]">Parameters (JSON schema)</Label>
-                      <Textarea className="text-[11px] font-mono min-h-[80px]"
-                        value={functionForm.parameters_schema}
-                        onChange={(e) => setFunctionForm((p) => ({ ...p, parameters_schema: e.target.value }))} />
+                    <div className="space-y-1.5">
+                      <div className="flex items-center justify-between">
+                        <Label className="text-[11px]">Parameters</Label>
+                        <button type="button" className="text-[10px] text-muted-foreground underline"
+                          onClick={() => setAdvancedJson((v) => !v)}>
+                          {advancedJson ? "Use visual builder" : "Edit raw JSON"}
+                        </button>
+                      </div>
+                      {advancedJson ? (
+                        <Textarea className="text-[11px] font-mono min-h-[80px]"
+                          value={rawSchema} onChange={(e) => setRawSchema(e.target.value)} />
+                      ) : (
+                        <div className="space-y-1.5">
+                          {paramRows.length === 0 && (
+                            <p className="text-[11px] text-muted-foreground">
+                              No parameters — the tool takes no input.
+                            </p>
+                          )}
+                          {paramRows.map((row, i) => (
+                            <div key={i} className="flex items-center gap-1.5">
+                              <Input className="h-7 text-[11px] font-mono flex-1" placeholder="param_name"
+                                value={row.name} onChange={(e) => updateParamRow(i, "name", e.target.value)} />
+                              <Select value={row.type}
+                                onValueChange={(v) => updateParamRow(i, "type", v as ParamRow["type"])}>
+                                <SelectTrigger className="h-7 text-[11px] w-[90px] shrink-0"><SelectValue /></SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value="string">string</SelectItem>
+                                  <SelectItem value="number">number</SelectItem>
+                                  <SelectItem value="boolean">boolean</SelectItem>
+                                </SelectContent>
+                              </Select>
+                              <Input className="h-7 text-[11px] flex-1" placeholder="description"
+                                value={row.description} onChange={(e) => updateParamRow(i, "description", e.target.value)} />
+                              <button type="button" title="Toggle required"
+                                onClick={() => updateParamRow(i, "required", !row.required)}
+                                className={`h-7 shrink-0 rounded-md border px-1.5 text-[10px] font-medium ${
+                                  row.required ? "border-primary bg-primary/10 text-primary" : "text-muted-foreground"
+                                }`}>
+                                {row.required ? "Req" : "Opt"}
+                              </button>
+                              <Button size="icon" variant="ghost" className="h-6 w-6 shrink-0" onClick={() => removeParamRow(i)}>
+                                <X className="h-3 w-3" />
+                              </Button>
+                            </div>
+                          ))}
+                          <Button type="button" size="sm" variant="ghost" className="h-6 text-[11px] px-2" onClick={addParamRow}>
+                            <Plus className="h-2.5 w-2.5 mr-1" />Parameter
+                          </Button>
+                        </div>
+                      )}
                     </div>
                     {functionError && (
                       <p className="text-[11px] text-destructive">{functionError}</p>
@@ -917,9 +1140,9 @@ export function AgentConfigModal({ agent, open, onClose, onUpdate }: AgentConfig
                     <div className="flex justify-end gap-2 pt-1">
                       <Button size="sm" variant="ghost" className="text-xs h-7"
                         onClick={() => setShowAddFunction(false)}>Cancel</Button>
-                      <Button size="sm" className="text-xs h-7" onClick={createFunction} disabled={savingFunction}>
+                      <Button size="sm" className="text-xs h-7" onClick={saveFunction} disabled={savingFunction}>
                         {savingFunction ? <Loader2 className="h-3 w-3 mr-1 animate-spin" /> : null}
-                        Save tool
+                        {editingFunctionId ? "Save changes" : "Save tool"}
                       </Button>
                     </div>
                   </div>
