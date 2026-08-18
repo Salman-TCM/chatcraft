@@ -24,6 +24,9 @@ class AgentToolsConfig(BaseModel):
     agent_builder: bool = False
     search_kb: bool = False
     faraid: bool = False
+    # Exposes list_products/buy_product for the CommerceStore linked to this
+    # agent via CommerceStore.agent_id — no-op if no store is linked.
+    commerce: bool = False
 
 
 _WEBHOOK_URL_RE = re.compile(r"^https?://[^\s]+$")
