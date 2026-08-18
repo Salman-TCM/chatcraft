@@ -1,7 +1,7 @@
 """add agent integrations and integration credentials tables
 
-Revision ID: 000000000057
-Revises: 000000000056
+Revision ID: 000000000058
+Revises: 000000000057
 Create Date: 2026-08-18
 """
 
@@ -9,8 +9,8 @@ import sqlalchemy as sa
 from alembic import op
 from sqlalchemy.dialects import postgresql
 
-revision = "000000000057"
-down_revision = "000000000056"
+revision = "000000000058"
+down_revision = "000000000057"
 branch_labels = None
 depends_on = None
 
