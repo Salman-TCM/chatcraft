@@ -386,6 +386,7 @@ export function AgentConfigModal({ agent, open, onClose, onUpdate }: AgentConfig
     webhook_url: agent.webhook_url || "",
     welcome_message: agent.welcome_message || "",
     suggestions_enabled: agent.suggestions_enabled,
+    welcome_suggestions: ((agent as any).welcome_suggestions as string[] || []).join("\n"),
     tools: { ...agent.tools },
     primary_colour: agent.primary_colour || "#6366f1",
     logo_url: agent.logo_url || "",
@@ -486,6 +487,7 @@ export function AgentConfigModal({ agent, open, onClose, onUpdate }: AgentConfig
         webhook_url: agent.webhook_url || "",
         welcome_message: agent.welcome_message || "",
         suggestions_enabled: agent.suggestions_enabled,
+        welcome_suggestions: ((agent as any).welcome_suggestions as string[] || []).join("\n"),
         tools: { ...agent.tools },
         primary_colour: agent.primary_colour || "#6366f1",
         logo_url: agent.logo_url || "",
@@ -542,6 +544,7 @@ export function AgentConfigModal({ agent, open, onClose, onUpdate }: AgentConfig
         webhook_url: form.webhook_url.trim() || null,
         welcome_message: form.welcome_message.trim() || null,
         suggestions_enabled: form.suggestions_enabled,
+        welcome_suggestions: form.welcome_suggestions.split("\n").map((s: string) => s.trim()).filter(Boolean).slice(0, 4),
         tools: form.tools,
         primary_colour: form.primary_colour || "#6366f1",
         logo_url: form.logo_url.trim() || null,
@@ -812,6 +815,20 @@ export function AgentConfigModal({ agent, open, onClose, onUpdate }: AgentConfig
                 />
                 <p className="text-[11px] text-muted-foreground">
                   Shown as the agent's first message when a chat starts.
+                </p>
+              </div>
+
+              <div className="space-y-1.5">
+                <Label className="text-xs">Quick Reply Suggestions <span className="text-muted-foreground font-normal">(with welcome message)</span></Label>
+                <Textarea
+                  value={form.welcome_suggestions}
+                  onChange={(e) => set("welcome_suggestions", e.target.value)}
+                  placeholder={"Find a product\nCheck my order\nShipping info\nContact support"}
+                  rows={4}
+                  className="text-sm resize-none font-mono"
+                />
+                <p className="text-[11px] text-muted-foreground">
+                  One suggestion per line · max 4 · shown as tappable chips below the welcome message.
                 </p>
               </div>
 

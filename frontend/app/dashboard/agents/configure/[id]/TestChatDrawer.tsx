@@ -22,6 +22,7 @@ interface Props {
   agentId: string;
   agentName: string;
   welcomeMessage?: string | null;
+  welcomeSuggestions?: string[];
   open: boolean;
   onClose: () => void;
 }
@@ -93,7 +94,7 @@ function getAuthToken(): string {
   return "";
 }
 
-export function TestChatDrawer({ agentId, agentName, welcomeMessage, open, onClose }: Props) {
+export function TestChatDrawer({ agentId, agentName, welcomeMessage, welcomeSuggestions, open, onClose }: Props) {
   const [events, setEvents] = useState<Event[]>([]);
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
@@ -219,6 +220,7 @@ export function TestChatDrawer({ agentId, agentName, welcomeMessage, open, onClo
             }
             if (e.kind === "assistant") {
               const rich = parseRichContent(e.content);
+              const isWelcome = i === 0 && e.content === welcomeMessage;
               return (
                 <div key={i} className="flex flex-col items-start gap-1.5">
                   <div className="max-w-[85%] rounded-2xl bg-muted px-3 py-2 text-sm whitespace-pre-wrap break-words">
@@ -229,6 +231,19 @@ export function TestChatDrawer({ agentId, agentName, welcomeMessage, open, onClo
                       <RichContent block={block} onQuickReply={(reply) => send(reply)} />
                     </div>
                   ))}
+                  {isWelcome && events.length === 1 && !sending && welcomeSuggestions && welcomeSuggestions.length > 0 && (
+                    <div className="flex flex-wrap gap-1.5 max-w-[85%]">
+                      {welcomeSuggestions.map((s, si) => (
+                        <button
+                          key={si}
+                          onClick={() => send(s)}
+                          className="rounded-full border border-primary/30 bg-primary/8 px-3 py-1 text-[11px] text-primary hover:bg-primary/15 transition-colors"
+                        >
+                          {s}
+                        </button>
+                      ))}
+                    </div>
+                  )}
                 </div>
               );
             }

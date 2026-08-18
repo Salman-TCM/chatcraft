@@ -93,6 +93,7 @@ class AgentCreateRequest(BaseModel):
     webhook_url: str | None = Field(None, max_length=2048)
     welcome_message: str | None = Field(None, max_length=500)
     suggestions_enabled: bool = False
+    welcome_suggestions: list[str] = Field(default_factory=list)
     # Design
     primary_colour: str = Field("#6366f1", max_length=20)
     logo_url: str | None = Field(None, max_length=2048)
@@ -105,6 +106,11 @@ class AgentCreateRequest(BaseModel):
     _v_model = field_validator("model")(lambda cls, v: _validate_model_id(v))
     _v_webhook = field_validator("webhook_url")(lambda cls, v: _validate_webhook_url(v))
     _v_colour = field_validator("primary_colour")(lambda cls, v: _validate_hex_colour(v) or "#6366f1")
+
+    @field_validator("welcome_suggestions")
+    @classmethod
+    def v_suggestions(cls, v: list[str]) -> list[str]:
+        return [s.strip() for s in v if s.strip()][:4]
 
 
 class AgentUpdateRequest(BaseModel):
@@ -123,6 +129,7 @@ class AgentUpdateRequest(BaseModel):
     webhook_url: str | None = Field(None, max_length=2048)
     welcome_message: str | None = Field(None, max_length=500)
     suggestions_enabled: bool | None = None
+    welcome_suggestions: list[str] | None = None
     # Design
     primary_colour: str | None = Field(None, max_length=20)
     logo_url: str | None = Field(None, max_length=2048)
@@ -160,6 +167,7 @@ class AgentResponse(BaseModel):
     webhook_url: str | None = None
     welcome_message: str | None = None
     suggestions_enabled: bool = False
+    welcome_suggestions: list[str] = Field(default_factory=list)
     # Design
     primary_colour: str = "#6366f1"
     logo_url: str | None = None

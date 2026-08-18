@@ -24,6 +24,7 @@ interface AgentInfo extends AgentDesign {
   model: string;
   welcome_message: string | null;
   suggestions_enabled: boolean;
+  welcome_suggestions: string[];
 }
 
 interface ChatMessage {
@@ -350,6 +351,33 @@ export default function PublicAgentPage() {
                   <RichContent block={block} onQuickReply={(reply) => sendMessage(reply)} />
                 </div>
               ))}
+              {/* Welcome suggestion chips — only after the first (welcome) message, before any user input */}
+              {msg.isWelcome && messages.length === 1 && !running &&
+                agent.welcome_suggestions?.length > 0 && (
+                <div className="flex flex-wrap gap-1.5 mt-1.5" style={{ maxWidth: "85%" }}>
+                  {agent.welcome_suggestions.map((s, si) => (
+                    <button
+                      key={si}
+                      onClick={() => sendMessage(s)}
+                      style={{
+                        border: `1px solid ${primary}55`,
+                        color: primary,
+                        borderRadius: "9999px",
+                        padding: "5px 12px",
+                        fontSize: "12px",
+                        cursor: "pointer",
+                        backgroundColor: primary + "12",
+                        fontFamily: "inherit",
+                        transition: "background .15s",
+                      }}
+                      onMouseEnter={e => (e.currentTarget.style.backgroundColor = primary + "22")}
+                      onMouseLeave={e => (e.currentTarget.style.backgroundColor = primary + "12")}
+                    >
+                      {s}
+                    </button>
+                  ))}
+                </div>
+              )}
             </div>
           );
         })}

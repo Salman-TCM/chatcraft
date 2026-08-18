@@ -246,6 +246,7 @@ export default function ConfigureAgentPage() {
     webhook_url: "",
     welcome_message: "",
     suggestions_enabled: false,
+    welcome_suggestions: [] as string[],
     tools: {} as Record<string, boolean>,
     // Design
     primary_colour: "#6366f1",
@@ -274,6 +275,7 @@ export default function ConfigureAgentPage() {
         webhook_url: d.webhook_url || "",
         welcome_message: d.welcome_message || "",
         suggestions_enabled: d.suggestions_enabled || false,
+        welcome_suggestions: d.welcome_suggestions || [],
         tools: d.tools || {},
         primary_colour: d.primary_colour || "#6366f1",
         logo_url: d.logo_url || "",
@@ -1005,6 +1007,7 @@ export default function ConfigureAgentPage() {
         agentId={id}
         agentName={form.name || "Agent"}
         welcomeMessage={form.welcome_message}
+        welcomeSuggestions={form.welcome_suggestions}
         open={testChatOpen}
         onClose={() => setTestChatOpen(false)}
       />

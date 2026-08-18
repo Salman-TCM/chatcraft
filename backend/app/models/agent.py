@@ -68,6 +68,12 @@ class Agent(TimestampMixin, Base):
         Boolean, nullable=False, default=False, server_default="false"
     )
 
+    # Static quick-reply chips shown below the welcome message before the
+    # first user message (max 4). Stored as a JSON array of strings.
+    welcome_suggestions: Mapped[list] = mapped_column(
+        JSONB, nullable=False, default=list, server_default="'[]'"
+    )
+
     # ── Design / branding fields ───────────────────────────────────────────────
     primary_colour: Mapped[str] = mapped_column(
         String(20), nullable=False, default="#6366f1", server_default="'#6366f1'"
