@@ -183,7 +183,10 @@ async def _get_server(server_id: str, current_user: Any, db: Any) -> MCPServerCo
 
 
 def _auth_headers(server: MCPServerConfig) -> dict:
-    headers: dict = {"Content-Type": "application/json"}
+    headers: dict = {
+        "Content-Type": "application/json",
+        "Accept": "application/json, text/event-stream",
+    }
     cfg = server.auth_config or {}
     if server.auth_type == "bearer":
         headers["Authorization"] = f"Bearer {cfg.get('token', '')}"
