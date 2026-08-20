@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { Check, ExternalLink, Eye, EyeOff, Loader2, Trash2, X } from "lucide-react";
-import { SiBrave, SiDuckduckgo, SiMicrosoftbing } from "react-icons/si";
+import { SiBrave, SiDuckduckgo } from "react-icons/si";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -26,7 +26,7 @@ type SearchIconDef =
 const SEARCH_ICON_MAP: Record<string, SearchIconDef> = {
   tavily:       { kind: "letter", letter: "T",  bg: "#0073E6", fg: "#fff" },
   serper:       { kind: "letter", letter: "S",  bg: "#E63946", fg: "#fff" },
-  bing:         { kind: "si",     Icon: SiMicrosoftbing, bg: "#0078D4", fg: "#fff" },
+  bing:         { kind: "letter", letter: "B",           bg: "#0078D4", fg: "#fff" },
   brave_search: { kind: "si",     Icon: SiBrave,         bg: "#FF5000", fg: "#fff" },
   serpapi:      { kind: "letter", letter: "S",  bg: "#3DDC84", fg: "#000" },
   you:          { kind: "letter", letter: "Y",  bg: "#6E48AA", fg: "#fff" },
@@ -72,6 +72,8 @@ export default function SearchIntegrationsPage() {
     try {
       const res = await apiClient.get("/api/settings/search-keys");
       setProviders(res.data.data ?? []);
+    } catch {
+      // show empty list on error
     } finally {
       setLoading(false);
     }
