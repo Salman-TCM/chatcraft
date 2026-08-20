@@ -90,8 +90,12 @@ export default function IntegrationsPage() {
   }, []);
 
   async function load() {
-    const metaRes = await apiClient.get("/api/settings/model-keys/providers");
-    setMeta(metaRes.data.data);
+    try {
+      const metaRes = await apiClient.get("/api/settings/model-keys/providers");
+      setMeta(metaRes.data.data);
+    } catch {
+      return;
+    }
     try {
       const statusRes = await apiClient.get("/api/settings/model-keys");
       const data: KeyStatus[] = statusRes.data.data;
