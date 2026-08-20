@@ -44,6 +44,7 @@ from app.models.mcp import MCPServerConfig
 from app.models.usage_log import UsageLog
 from app.schemas.agent import AgentCreateRequest, AgentResponse, AgentUpdateRequest
 from app.services.kb.extractor import extract_docx, extract_pdf, extract_txt
+from app.api.mcp_servers import _mcp_rpc
 from app.services.llm.key_store import get_key as _get_user_key
 
 router = APIRouter(
@@ -2277,25 +2278,6 @@ async def _tool_mcp(server: MCPServerConfig, tool_name: str, arguments: dict) ->
         return "\n".join(parts)[:4000] or json.dumps(result)[:4000]
     return str(result)[:4000]
 
-
-def _mcp_auth_headers(server: MCPServerConfig) -> dict:
-    headers: dict = {"Content-Type": "application/json"}
-    cfg = server.auth_config or {}
-    if server.auth_type == "bearer":
-        headers["Authorization"] = f"Bearer {cfg.get('token', '')}"
-    elif server.auth_type == "header":
-        headers[cfg.get("header_name", "X-API-Key")] = cfg.get("header_value", "")
-    return headers
-
-
-async def _mcp_rpc(server: MCPServerConfig, method: str, params: dict) -> dict:
-    payload = {"jsonrpc": "2.0", "id": 1, "method": method, "params": params}
-    async with httpx.AsyncClient(timeout=30) as client:
-        resp = await client.post(server.server_url, headers=_mcp_auth_headers(server), json=payload)
-    data = resp.json()
-    if "error" in data:
-        raise RuntimeError(data["error"].get("message", "MCP error"))
-    return data.get("result", {})
 
 
 # ─── Built-in tool implementations ───────────────────────────────────────────
