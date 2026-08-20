@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { Check, ExternalLink, Eye, EyeOff, Loader2, Trash2, X } from "lucide-react";
+import { SiBrave, SiDuckduckgo, SiMicrosoftbing } from "react-icons/si";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -18,24 +19,53 @@ interface SearchProvider {
   configured: boolean;
 }
 
-const PROVIDER_ICONS: Record<string, string> = {
-  tavily:       "🔍",
-  serper:       "🔎",
-  bing:         "🅱️",
-  brave_search: "🦁",
-  serpapi:      "🐍",
-  you:          "💡",
-  exa:          "🧠",
+type SearchIconDef =
+  | { kind: "si"; Icon: React.ComponentType<{ className?: string }>; bg: string; fg: string }
+  | { kind: "letter"; letter: string; bg: string; fg: string };
+
+const SEARCH_ICON_MAP: Record<string, SearchIconDef> = {
+  tavily:       { kind: "letter", letter: "T",  bg: "#0073E6", fg: "#fff" },
+  serper:       { kind: "letter", letter: "S",  bg: "#E63946", fg: "#fff" },
+  bing:         { kind: "si",     Icon: SiMicrosoftbing, bg: "#0078D4", fg: "#fff" },
+  brave_search: { kind: "si",     Icon: SiBrave,         bg: "#FF5000", fg: "#fff" },
+  serpapi:      { kind: "letter", letter: "S",  bg: "#3DDC84", fg: "#000" },
+  you:          { kind: "letter", letter: "Y",  bg: "#6E48AA", fg: "#fff" },
+  exa:          { kind: "letter", letter: "E",  bg: "#111827", fg: "#fff" },
 };
+
+function SearchProviderIcon({ provider }: { provider: string }) {
+  const def = SEARCH_ICON_MAP[provider];
+  if (!def) {
+    return (
+      <div className="h-9 w-9 rounded-xl bg-muted flex items-center justify-center shrink-0">
+        <span className="text-xs font-bold text-muted-foreground">?</span>
+      </div>
+    );
+  }
+  return (
+    <div
+      className="h-9 w-9 rounded-xl flex items-center justify-center shrink-0"
+      style={{ backgroundColor: def.bg }}
+    >
+      {def.kind === "letter" ? (
+        <span className="text-sm font-bold leading-none" style={{ color: def.fg }}>
+          {def.letter}
+        </span>
+      ) : (
+        <def.Icon className="h-[18px] w-[18px]" style={{ color: def.fg }} />
+      )}
+    </div>
+  );
+}
 
 export default function SearchIntegrationsPage() {
   const [providers, setProviders] = useState<SearchProvider[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [inputs, setInputs]   = useState<Record<string, string>>({});
-  const [visible, setVisible] = useState<Record<string, boolean>>({});
-  const [saving, setSaving]   = useState<Record<string, boolean>>({});
-  const [removing, setRemoving] = useState<Record<string, boolean>>({});
-  const [testing, setTesting] = useState<Record<string, boolean>>({});
+  const [loading, setLoading]     = useState(true);
+  const [inputs, setInputs]       = useState<Record<string, string>>({});
+  const [visible, setVisible]     = useState<Record<string, boolean>>({});
+  const [saving, setSaving]       = useState<Record<string, boolean>>({});
+  const [removing, setRemoving]   = useState<Record<string, boolean>>({});
+  const [testing, setTesting]     = useState<Record<string, boolean>>({});
   const [testResult, setTestResult] = useState<Record<string, { ok: boolean; msg: string }>>({});
 
   async function load() {
@@ -113,8 +143,10 @@ export default function SearchIntegrationsPage() {
       {/* DuckDuckGo — always available, no key */}
       <Card className="p-5 space-y-2 border-dashed">
         <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2.5">
-            <span className="text-xl">🦆</span>
+          <div className="flex items-center gap-3">
+            <div className="h-9 w-9 rounded-xl flex items-center justify-center shrink-0" style={{ backgroundColor: "#DE5833" }}>
+              <SiDuckduckgo className="h-[18px] w-[18px]" style={{ color: "#fff" }} />
+            </div>
             <div>
               <p className="text-sm font-semibold">DuckDuckGo</p>
               <p className="text-xs text-muted-foreground">Free fallback — no API key needed. Used automatically when no other provider is configured.</p>
@@ -136,8 +168,8 @@ export default function SearchIntegrationsPage() {
           <Card key={p.provider} className="p-5 space-y-4">
             {/* Header */}
             <div className="flex items-start justify-between gap-3">
-              <div className="flex items-center gap-2.5">
-                <span className="text-xl">{PROVIDER_ICONS[p.provider] ?? "🔍"}</span>
+              <div className="flex items-center gap-3">
+                <SearchProviderIcon provider={p.provider} />
                 <div>
                   <p className="text-sm font-semibold">{p.label}</p>
                   <p className="text-xs text-muted-foreground mt-0.5">{p.description}</p>

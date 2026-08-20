@@ -1,7 +1,14 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Check, Download, Loader2, Trash2, Key, ExternalLink, Plug, Mail, Search, Wallet } from "lucide-react";
+import { Check, Download, Loader2, Trash2, ExternalLink, ChevronRight } from "lucide-react";
+import {
+  RiBrainLine,
+  RiSearchLine,
+  RiWalletLine,
+  RiMailSendLine,
+  RiCodeSSlashLine,
+} from "react-icons/ri";
 import { signOut } from "next-auth/react";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
@@ -220,66 +227,40 @@ export default function SettingsPage() {
 
       {/* Integrations */}
       <Section title="Integrations">
-        <Card className="flex items-center justify-between p-4">
-          <div>
-            <p className="text-sm font-medium flex items-center gap-2">
-              <Plug className="h-4 w-4" /> AI Model Integrations
-            </p>
-            <p className="text-xs text-muted-foreground mt-0.5">
-              Connect your own API keys (Anthropic, OpenAI, Google, etc.) to power your chatbots.
-            </p>
-          </div>
-          <Link href="/dashboard/settings/integrations">
-            <Button size="sm" variant="outline">
-              Manage <ExternalLink className="h-3.5 w-3.5 ml-1.5" />
-            </Button>
-          </Link>
-        </Card>
-        <Card className="flex items-center justify-between p-4">
-          <div>
-            <p className="text-sm font-medium flex items-center gap-2">
-              <Search className="h-4 w-4" /> Search Integrations
-            </p>
-            <p className="text-xs text-muted-foreground mt-0.5">
-              Configure search providers for agent web search (Tavily, Serper, Bing, Brave and more).
-            </p>
-          </div>
-          <Link href="/dashboard/settings/search">
-            <Button size="sm" variant="outline">
-              Manage <ExternalLink className="h-3.5 w-3.5 ml-1.5" />
-            </Button>
-          </Link>
-        </Card>
-        <Card className="flex items-center justify-between p-4">
-          <div>
-            <p className="text-sm font-medium flex items-center gap-2">
-              <Wallet className="h-4 w-4" /> Wallet Pass Credentials
-            </p>
-            <p className="text-xs text-muted-foreground mt-0.5">
-              Configure Apple Wallet (.p12 certificate) and Google Wallet (service account) signing credentials.
-            </p>
-          </div>
-          <Link href="/dashboard/settings/wallet-passes">
-            <Button size="sm" variant="outline">
-              Manage <ExternalLink className="h-3.5 w-3.5 ml-1.5" />
-            </Button>
-          </Link>
-        </Card>
-        <Card className="flex items-center justify-between p-4">
-          <div>
-            <p className="text-sm font-medium flex items-center gap-2">
-              <Mail className="h-4 w-4" /> Communication — SMTP &amp; SMS
-            </p>
-            <p className="text-xs text-muted-foreground mt-0.5">
-              Configure your SMTP email server and Twilio SMS credentials.
-            </p>
-          </div>
-          <Link href="/dashboard/settings/communications">
-            <Button size="sm" variant="outline">
-              Manage <ExternalLink className="h-3.5 w-3.5 ml-1.5" />
-            </Button>
-          </Link>
-        </Card>
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+          <IntegrationCard
+            href="/dashboard/settings/integrations"
+            iconBg="bg-violet-100 dark:bg-violet-950"
+            iconColor="text-violet-600 dark:text-violet-400"
+            Icon={RiBrainLine}
+            title="AI Model Integrations"
+            description="Anthropic, OpenAI, Google, DeepSeek, and more"
+          />
+          <IntegrationCard
+            href="/dashboard/settings/search"
+            iconBg="bg-blue-100 dark:bg-blue-950"
+            iconColor="text-blue-600 dark:text-blue-400"
+            Icon={RiSearchLine}
+            title="Search Integrations"
+            description="Tavily, Serper, Bing, Brave, and more"
+          />
+          <IntegrationCard
+            href="/dashboard/settings/wallet-passes"
+            iconBg="bg-emerald-100 dark:bg-emerald-950"
+            iconColor="text-emerald-600 dark:text-emerald-400"
+            Icon={RiWalletLine}
+            title="Wallet Pass Credentials"
+            description="Apple Wallet & Google Wallet signing keys"
+          />
+          <IntegrationCard
+            href="/dashboard/settings/communications"
+            iconBg="bg-orange-100 dark:bg-orange-950"
+            iconColor="text-orange-600 dark:text-orange-400"
+            Icon={RiMailSendLine}
+            title="Communication"
+            description="SMTP email & Twilio SMS credentials"
+          />
+        </div>
       </Section>
 
       <Separator />
@@ -287,13 +268,16 @@ export default function SettingsPage() {
       {/* Developer */}
       <Section title="Developer">
         <Card className="flex items-center justify-between p-4">
-          <div>
-            <p className="text-sm font-medium flex items-center gap-2">
-              <Key className="h-4 w-4" /> API Tokens
-            </p>
-            <p className="text-xs text-muted-foreground mt-0.5">
-              Create bearer tokens for programmatic API access.
-            </p>
+          <div className="flex items-center gap-3">
+            <div className="h-10 w-10 rounded-xl bg-amber-100 dark:bg-amber-950 flex items-center justify-center shrink-0">
+              <RiCodeSSlashLine className="h-5 w-5 text-amber-600 dark:text-amber-400" />
+            </div>
+            <div>
+              <p className="text-sm font-semibold">API Tokens</p>
+              <p className="text-xs text-muted-foreground mt-0.5">
+                Create bearer tokens for programmatic API access.
+              </p>
+            </div>
           </div>
           <Link href="/dashboard/settings/api-tokens">
             <Button size="sm" variant="outline">
@@ -398,5 +382,38 @@ function Section({ title, children }: { title: string; children: React.ReactNode
       <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">{title}</p>
       {children}
     </div>
+  );
+}
+
+function IntegrationCard({
+  href,
+  iconBg,
+  iconColor,
+  Icon,
+  title,
+  description,
+}: {
+  href: string;
+  iconBg: string;
+  iconColor: string;
+  Icon: React.ComponentType<{ className?: string }>;
+  title: string;
+  description: string;
+}) {
+  return (
+    <Link href={href} className="block">
+      <Card className="p-4 hover:border-primary/40 hover:shadow-sm transition-all cursor-pointer group h-full">
+        <div className="flex items-start gap-3">
+          <div className={`h-10 w-10 rounded-xl flex items-center justify-center shrink-0 ${iconBg}`}>
+            <Icon className={`h-5 w-5 ${iconColor}`} />
+          </div>
+          <div className="flex-1 min-w-0">
+            <p className="text-sm font-semibold group-hover:text-primary transition-colors">{title}</p>
+            <p className="text-xs text-muted-foreground mt-0.5 leading-relaxed">{description}</p>
+          </div>
+          <ChevronRight className="h-4 w-4 text-muted-foreground shrink-0 mt-0.5 group-hover:text-primary transition-colors" />
+        </div>
+      </Card>
+    </Link>
   );
 }

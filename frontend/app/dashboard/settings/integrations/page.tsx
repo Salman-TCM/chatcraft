@@ -2,6 +2,9 @@
 
 import { useEffect, useState } from "react";
 import { Check, ExternalLink, Eye, EyeOff, Loader2, Trash2, X } from "lucide-react";
+import { SiOpenai, SiAnthropic, SiDeepseek, SiGroq, SiPerplexity } from "react-icons/si";
+import { FcGoogle } from "react-icons/fc";
+import { FiServer, FiZap } from "react-icons/fi";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -24,16 +27,52 @@ interface KeyStatus {
   base_url?: string;
 }
 
-const PROVIDER_ICONS: Record<string, string> = {
-  anthropic: "🟣",
-  openai: "🟢",
-  google: "🔵",
-  deepseek: "🔷",
-  groq: "⚡",
-  perplexity: "🔮",
-  xai: "✖️",
-  self_hosted: "🖥️",
+type ProviderIconDef =
+  | { kind: "si"; Icon: React.ComponentType<{ className?: string }>; bg: string; fg: string }
+  | { kind: "fc"; Icon: React.ComponentType<{ className?: string }>; bg: string }
+  | { kind: "letter"; letter: string; bg: string; fg: string };
+
+const PROVIDER_ICON_MAP: Record<string, ProviderIconDef> = {
+  anthropic:   { kind: "si", Icon: SiAnthropic,  bg: "#CC785C", fg: "#fff" },
+  openai:      { kind: "si", Icon: SiOpenai,      bg: "#000",    fg: "#fff" },
+  google:      { kind: "fc", Icon: FcGoogle,      bg: "#fff" },
+  deepseek:    { kind: "si", Icon: SiDeepseek,    bg: "#1864F0", fg: "#fff" },
+  groq:        { kind: "si", Icon: SiGroq,        bg: "#F55036", fg: "#fff" },
+  perplexity:  { kind: "si", Icon: SiPerplexity,  bg: "#1FB8CD", fg: "#fff" },
+  xai:         { kind: "letter", letter: "𝕏",     bg: "#000",    fg: "#fff" },
+  self_hosted: { kind: "si", Icon: FiServer,      bg: "#475569", fg: "#fff" },
 };
+
+function ProviderIcon({ provider }: { provider: string }) {
+  const def = PROVIDER_ICON_MAP[provider];
+  if (!def) {
+    return (
+      <div className="h-9 w-9 rounded-xl bg-muted flex items-center justify-center shrink-0">
+        <FiZap className="h-4 w-4 text-muted-foreground" />
+      </div>
+    );
+  }
+  return (
+    <div
+      className="h-9 w-9 rounded-xl flex items-center justify-center shrink-0"
+      style={{
+        backgroundColor: def.bg,
+        border: def.bg === "#fff" ? "1px solid #e2e8f0" : undefined,
+      }}
+    >
+      {def.kind === "letter" ? (
+        <span className="text-sm font-bold leading-none" style={{ color: def.fg }}>
+          {def.letter}
+        </span>
+      ) : (
+        <def.Icon
+          className="h-[18px] w-[18px]"
+          style={def.kind === "si" ? { color: def.fg } : undefined}
+        />
+      )}
+    </div>
+  );
+}
 
 export default function IntegrationsPage() {
   const [meta, setMeta] = useState<Record<string, ProviderMeta>>({});
@@ -125,7 +164,7 @@ export default function IntegrationsPage() {
       <div>
         <h1 className="text-2xl font-semibold">AI Model Integrations</h1>
         <p className="text-sm text-muted-foreground mt-1">
-          Connect your own API keys. You pay the provider directly — {APP_NAME} doesn't charge per message.
+          Connect your own API keys. You pay the provider directly — {APP_NAME} doesn&apos;t charge per message.
         </p>
       </div>
 
@@ -140,13 +179,13 @@ export default function IntegrationsPage() {
           <Card key={provider} className="p-5 space-y-4">
             {/* Header */}
             <div className="flex items-start justify-between gap-3">
-              <div className="flex items-center gap-2.5">
-                <span className="text-xl">{PROVIDER_ICONS[provider] ?? "🤖"}</span>
+              <div className="flex items-center gap-3">
+                <ProviderIcon provider={provider} />
                 <div>
                   <p className="text-sm font-semibold">{info.label}</p>
                   <p className="text-xs text-muted-foreground mt-0.5">
                     {provider === "self_hosted"
-                      ? "Your own OpenAI-compatible server (Ollama, vLLM, LM Studio, ...)"
+                      ? "OpenAI-compatible server (Ollama, vLLM, LM Studio…)"
                       : `${info.models.slice(0, 3).join(", ")}${info.models.length > 3 ? ` +${info.models.length - 3} more` : ""}`}
                   </p>
                 </div>
@@ -220,7 +259,7 @@ export default function IntegrationsPage() {
 
             {/* Actions for configured keys */}
             {isConfigured && (
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 flex-wrap">
                 <Button
                   size="sm"
                   variant="outline"
@@ -239,7 +278,6 @@ export default function IntegrationsPage() {
                 >
                   {isRemoving ? <Loader2 className="h-3 w-3 animate-spin" /> : <><Trash2 className="h-3 w-3" /> Remove</>}
                 </Button>
-
                 {result && (
                   <span className={`text-xs flex items-center gap-1 ${result.ok ? "text-green-600" : "text-destructive"}`}>
                     {result.ok ? <Check className="h-3 w-3" /> : <X className="h-3 w-3" />}
