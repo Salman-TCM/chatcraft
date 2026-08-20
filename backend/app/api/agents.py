@@ -14,6 +14,7 @@ import asyncio
 import json
 import re as _re
 import secrets
+import time
 import uuid
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime
@@ -23,6 +24,7 @@ import anthropic
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Request, UploadFile, status
 from fastapi.responses import StreamingResponse
+from loguru import logger
 from openai import AsyncOpenAI
 from pydantic import BaseModel, Field
 from sqlalchemy import func, select
@@ -770,10 +772,16 @@ async def _run_agent_anthropic(
             if tools:
                 kwargs["tools"] = tools
 
+            _step_start = time.perf_counter()
             async with client.messages.stream(**kwargs) as stream:
                 async for text in stream.text_stream:
                     yield _sse({"type": "text", "content": text})
                 response = await stream.get_final_message()
+            logger.bind(agent_id=str(agent.id), step=step).info(
+                f"llm_round anthropic step={step} "
+                f"{round((time.perf_counter() - _step_start) * 1000, 1)}ms "
+                f"stop_reason={response.stop_reason}"
+            )
 
             tool_uses: list[Any] = [b for b in response.content if b.type == "tool_use"]
 
@@ -2132,6 +2140,24 @@ def _build_builtin_tools(tools_config: dict) -> list[dict]:
 
 
 async def _execute_tool(name: str, inputs: dict, mcp_map: dict, ctx: dict | None = None) -> str:
+    """Timed wrapper around _execute_tool_impl — logs how long each tool call
+    takes so a stalled/slow tool is visible in logs even though the request
+    itself may still eventually return 200 (see _run_agent's SSE streaming:
+    the request-logging middleware only times the first chunk, not the full
+    tool-calling loop)."""
+    start = time.perf_counter()
+    try:
+        return await _execute_tool_impl(name, inputs, mcp_map, ctx)
+    finally:
+        duration_ms = round((time.perf_counter() - start) * 1000, 1)
+        logger.bind(
+            agent_id=(ctx or {}).get("agent_id"),
+            tool=name,
+            duration_ms=duration_ms,
+        ).info(f"tool_call {name} {duration_ms}ms")
+
+
+async def _execute_tool_impl(name: str, inputs: dict, mcp_map: dict, ctx: dict | None = None) -> str:
     # Defense-in-depth: even if the model hallucinates a tool call for a name
     # that isn't in its declared tool list (text-mode extraction, retries, etc),
     # refuse to dispatch it if the caller passed an allowlist. Public shares set
