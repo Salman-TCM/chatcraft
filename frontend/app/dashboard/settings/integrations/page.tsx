@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { Check, ExternalLink, Eye, EyeOff, Loader2, Trash2, X } from "lucide-react";
-import { SiOpenai, SiAnthropic, SiDeepseek, SiGroq, SiPerplexity } from "react-icons/si";
+import { SiAnthropic, SiDeepseek, SiPerplexity } from "react-icons/si";
 import { FcGoogle } from "react-icons/fc";
 import { FiServer, FiZap } from "react-icons/fi";
 import { Button } from "@/components/ui/button";
@@ -34,10 +34,10 @@ type ProviderIconDef =
 
 const PROVIDER_ICON_MAP: Record<string, ProviderIconDef> = {
   anthropic:   { kind: "si", Icon: SiAnthropic,  bg: "#CC785C", fg: "#fff" },
-  openai:      { kind: "si", Icon: SiOpenai,      bg: "#000",    fg: "#fff" },
+  openai:      { kind: "letter", letter: "AI",     bg: "#000",    fg: "#fff" },
   google:      { kind: "fc", Icon: FcGoogle,      bg: "#fff" },
   deepseek:    { kind: "si", Icon: SiDeepseek,    bg: "#1864F0", fg: "#fff" },
-  groq:        { kind: "si", Icon: SiGroq,        bg: "#F55036", fg: "#fff" },
+  groq:        { kind: "letter", letter: "G",      bg: "#F55036", fg: "#fff" },
   perplexity:  { kind: "si", Icon: SiPerplexity,  bg: "#1FB8CD", fg: "#fff" },
   xai:         { kind: "letter", letter: "𝕏",     bg: "#000",    fg: "#fff" },
   self_hosted: { kind: "si", Icon: FiServer,      bg: "#475569", fg: "#fff" },
