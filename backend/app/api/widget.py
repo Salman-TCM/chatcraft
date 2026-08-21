@@ -13,6 +13,7 @@ import uuid
 from calendar import monthrange
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime
+from decimal import Decimal
 
 from fastapi import APIRouter, BackgroundTasks, Header, HTTPException, Request, status
 from fastapi import Response as FastAPIResponse
@@ -39,6 +40,7 @@ class _LicenseCreate(_BaseModel):
     expires_at: datetime | None = None
 
 
+from app.models.mcp import MCPServerConfig
 from app.services.kb.rag import RAGService
 from app.services.llm import (
     ChatMessage,
@@ -50,11 +52,66 @@ from app.services.llm import (
 from app.services.llm.key_store import get_all_keys
 from app.services.llm.router import get_model_provider
 
+# Tool-calling for the widget deliberately reuses Agent Builder's proven
+# text-mode tool loop (agents.py's primary format, not just its fallback)
+# rather than adding native tools= support to the shared LLMProvider
+# interface: that interface (ChatMessage/StreamChunk) is plain role+content
+# with no tool-call concept, used by every provider AND by the plain (non
+# -widget) chat product, so extending it would mean re-deriving native
+# tool-calling for all 4 provider SDKs just to serve this one surface. The
+# text-mode format already works across every provider agents.py supports.
+from app.api.agents import (
+    _build_text_tool_instructions,
+    _execute_tool,
+    _extract_text_tool_calls,
+    _discover_mcp_tools,
+    _is_public_safe_mcp_tool,
+    _strip_recognized_fences,
+    _tools_to_openai,
+    _MAX_TOOL_CALLS_PER_TURN,
+    _TOOL_RESULT_FOLLOWUP_REMINDER,
+)
+
 router = APIRouter(prefix="/api/widget", tags=["widget"])
 
 _optional_bearer = HTTPBearer(auto_error=False)
 
 _GUEST_CAP = settings.free_tier_message_cap
+
+# Widget visitors are anonymous, same trust level as an Agent Builder public
+# share link — so this only ever discovers the same narrow, read-only MCP
+# catalog surface (_PUBLIC_SHARE_SAFE_MCP_TOOL_NAMES via _is_public_safe_mcp_tool),
+# never the owner's cart/order/refund/account or non-MCP tools (widgets have
+# no concept of custom webhook tools or a linked commerce store — those are
+# Agent Builder-only, tied to agents.id, not chatbot_id).
+async def _build_widget_mcp_tools(user_id: uuid.UUID, db: AsyncSession) -> tuple[list[dict], dict]:
+    tools: list[dict] = []
+    mcp_map: dict = {}
+    result = await db.execute(
+        select(MCPServerConfig).where(
+            MCPServerConfig.user_id == user_id,
+            MCPServerConfig.is_active == True,  # noqa: E712
+        )
+    )
+    for server in result.scalars().all():
+        try:
+            discovered = await _discover_mcp_tools(server)
+        except Exception:
+            continue  # unreachable MCP server — skip silently, same as agents.py
+        for tool in discovered:
+            name = f"mcp__{server.name.replace(' ', '_')}__{tool['name']}"
+            route = {"kind": "mcp", "server": server, "original_name": tool["name"]}
+            if not _is_public_safe_mcp_tool(name, {name: route}):
+                continue
+            tools.append(
+                {
+                    "name": name,
+                    "description": f"[MCP: {server.name}] {tool.get('description', '')}",
+                    "input_schema": tool.get("inputSchema", {"type": "object", "properties": {}}),
+                }
+            )
+            mcp_map[name] = route
+    return tools, mcp_map
 
 
 # ── Public config ──────────────────────────────────────────────────────────────
@@ -371,59 +428,134 @@ async def widget_chat(
     rag = RAGService(db)
     knowledge_context, _ = await rag.query(chatbot_id=chatbot_id, user_message=sanitized)
 
+    # MCP tools (read-only catalog browsing only — see _build_widget_mcp_tools)
+    # are taught via the same text-mode instructions agents.py uses, so any
+    # provider/model this chatbot is configured with can use them.
+    tools, mcp_map = await _build_widget_mcp_tools(bot.user_id, db)
+    allowed_tools = frozenset(mcp_map.keys())
+
     sys_ctx = SystemPromptContext(
         chatbot_name=bot.name,
         custom_instructions=bot.system_prompt,
         knowledge_context=knowledge_context,
     )
     system_prompt = build_system_prompt(sys_ctx)
+    if tools:
+        system_prompt = system_prompt + "\n\n" + _build_text_tool_instructions(_tools_to_openai(tools))
 
     history = await _load_history(db, conv.id)
     llm_messages = [ChatMessage(role="system", content=system_prompt)] + history
 
     conv_id = conv.id
 
+    async def _finish(
+        final_text: str, model: str, input_tokens: int, output_tokens: int, cost_usd
+    ) -> AsyncIterator[str]:
+        from app.db.session import AsyncSessionLocal
+
+        async with AsyncSessionLocal() as session:
+            msg = Message(
+                conversation_id=conv_id,
+                role=MessageRole.assistant,
+                content=final_text,
+                model=model,
+                input_tokens=input_tokens,
+                output_tokens=output_tokens,
+                cost_usd=cost_usd,
+            )
+            session.add(msg)
+            await session.commit()
+            await session.refresh(msg)
+            msg_id = msg.id
+        yield _sse(
+            type="done",
+            model=model,
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+            cost_usd=str(cost_usd),
+            conversation_id=str(conv_id),
+            message_id=str(msg_id),
+        )
+        background_tasks.add_task(_send_widget_push, redis, conv_id, bot.name, final_text)
+        if is_first:
+            from app.api.chat import _generate_title
+
+            background_tasks.add_task(_generate_title, conv_id, body.message, final_text, model_id)
+
+    async def _run_with_tools() -> AsyncIterator[str]:
+        # Buffered, turn-at-a-time (not token-streamed) — same tradeoff
+        # agents.py already made: you can't safely stream raw tokens live
+        # AND retroactively hide a tool-call fence that shows up later in the
+        # same turn, so each LLM turn is fetched whole via complete(), then
+        # inspected for a tool call before anything is shown to the visitor.
+        loop_messages = list(llm_messages)
+        max_steps = bot.max_agent_steps or 5
+        full: list[str] = []
+        total_input = total_output = 0
+        total_cost = Decimal("0")
+        step = 0
+        resp = None
+        while step < max_steps:
+            step += 1
+            if await request.is_disconnected():
+                return
+            resp = await llm_router.complete(loop_messages)
+            total_input += resp.input_tokens
+            total_output += resp.output_tokens
+            total_cost += resp.cost_usd
+            text = resp.content or ""
+            calls, cutoff = _extract_text_tool_calls(text, allowed_tools)
+            if not calls:
+                full.append(text)
+                yield _sse(type="delta", content=text)
+                break
+            calls = calls[:_MAX_TOOL_CALLS_PER_TURN]
+            trusted = text[:cutoff]
+            display = _strip_recognized_fences(trusted, allowed_tools)
+            if display:
+                full.append(display)
+                yield _sse(type="delta", content=display)
+            loop_messages.append(ChatMessage(role="assistant", content=trusted))
+            ctx = {"agent_id": "", "user_id": str(bot.user_id), "allowed_tools": allowed_tools}
+            for tc in calls:
+                name, inputs = tc["name"], tc["args"]
+                yield _sse(type="tool_call", tool=name, input=inputs)
+                result_text = await _execute_tool(name, inputs, mcp_map, ctx)
+                yield _sse(type="tool_result", tool=name, result=result_text[:500])
+                loop_messages.append(
+                    ChatMessage(role="user", content=f"[Tool result for '{name}']: {result_text}")
+                )
+            loop_messages.append(ChatMessage(role="user", content=_TOOL_RESULT_FOLLOWUP_REMINDER))
+        else:
+            # Exhausted max_steps without ever landing a call-free final answer.
+            if not full:
+                fallback_text = "Sorry, I wasn't able to finish that request."
+                full.append(fallback_text)
+                yield _sse(type="delta", content=fallback_text)
+        if resp is None:
+            return
+        async for ev in _finish("".join(full), resp.model, total_input, total_output, total_cost):
+            yield ev
+
     async def event_generator() -> AsyncIterator[str]:
         full: list[str] = []
         try:
+            if tools:
+                async for ev in _run_with_tools():
+                    yield ev
+                return
             async for chunk in llm_router.stream(llm_messages):
                 if await request.is_disconnected():
                     break
                 if chunk.done:
-                    from app.db.session import AsyncSessionLocal
-
-                    async with AsyncSessionLocal() as session:
-                        msg = Message(
-                            conversation_id=conv_id,
-                            role=MessageRole.assistant,
-                            content="".join(full),
-                            model=chunk.model,
-                            input_tokens=chunk.input_tokens,
-                            output_tokens=chunk.output_tokens,
-                            cost_usd=chunk.cost_usd,
-                        )
-                        session.add(msg)
-                        await session.commit()
-                        await session.refresh(msg)
-                        msg_id = msg.id
-                    yield _sse(
-                        type="done",
-                        model=chunk.model,
-                        input_tokens=chunk.input_tokens,
-                        output_tokens=chunk.output_tokens,
-                        cost_usd=str(chunk.cost_usd),
-                        conversation_id=str(conv_id),
-                        message_id=str(msg_id),
-                    )
-                    background_tasks.add_task(
-                        _send_widget_push, redis, conv_id, bot.name, "".join(full)
-                    )
-                    if is_first:
-                        from app.api.chat import _generate_title
-
-                        background_tasks.add_task(
-                            _generate_title, conv_id, body.message, "".join(full), model_id
-                        )
+                    async for ev in _finish(
+                        "".join(full),
+                        chunk.model,
+                        chunk.input_tokens,
+                        chunk.output_tokens,
+                        chunk.cost_usd,
+                    ):
+                        yield ev
                 else:
                     full.append(chunk.delta)
                     yield _sse(type="delta", content=chunk.delta)

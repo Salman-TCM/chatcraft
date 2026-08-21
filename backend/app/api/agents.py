@@ -269,6 +269,36 @@ _PUBLIC_SHARE_TOOL_ALLOWLIST = {
     "check_order_status",  # requires order id + matching email, not id alone
 }
 
+# MCP tools are excluded from public shares as a class (see the SECURITY note
+# below) because most of them mutate the owner's account or need a customer's
+# own accessToken that an anonymous visitor doesn't have. This is a narrow,
+# name-based exception for read-only catalog browsing — the same operations
+# _build_tools_with_mcp's non-MCP commerce tools (list_products/buy_product)
+# are already allowed to expose. Matched against the MCP tool's *original*
+# name (not the server-qualified mcp__SERVER__name), so it applies to any
+# server exposing a same-named catalog tool, not just one specific one. Never
+# add anything here that mutates state or needs per-customer auth (cart,
+# checkout, orders, refunds, account) — those still require the visitor's own
+# accessToken, which the public route intentionally never has.
+_PUBLIC_SHARE_SAFE_MCP_TOOL_NAMES = {
+    "search_products",
+    "list_products",
+    "get_product",
+    "product_filters",
+    "check_product_stock",
+    "get_product_price",
+    "check_product_compatibility",
+}
+
+
+def _is_public_safe_mcp_tool(name: str, mcp_map: dict) -> bool:
+    route = mcp_map.get(name)
+    return (
+        bool(route)
+        and route.get("kind") == "mcp"
+        and route.get("original_name") in _PUBLIC_SHARE_SAFE_MCP_TOOL_NAMES
+    )
+
 
 @public_router.post("/{share_token}/chat")
 @limiter.limit("5/minute")
@@ -292,13 +322,23 @@ async def public_agent_chat(
     tools, mcp_map = await _build_tools_with_mcp(agent, agent.user_id, db)
     # SECURITY: anonymous share visitors must not be able to invoke tools that
     # mutate the owner's account (create_agent, send_email, send_sms, sheets,
-    # http_request, MCP, custom webhook tools) or reveal owner secrets
-    # (list_available_models). Only read-only, per-request-scoped tools survive
-    # on the public route. Filtering mcp_map the same way (rather than clearing
-    # it) keeps routing info for the allowlisted commerce tools while still
-    # dropping every MCP/custom-webhook route.
-    tools = [t for t in tools if t["name"] in _PUBLIC_SHARE_TOOL_ALLOWLIST]
-    mcp_map = {k: v for k, v in mcp_map.items() if k in _PUBLIC_SHARE_TOOL_ALLOWLIST}
+    # http_request, most MCP tools, custom webhook tools) or reveal owner
+    # secrets (list_available_models). Only read-only, per-request-scoped
+    # tools survive on the public route — including the narrow MCP catalog
+    # exception in _PUBLIC_SHARE_SAFE_MCP_TOOL_NAMES. Filtering mcp_map the
+    # same way (rather than clearing it) keeps routing info for the
+    # allowlisted commerce/MCP tools while still dropping every other
+    # MCP/custom-webhook route.
+    tools = [
+        t
+        for t in tools
+        if t["name"] in _PUBLIC_SHARE_TOOL_ALLOWLIST or _is_public_safe_mcp_tool(t["name"], mcp_map)
+    ]
+    mcp_map = {
+        k: v
+        for k, v in mcp_map.items()
+        if k in _PUBLIC_SHARE_TOOL_ALLOWLIST or _is_public_safe_mcp_tool(k, mcp_map)
+    }
     _, api_key, base_url = await _resolve_api_key(
         agent.user_id, agent.model or "claude-sonnet-4-6", db
     )
@@ -970,6 +1010,55 @@ _BUILTIN_TOOL_NAMES = frozenset(
 )
 
 
+# 7. <|tool_call>call:ALIAS:TOOL{k:<|"|>v<|"|>,k2:v2}<tool_call|>  — the
+# self-hosted abliterated Gemma quant's own invented format: unquoted keys,
+# <|"|> sentinel tokens standing in for real quote characters (so it's not
+# valid JSON even after fixing quoting), a server "alias" instead of the real
+# mcp__SERVER__tool identifier, and no guarantee the closing tag survives.
+_ALIASED_CALL_RE = _re.compile(
+    r'<\|tool_call>call:([A-Za-z0-9_.-]+):([A-Za-z0-9_.-]+)\{([^{}]*)\}(?:\s*<tool_call\|>)?',
+)
+_ALIASED_KV_RE = _re.compile(r'([A-Za-z0-9_]+)\s*:\s*(?:<\|"\|>(.*?)<\|"\|>|([^,]+))')
+
+
+def _resolve_aliased_tool_name(alias: str, tool: str, known_tool_names: frozenset[str]) -> str:
+    """Map the model's made-up `alias:tool` shorthand to the real registered
+    tool name (e.g. "motoup:search_products" -> "mcp__MOTOUP_ASSISTANT__search_products")."""
+    tool_l = tool.lower()
+    alias_key = _re.sub(r"[^a-z0-9]", "", alias.lower())
+    matches = [
+        n for n in known_tool_names if n.lower() == tool_l or n.lower().endswith(f"__{tool_l}")
+    ]
+    if len(matches) > 1:
+        matches.sort(key=lambda n: alias_key not in _re.sub(r"[^a-z0-9]", "", n.lower()))
+    return matches[0] if matches else f"{alias}:{tool}"
+
+
+def _parse_aliased_args(body: str) -> dict:
+    args: dict[str, Any] = {}
+    for m in _ALIASED_KV_RE.finditer(body):
+        key = m.group(1)
+        if m.group(2) is not None:
+            args[key] = m.group(2)
+            continue
+        raw = (m.group(3) or "").strip()
+        if raw.lower() == "true":
+            args[key] = True
+        elif raw.lower() == "false":
+            args[key] = False
+        elif raw.lower() == "null":
+            args[key] = None
+        else:
+            try:
+                args[key] = int(raw)
+            except ValueError:
+                try:
+                    args[key] = float(raw)
+                except ValueError:
+                    args[key] = raw
+    return args
+
+
 def _consume_json_object(text: str, start: int) -> tuple[dict, int] | None:
     """Parse a JSON object starting at `text[start:]` and return (obj, end_idx).
 
@@ -1001,6 +1090,10 @@ def _extract_text_tool_calls(
       5. A bare {"name": ..., "arguments": {...}} with no wrapper at all
       6. ```<tool_name>\\n{...}\\n```         — model names the fence after
          the tool itself instead of "tool_call" (`known_tool_names`-gated)
+      7. <|tool_call>call:alias:tool{k:<|"|>v<|"|>}<tool_call|>  — the
+         self-hosted abliterated Gemma quant's own invented, JSON-invalid
+         format; `alias` is resolved against `known_tool_names` to find the
+         real mcp__SERVER__tool identifier
 
     Also returns `cutoff`: the end offset of the last recognized call. Weak
     models sometimes keep generating past the call, narrating a fabricated
@@ -1067,6 +1160,13 @@ def _extract_text_tool_calls(
             calls.append({"name": tag, "args": data})
             cutoff = max(cutoff, m.end())
 
+    # 7. <|tool_call>call:alias:tool{...}<tool_call|>
+    for m in _ALIASED_CALL_RE.finditer(text):
+        alias, tool, body = m.group(1), m.group(2), m.group(3)
+        name = _resolve_aliased_tool_name(alias, tool, known_tool_names)
+        calls.append({"name": name, "args": _parse_aliased_args(body)})
+        cutoff = max(cutoff, m.end())
+
     # 5. Bare JSON object, no fence/tags at all — some Groq models (e.g.
     # gpt-oss, qwen) emit a raw {"name": ..., "arguments": {...}} as the
     # entire message body.
@@ -1097,6 +1197,7 @@ def _strip_recognized_fences(text: str, known_tool_names: frozenset[str] = froze
     text = _TOOL_CALL_BLOCK_RE.sub("", text)
     text = _FN_TAG_SPAN_RE.sub("", text)
     text = _TOOL_TAG_SPAN_RE.sub("", text)
+    text = _ALIASED_CALL_RE.sub("", text)
     allowed = known_tool_names | _BUILTIN_TOOL_NAMES
     text = _GENERIC_FENCE_RE.sub(lambda m: "" if m.group(1) in allowed else m.group(0), text)
     return text.strip()
