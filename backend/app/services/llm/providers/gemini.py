@@ -30,7 +30,7 @@ def _build_contents(messages: list[ChatMessage]) -> tuple[str | None, list, str]
         if i == len(non_system) - 1 and m.role == "user":
             last_user = m.content
         else:
-            contents.append(types.Content(role=role, parts=[types.Part.from_text(m.content or "")]))
+            contents.append(types.Content(role=role, parts=[types.Part.from_text(text=m.content or "")]))
 
     return system, contents, last_user
 
@@ -55,7 +55,7 @@ class GeminiProvider(LLMProvider):
         client = _make_client(self._api_key)
 
         contents = history_contents + [
-            types.Content(role="user", parts=[types.Part.from_text(last_user)])
+            types.Content(role="user", parts=[types.Part.from_text(text=last_user)])
         ]
         config = types.GenerateContentConfig(
             system_instruction=system,
@@ -90,7 +90,7 @@ class GeminiProvider(LLMProvider):
         client = _make_client(self._api_key)
 
         contents = history_contents + [
-            types.Content(role="user", parts=[types.Part.from_text(last_user)])
+            types.Content(role="user", parts=[types.Part.from_text(text=last_user)])
         ]
         config = types.GenerateContentConfig(
             system_instruction=system,

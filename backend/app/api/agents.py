@@ -1540,9 +1540,9 @@ async def _run_agent_gemini(
     for m in history:
         role = "user" if m.get("role") == "user" else "model"
         contents.append(
-            _gtypes.Content(role=role, parts=[_gtypes.Part.from_text(m.get("content", "") or "")])
+            _gtypes.Content(role=role, parts=[_gtypes.Part.from_text(text=m.get("content", "") or "")])
         )
-    contents.append(_gtypes.Content(role="user", parts=[_gtypes.Part.from_text(user_message)]))
+    contents.append(_gtypes.Content(role="user", parts=[_gtypes.Part.from_text(text=user_message)]))
 
     config = _gtypes.GenerateContentConfig(
         system_instruction=system_prompt or None,

@@ -1143,7 +1143,7 @@ async def receipt_scan(
             response = await client.aio.models.generate_content(
                 model="gemini-1.5-flash",
                 contents=[
-                    _gtypes.Part.from_text(prompt),
+                    _gtypes.Part.from_text(text=prompt),
                     _gtypes.Part.from_bytes(data=img_bytes, mime_type="image/jpeg"),
                 ],
             )
