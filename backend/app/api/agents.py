@@ -1621,6 +1621,31 @@ async def _run_agent_gemini(
 
 # ─── Tool building (built-in + MCP) ──────────────────────────────────────────
 
+# Some MCP servers declare the calling customer's own session credential as a
+# model-fillable parameter (moto-hub's tools.js: `accessToken`, "The calling
+# customer's Django JWT access token"). The model has no legitimate way to
+# obtain a real one — there is no per-visitor identity threaded into agent
+# chat today — so exposing it just teaches the model to ask the human to
+# paste their login token into the conversation, which is unsafe regardless
+# of how well the model otherwise behaves. Strip it from the schema instead;
+# _execute_tool_impl short-circuits these calls with an honest explanation.
+_CUSTOMER_CREDENTIAL_PARAM_NAMES = {"accessToken", "access_token"}
+
+
+def _strip_customer_credential_param(input_schema: dict) -> tuple[dict, bool]:
+    """Returns (schema_with_credential_param_removed, whether_one_was_found)."""
+    props = dict(input_schema.get("properties", {}))
+    removed = [p for p in props if p in _CUSTOMER_CREDENTIAL_PARAM_NAMES]
+    if not removed:
+        return input_schema, False
+    for p in removed:
+        props.pop(p)
+    schema = dict(input_schema)
+    schema["properties"] = props
+    if "required" in schema:
+        schema["required"] = [r for r in schema["required"] if r not in removed]
+    return schema, True
+
 
 async def _build_tools_with_mcp(
     agent: Agent, user_id: uuid.UUID, db: DBSession
@@ -1650,19 +1675,20 @@ async def _build_tools_with_mcp(
                 discovered = await _discover_mcp_tools(server)
                 for tool in discovered:
                     tool_name = f"mcp__{server.name.replace(' ', '_')}__{tool['name']}"
+                    raw_schema = tool.get("inputSchema", {"type": "object", "properties": {}})
+                    schema, needs_customer_auth = _strip_customer_credential_param(raw_schema)
                     tools.append(
                         {
                             "name": tool_name,
                             "description": f"[MCP: {server.name}] {tool.get('description', '')}",
-                            "input_schema": tool.get(
-                                "inputSchema", {"type": "object", "properties": {}}
-                            ),
+                            "input_schema": schema,
                         }
                     )
                     mcp_map[tool_name] = {
                         "kind": "mcp",
                         "server": server,
                         "original_name": tool["name"],
+                        "needs_customer_auth": needs_customer_auth,
                     }
             except Exception:
                 pass  # Skip unreachable MCP servers silently
@@ -2318,6 +2344,15 @@ async def _execute_tool_impl(name: str, inputs: dict, mcp_map: dict, ctx: dict |
         if route is not None:
             kind = route.get("kind")
             if kind == "mcp":
+                if route.get("needs_customer_auth"):
+                    return (
+                        "This action requires the customer to already be logged in on the "
+                        "store's own website — there is no way to access their account from "
+                        "this chat. Tell the user (in your own words, don't quote this "
+                        "verbatim) that they'll need to log in on the site and complete this "
+                        "action from their account page, or offer to help with something "
+                        "that doesn't require login, such as browsing or comparing products."
+                    )
                 return await _tool_mcp(route["server"], route["original_name"], inputs)
             if kind == "custom_webhook":
                 return await _tool_custom_webhook(route["function"], inputs)
