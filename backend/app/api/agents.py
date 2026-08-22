@@ -325,20 +325,22 @@ async def public_agent_chat(
     # http_request, most MCP tools, custom webhook tools) or reveal owner
     # secrets (list_available_models). Only read-only, per-request-scoped
     # tools survive on the public route — including the narrow MCP catalog
-    # exception in _PUBLIC_SHARE_SAFE_MCP_TOOL_NAMES. Filtering mcp_map the
-    # same way (rather than clearing it) keeps routing info for the
-    # allowlisted commerce/MCP tools while still dropping every other
-    # MCP/custom-webhook route.
-    tools = [
-        t
-        for t in tools
-        if t["name"] in _PUBLIC_SHARE_TOOL_ALLOWLIST or _is_public_safe_mcp_tool(t["name"], mcp_map)
-    ]
-    mcp_map = {
-        k: v
-        for k, v in mcp_map.items()
-        if k in _PUBLIC_SHARE_TOOL_ALLOWLIST or _is_public_safe_mcp_tool(k, mcp_map)
-    }
+    # exception in _PUBLIC_SHARE_SAFE_MCP_TOOL_NAMES, and any MCP tool marked
+    # needs_customer_auth: those never reach the real MCP server at all (see
+    # _execute_tool_impl) — they always short-circuit into a plain-text
+    # explanation, so exposing them here can't touch the owner's account or
+    # data regardless of who's asking. Filtering mcp_map the same way (rather
+    # than clearing it) keeps routing info for every allowlisted tool while
+    # still dropping every other MCP/custom-webhook route.
+    def _public_share_ok(name: str) -> bool:
+        return (
+            name in _PUBLIC_SHARE_TOOL_ALLOWLIST
+            or _is_public_safe_mcp_tool(name, mcp_map)
+            or mcp_map.get(name, {}).get("needs_customer_auth", False)
+        )
+
+    tools = [t for t in tools if _public_share_ok(t["name"])]
+    mcp_map = {k: v for k, v in mcp_map.items() if _public_share_ok(k)}
     _, api_key, base_url = await _resolve_api_key(
         agent.user_id, agent.model or "claude-sonnet-4-6", db
     )
