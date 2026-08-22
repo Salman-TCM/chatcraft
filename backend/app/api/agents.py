@@ -2395,18 +2395,56 @@ async def _execute_tool_impl(name: str, inputs: dict, mcp_map: dict, ctx: dict |
             kind = route.get("kind")
             if kind == "mcp":
                 if route.get("needs_customer_auth"):
+                    if route["original_name"] == "add_to_cart":
+                        # Weak/self-hosted models sometimes call add_to_cart with a
+                        # fabricated productId instead of one actually seen in a
+                        # search_products/get_product result this turn — never
+                        # hand the customer a link that will 404. Verify against
+                        # the real catalog first.
+                        product_id = inputs.get("productId")
+                        check = (
+                            await _tool_mcp(
+                                route["server"], "get_product", {"type": "new", "id": product_id}
+                            )
+                            if product_id is not None
+                            else "Error: no productId given"
+                        )
+                        if check.startswith("Error"):
+                            return (
+                                f"There's no product with id {product_id!r} in the catalog — that id "
+                                f"wasn't real. Call search_products or get_product first to find the "
+                                f"correct one, then retry add_to_cart with that id. Do not tell the "
+                                f"user you added anything."
+                            )
+                        # A wrong-but-real id (e.g. a helmet's id when the customer asked for
+                        # engine oil) passes the existence check above but is still the wrong
+                        # product — weak models can lose track of which id belongs to which
+                        # name across a multi-turn conversation. Surfacing the verified name
+                        # forces a self-check against what was actually requested instead of
+                        # trusting whatever id the model recalled.
+                        try:
+                            parsed = json.loads(check)
+                            verified_name = (parsed.get("data") or parsed).get("name") or "this item"
+                        except (json.JSONDecodeError, AttributeError):
+                            verified_name = "this item"
+                        link = _customer_action_link(
+                            route["original_name"], inputs, route["server"].server_url
+                        )
+                        return (
+                            f'Verified real product for id {product_id}: "{verified_name}". Before '
+                            f"replying, check that this is actually what the customer asked for — if "
+                            f"it's a different product than they requested, call search_products again "
+                            f"instead of using this id. If it does match: nothing has been added yet, "
+                            f"I can't add items to a cart directly from this chat, so give the customer "
+                            f"this link and tell them clicking it will add \"{verified_name}\" to their "
+                            f"cart: {link}\n"
+                            f"Present it as a clickable link. Do not say the item has been added, is in "
+                            f"the cart, or use words like 'Added!' — it only happens once they click."
+                        )
                     link = _customer_action_link(
                         route["original_name"], inputs, route["server"].server_url
                     )
                     if link:
-                        if route["original_name"] == "add_to_cart":
-                            return (
-                                f"I can't add items to a cart directly from this chat, but here's a "
-                                f"link that adds it for the customer using their own logged-in browser "
-                                f"session — no login needed to click it: {link}\n"
-                                f"Present it as a clickable link and tell them clicking it will add the "
-                                f"item straight to their cart."
-                            )
                         return (
                             f"This action requires the customer to already be logged in on the "
                             f"store's own website — there is no way to complete it from this chat. "
