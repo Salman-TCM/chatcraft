@@ -66,6 +66,7 @@ from app.api.agents import (
     _extract_text_tool_calls,
     _discover_mcp_tools,
     _is_public_safe_mcp_tool,
+    _strip_customer_credential_param,
     _strip_recognized_fences,
     _tools_to_openai,
     _MAX_TOOL_CALLS_PER_TURN,
@@ -79,11 +80,14 @@ _optional_bearer = HTTPBearer(auto_error=False)
 _GUEST_CAP = settings.free_tier_message_cap
 
 # Widget visitors are anonymous, same trust level as an Agent Builder public
-# share link — so this only ever discovers the same narrow, read-only MCP
-# catalog surface (_PUBLIC_SHARE_SAFE_MCP_TOOL_NAMES via _is_public_safe_mcp_tool),
-# never the owner's cart/order/refund/account or non-MCP tools (widgets have
-# no concept of custom webhook tools or a linked commerce store — those are
-# Agent Builder-only, tied to agents.id, not chatbot_id).
+# share link — so this only discovers two kinds of MCP tool: the narrow
+# read-only catalog surface (_PUBLIC_SHARE_SAFE_MCP_TOOL_NAMES via
+# _is_public_safe_mcp_tool), and tools needing a customer credential we can
+# never actually have (needs_customer_auth) — those are safe to expose too
+# because they never reach the real MCP server; _execute_tool_impl always
+# short-circuits them into a plain-text storefront link instead. Widgets
+# have no concept of custom webhook tools or a linked commerce store —
+# those are Agent Builder-only, tied to agents.id, not chatbot_id.
 async def _build_widget_mcp_tools(user_id: uuid.UUID, db: AsyncSession) -> tuple[list[dict], dict]:
     tools: list[dict] = []
     mcp_map: dict = {}
@@ -100,14 +104,21 @@ async def _build_widget_mcp_tools(user_id: uuid.UUID, db: AsyncSession) -> tuple
             continue  # unreachable MCP server — skip silently, same as agents.py
         for tool in discovered:
             name = f"mcp__{server.name.replace(' ', '_')}__{tool['name']}"
-            route = {"kind": "mcp", "server": server, "original_name": tool["name"]}
-            if not _is_public_safe_mcp_tool(name, {name: route}):
+            raw_schema = tool.get("inputSchema", {"type": "object", "properties": {}})
+            schema, needs_customer_auth = _strip_customer_credential_param(raw_schema)
+            route = {
+                "kind": "mcp",
+                "server": server,
+                "original_name": tool["name"],
+                "needs_customer_auth": needs_customer_auth,
+            }
+            if not (needs_customer_auth or _is_public_safe_mcp_tool(name, {name: route})):
                 continue
             tools.append(
                 {
                     "name": name,
                     "description": f"[MCP: {server.name}] {tool.get('description', '')}",
-                    "input_schema": tool.get("inputSchema", {"type": "object", "properties": {}}),
+                    "input_schema": schema,
                 }
             )
             mcp_map[name] = route

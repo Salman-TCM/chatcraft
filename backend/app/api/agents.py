@@ -19,6 +19,7 @@ import uuid
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime
 from typing import Any
+from urllib.parse import quote as _urlquote, urlparse as _urlparse
 
 import anthropic
 import httpx
@@ -325,20 +326,22 @@ async def public_agent_chat(
     # http_request, most MCP tools, custom webhook tools) or reveal owner
     # secrets (list_available_models). Only read-only, per-request-scoped
     # tools survive on the public route — including the narrow MCP catalog
-    # exception in _PUBLIC_SHARE_SAFE_MCP_TOOL_NAMES. Filtering mcp_map the
-    # same way (rather than clearing it) keeps routing info for the
-    # allowlisted commerce/MCP tools while still dropping every other
-    # MCP/custom-webhook route.
-    tools = [
-        t
-        for t in tools
-        if t["name"] in _PUBLIC_SHARE_TOOL_ALLOWLIST or _is_public_safe_mcp_tool(t["name"], mcp_map)
-    ]
-    mcp_map = {
-        k: v
-        for k, v in mcp_map.items()
-        if k in _PUBLIC_SHARE_TOOL_ALLOWLIST or _is_public_safe_mcp_tool(k, mcp_map)
-    }
+    # exception in _PUBLIC_SHARE_SAFE_MCP_TOOL_NAMES, and any MCP tool marked
+    # needs_customer_auth: those never reach the real MCP server at all (see
+    # _execute_tool_impl) — they always short-circuit into a plain-text
+    # explanation, so exposing them here can't touch the owner's account or
+    # data regardless of who's asking. Filtering mcp_map the same way (rather
+    # than clearing it) keeps routing info for every allowlisted tool while
+    # still dropping every other MCP/custom-webhook route.
+    def _public_share_ok(name: str) -> bool:
+        return (
+            name in _PUBLIC_SHARE_TOOL_ALLOWLIST
+            or _is_public_safe_mcp_tool(name, mcp_map)
+            or mcp_map.get(name, {}).get("needs_customer_auth", False)
+        )
+
+    tools = [t for t in tools if _public_share_ok(t["name"])]
+    mcp_map = {k: v for k, v in mcp_map.items() if _public_share_ok(k)}
     _, api_key, base_url = await _resolve_api_key(
         agent.user_id, agent.model or "claude-sonnet-4-6", db
     )
@@ -1621,6 +1624,78 @@ async def _run_agent_gemini(
 
 # ─── Tool building (built-in + MCP) ──────────────────────────────────────────
 
+# Some MCP servers declare the calling customer's own session credential as a
+# model-fillable parameter (moto-hub's tools.js: `accessToken`, "The calling
+# customer's Django JWT access token"). The model has no legitimate way to
+# obtain a real one — there is no per-visitor identity threaded into agent
+# chat today — so exposing it just teaches the model to ask the human to
+# paste their login token into the conversation, which is unsafe regardless
+# of how well the model otherwise behaves. Strip it from the schema instead;
+# _execute_tool_impl short-circuits these calls with an honest explanation.
+_CUSTOMER_CREDENTIAL_PARAM_NAMES = {"accessToken", "access_token"}
+
+
+def _strip_customer_credential_param(input_schema: dict) -> tuple[dict, bool]:
+    """Returns (schema_with_credential_param_removed, whether_one_was_found)."""
+    props = dict(input_schema.get("properties", {}))
+    removed = [p for p in props if p in _CUSTOMER_CREDENTIAL_PARAM_NAMES]
+    if not removed:
+        return input_schema, False
+    for p in removed:
+        props.pop(p)
+    schema = dict(input_schema)
+    schema["properties"] = props
+    if "required" in schema:
+        schema["required"] = [r for r in schema["required"] if r not in removed]
+    return schema, True
+
+
+def _storefront_origin(server_url: str) -> str | None:
+    """Best-effort scheme+host for the store's own website, derived from its
+    MCP server URL (e.g. "https://motoup.xyz/mcp/assistant" -> "https://motoup.xyz").
+    Assumes the storefront and MCP server share a domain, true for every
+    store configured today; a store that splits them across subdomains would
+    need an explicit field added to MCPServerConfig instead."""
+    parsed = _urlparse(server_url)
+    if not parsed.scheme or not parsed.netloc:
+        return None
+    return f"{parsed.scheme}://{parsed.netloc}"
+
+
+# Per-tool destination once a customer-scoped MCP action can't be completed
+# from chat (see needs_customer_auth in _execute_tool_impl). `add_to_cart` is
+# a real one-click link — quantity/product id are already known from the
+# conversation and the destination page completes the action itself using
+# the customer's own already-logged-in browser session, no token involved.
+# Everything else is navigation-only: the model doesn't have (and can't
+# safely be given) what a deep link into that action would need — an
+# existing cart-item id, an order id, or PII like name/address — so it just
+# points the customer to the right page to finish there themselves.
+_STOREFRONT_LINK_PATHS: dict[str, str] = {
+    "update_cart_item": "/cart",
+    "place_order": "/checkout",
+    "generate_checkout_link": "/checkout",
+    "get_cart": "/cart",
+    "get_order_history": "/dashboard",
+    "get_order_status": "/dashboard",
+    "request_refund": "/dashboard",
+    "get_return_status": "/dashboard",
+    "get_account_info": "/dashboard",
+    "update_account_info": "/dashboard",
+}
+
+
+def _customer_action_link(original_name: str, inputs: dict, server_url: str) -> str | None:
+    origin = _storefront_origin(server_url)
+    if not origin:
+        return None
+    if original_name == "add_to_cart":
+        product_id = inputs.get("productId", "")
+        quantity = inputs.get("quantity", 1)
+        return f"{origin}/cart/quick-add?product_id={_urlquote(str(product_id))}&quantity={_urlquote(str(quantity))}"
+    path = _STOREFRONT_LINK_PATHS.get(original_name)
+    return f"{origin}{path}" if path else None
+
 
 async def _build_tools_with_mcp(
     agent: Agent, user_id: uuid.UUID, db: DBSession
@@ -1650,19 +1725,20 @@ async def _build_tools_with_mcp(
                 discovered = await _discover_mcp_tools(server)
                 for tool in discovered:
                     tool_name = f"mcp__{server.name.replace(' ', '_')}__{tool['name']}"
+                    raw_schema = tool.get("inputSchema", {"type": "object", "properties": {}})
+                    schema, needs_customer_auth = _strip_customer_credential_param(raw_schema)
                     tools.append(
                         {
                             "name": tool_name,
                             "description": f"[MCP: {server.name}] {tool.get('description', '')}",
-                            "input_schema": tool.get(
-                                "inputSchema", {"type": "object", "properties": {}}
-                            ),
+                            "input_schema": schema,
                         }
                     )
                     mcp_map[tool_name] = {
                         "kind": "mcp",
                         "server": server,
                         "original_name": tool["name"],
+                        "needs_customer_auth": needs_customer_auth,
                     }
             except Exception:
                 pass  # Skip unreachable MCP servers silently
@@ -2318,6 +2394,72 @@ async def _execute_tool_impl(name: str, inputs: dict, mcp_map: dict, ctx: dict |
         if route is not None:
             kind = route.get("kind")
             if kind == "mcp":
+                if route.get("needs_customer_auth"):
+                    if route["original_name"] == "add_to_cart":
+                        # Weak/self-hosted models sometimes call add_to_cart with a
+                        # fabricated productId instead of one actually seen in a
+                        # search_products/get_product result this turn — never
+                        # hand the customer a link that will 404. Verify against
+                        # the real catalog first.
+                        product_id = inputs.get("productId")
+                        check = (
+                            await _tool_mcp(
+                                route["server"], "get_product", {"type": "new", "id": product_id}
+                            )
+                            if product_id is not None
+                            else "Error: no productId given"
+                        )
+                        if check.startswith("Error"):
+                            return (
+                                f"There's no product with id {product_id!r} in the catalog — that id "
+                                f"wasn't real. Call search_products or get_product first to find the "
+                                f"correct one, then retry add_to_cart with that id. Do not tell the "
+                                f"user you added anything."
+                            )
+                        # A wrong-but-real id (e.g. a helmet's id when the customer asked for
+                        # engine oil) passes the existence check above but is still the wrong
+                        # product — weak models can lose track of which id belongs to which
+                        # name across a multi-turn conversation. Surfacing the verified name
+                        # forces a self-check against what was actually requested instead of
+                        # trusting whatever id the model recalled.
+                        try:
+                            parsed = json.loads(check)
+                            verified_name = (parsed.get("data") or parsed).get("name") or "this item"
+                        except (json.JSONDecodeError, AttributeError):
+                            verified_name = "this item"
+                        link = _customer_action_link(
+                            route["original_name"], inputs, route["server"].server_url
+                        )
+                        return (
+                            f'Verified real product for id {product_id}: "{verified_name}". Before '
+                            f"replying, check that this is actually what the customer asked for — if "
+                            f"it's a different product than they requested, call search_products again "
+                            f"instead of using this id. If it does match: nothing has been added yet, "
+                            f"I can't add items to a cart directly from this chat, so give the customer "
+                            f"this link and tell them clicking it will add \"{verified_name}\" to their "
+                            f"cart: {link}\n"
+                            f"Present it as a clickable link. Do not say the item has been added, is in "
+                            f"the cart, or use words like 'Added!' — it only happens once they click."
+                        )
+                    link = _customer_action_link(
+                        route["original_name"], inputs, route["server"].server_url
+                    )
+                    if link:
+                        return (
+                            f"This action requires the customer to already be logged in on the "
+                            f"store's own website — there is no way to complete it from this chat. "
+                            f"Here's where they can do it themselves: {link}\n"
+                            f"Present it as a clickable link (in your own words, don't quote this "
+                            f"verbatim)."
+                        )
+                    return (
+                        "This action requires the customer to already be logged in on the "
+                        "store's own website — there is no way to access their account from "
+                        "this chat. Tell the user (in your own words, don't quote this "
+                        "verbatim) that they'll need to log in on the site and complete this "
+                        "action from their account page, or offer to help with something "
+                        "that doesn't require login, such as browsing or comparing products."
+                    )
                 return await _tool_mcp(route["server"], route["original_name"], inputs)
             if kind == "custom_webhook":
                 return await _tool_custom_webhook(route["function"], inputs)
