@@ -19,6 +19,7 @@ import uuid
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime
 from typing import Any
+from urllib.parse import quote as _urlquote, urlparse as _urlparse
 
 import anthropic
 import httpx
@@ -1649,6 +1650,53 @@ def _strip_customer_credential_param(input_schema: dict) -> tuple[dict, bool]:
     return schema, True
 
 
+def _storefront_origin(server_url: str) -> str | None:
+    """Best-effort scheme+host for the store's own website, derived from its
+    MCP server URL (e.g. "https://motoup.xyz/mcp/assistant" -> "https://motoup.xyz").
+    Assumes the storefront and MCP server share a domain, true for every
+    store configured today; a store that splits them across subdomains would
+    need an explicit field added to MCPServerConfig instead."""
+    parsed = _urlparse(server_url)
+    if not parsed.scheme or not parsed.netloc:
+        return None
+    return f"{parsed.scheme}://{parsed.netloc}"
+
+
+# Per-tool destination once a customer-scoped MCP action can't be completed
+# from chat (see needs_customer_auth in _execute_tool_impl). `add_to_cart` is
+# a real one-click link — quantity/product id are already known from the
+# conversation and the destination page completes the action itself using
+# the customer's own already-logged-in browser session, no token involved.
+# Everything else is navigation-only: the model doesn't have (and can't
+# safely be given) what a deep link into that action would need — an
+# existing cart-item id, an order id, or PII like name/address — so it just
+# points the customer to the right page to finish there themselves.
+_STOREFRONT_LINK_PATHS: dict[str, str] = {
+    "update_cart_item": "/cart",
+    "place_order": "/checkout",
+    "generate_checkout_link": "/checkout",
+    "get_cart": "/cart",
+    "get_order_history": "/dashboard",
+    "get_order_status": "/dashboard",
+    "request_refund": "/dashboard",
+    "get_return_status": "/dashboard",
+    "get_account_info": "/dashboard",
+    "update_account_info": "/dashboard",
+}
+
+
+def _customer_action_link(original_name: str, inputs: dict, server_url: str) -> str | None:
+    origin = _storefront_origin(server_url)
+    if not origin:
+        return None
+    if original_name == "add_to_cart":
+        product_id = inputs.get("productId", "")
+        quantity = inputs.get("quantity", 1)
+        return f"{origin}/cart/quick-add?product_id={_urlquote(str(product_id))}&quantity={_urlquote(str(quantity))}"
+    path = _STOREFRONT_LINK_PATHS.get(original_name)
+    return f"{origin}{path}" if path else None
+
+
 async def _build_tools_with_mcp(
     agent: Agent, user_id: uuid.UUID, db: DBSession
 ) -> tuple[list[dict], dict[str, Any]]:
@@ -2347,6 +2395,25 @@ async def _execute_tool_impl(name: str, inputs: dict, mcp_map: dict, ctx: dict |
             kind = route.get("kind")
             if kind == "mcp":
                 if route.get("needs_customer_auth"):
+                    link = _customer_action_link(
+                        route["original_name"], inputs, route["server"].server_url
+                    )
+                    if link:
+                        if route["original_name"] == "add_to_cart":
+                            return (
+                                f"I can't add items to a cart directly from this chat, but here's a "
+                                f"link that adds it for the customer using their own logged-in browser "
+                                f"session — no login needed to click it: {link}\n"
+                                f"Present it as a clickable link and tell them clicking it will add the "
+                                f"item straight to their cart."
+                            )
+                        return (
+                            f"This action requires the customer to already be logged in on the "
+                            f"store's own website — there is no way to complete it from this chat. "
+                            f"Here's where they can do it themselves: {link}\n"
+                            f"Present it as a clickable link (in your own words, don't quote this "
+                            f"verbatim)."
+                        )
                     return (
                         "This action requires the customer to already be logged in on the "
                         "store's own website — there is no way to access their account from "
