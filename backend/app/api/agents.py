@@ -1127,6 +1127,8 @@ _BUILTIN_TOOL_NAMES = frozenset(
         "get_current_datetime",
         "generate_image",
         "convert_document",
+        "calculate_deadline",
+        "search_jobs",
     }
 )
 
@@ -2403,6 +2405,83 @@ def _build_builtin_tools(tools_config: dict) -> list[dict]:
             }
         )
 
+    if tools_config.get("deadline_calculator"):
+        defs.append(
+            {
+                "name": "calculate_deadline",
+                "description": (
+                    "Calculate a deadline date by adding a number of calendar, business, "
+                    "or court days to a start date. Accounts for weekends and common public "
+                    "holidays. Use this for any date arithmetic: court filing deadlines, "
+                    "contract notice periods, statutory time limits, project milestones."
+                ),
+                "input_schema": {
+                    "type": "object",
+                    "properties": {
+                        "start_date": {
+                            "type": "string",
+                            "description": "Start date in ISO format (YYYY-MM-DD), e.g. '2025-03-15'",
+                        },
+                        "days": {
+                            "type": "integer",
+                            "description": "Number of days to add (negative to subtract)",
+                        },
+                        "day_type": {
+                            "type": "string",
+                            "enum": ["calendar", "business", "court"],
+                            "description": (
+                                "calendar: all days. "
+                                "business: Mon–Fri only. "
+                                "court: Mon–Fri excluding common public holidays."
+                            ),
+                        },
+                        "jurisdiction": {
+                            "type": "string",
+                            "description": "Optional country/jurisdiction for holiday lookup, e.g. 'US', 'UK', 'MY'",
+                        },
+                    },
+                    "required": ["start_date", "days"],
+                },
+            }
+        )
+
+    if tools_config.get("job_search"):
+        defs.append(
+            {
+                "name": "search_jobs",
+                "description": (
+                    "Search for job listings across multiple job boards (Remotive for remote "
+                    "roles, The Muse for on-site/hybrid, and web search as fallback). "
+                    "Returns a list of matching roles with title, company, location, salary "
+                    "range (where available), and apply URL. "
+                    "Use this when the user asks to find jobs matching their skills or CV."
+                ),
+                "input_schema": {
+                    "type": "object",
+                    "properties": {
+                        "query": {
+                            "type": "string",
+                            "description": "Job title, skills, or keywords (e.g. 'senior Python engineer', 'family law solicitor')",
+                        },
+                        "location": {
+                            "type": "string",
+                            "description": "City, country, or 'remote' (optional)",
+                        },
+                        "job_type": {
+                            "type": "string",
+                            "enum": ["any", "remote", "full_time", "part_time", "contract"],
+                            "description": "Filter by employment type",
+                        },
+                        "limit": {
+                            "type": "integer",
+                            "description": "Max results to return (default 10, max 20)",
+                        },
+                    },
+                    "required": ["query"],
+                },
+            }
+        )
+
     if tools_config.get("document_conversion"):
         defs.append(
             {
@@ -2704,6 +2783,10 @@ async def _execute_tool_impl(name: str, inputs: dict, mcp_map: dict, ctx: dict |
             return await _tool_generate_image(inputs, ctx or {})
         elif name == "convert_document":
             return await _tool_convert_document(inputs)
+        elif name == "calculate_deadline":
+            return _tool_calculate_deadline(inputs)
+        elif name == "search_jobs":
+            return await _tool_search_jobs(inputs)
         return f"Unknown tool: {name}"
     except Exception as exc:
         return f"Tool error: {exc}"
@@ -3724,6 +3807,161 @@ async def _tool_convert_document(inputs: dict) -> str:
         )
     except Exception as exc:
         return f"Conversion succeeded but upload failed: {exc}"
+
+
+def _tool_calculate_deadline(inputs: dict) -> str:
+    """Business/court date arithmetic using dateutil."""
+    from datetime import date, timedelta
+
+    start_str = (inputs.get("start_date") or "").strip()
+    try:
+        days = int(inputs.get("days", 0))
+    except (TypeError, ValueError):
+        return "Error: 'days' must be an integer."
+    day_type = (inputs.get("day_type") or "calendar").lower()
+    jurisdiction = (inputs.get("jurisdiction") or "").upper().strip()
+
+    try:
+        start = date.fromisoformat(start_str)
+    except ValueError:
+        return f"Error: invalid start_date '{start_str}'. Use ISO format YYYY-MM-DD."
+
+    # Common public holidays for supported jurisdictions (non-exhaustive but covers key dates)
+    _US_FIXED = {(1, 1), (7, 4), (11, 11), (12, 25), (12, 26)}   # NY, MLK, etc. omitted for simplicity
+    _UK_FIXED = {(1, 1), (12, 25), (12, 26)}
+    _MY_FIXED = {(1, 1), (2, 1), (5, 1), (8, 31), (9, 16), (12, 25)}
+
+    holiday_sets = {"US": _US_FIXED, "UK": _UK_FIXED, "MY": _MY_FIXED}
+    holidays = holiday_sets.get(jurisdiction, set())
+
+    def is_working_day(d: date) -> bool:
+        if d.weekday() >= 5:  # Sat/Sun
+            return False
+        if day_type == "court" and (d.month, d.day) in holidays:
+            return False
+        return True
+
+    if day_type == "calendar":
+        result = start + timedelta(days=days)
+    elif day_type in ("business", "court"):
+        direction = 1 if days >= 0 else -1
+        remaining = abs(days)
+        current = start
+        while remaining > 0:
+            current += timedelta(days=direction)
+            if is_working_day(current):
+                remaining -= 1
+        result = current
+    else:
+        return f"Error: unknown day_type '{day_type}'. Use calendar, business, or court."
+
+    note = ""
+    if day_type in ("business", "court") and not is_working_day(result):
+        # Nudge to next working day
+        while not is_working_day(result):
+            result += timedelta(days=1)
+        note = " (adjusted forward to next working day)"
+
+    day_label = f"{abs(days)} {day_type} day{'s' if abs(days) != 1 else ''}"
+    direction_word = "after" if days >= 0 else "before"
+    return (
+        f"**Deadline: {result.strftime('%A, %-d %B %Y')}** ({result.isoformat()}){note}\n\n"
+        f"Calculation: {start.strftime('%-d %B %Y')} + {day_label} ({direction_word}) "
+        f"= {result.strftime('%-d %B %Y')}"
+        + (f"\nJurisdiction holidays applied: {jurisdiction}" if jurisdiction and day_type == "court" else "")
+    )
+
+
+async def _tool_search_jobs(inputs: dict) -> str:
+    """Search job boards — Remotive (remote) + The Muse (all) + web search fallback."""
+    query = (inputs.get("query") or "").strip()
+    location = (inputs.get("location") or "").strip().lower()
+    job_type = (inputs.get("job_type") or "any").lower()
+    limit = min(int(inputs.get("limit") or 10), 20)
+
+    if not query:
+        return "Error: query is required."
+
+    results: list[dict] = []
+
+    # ── 1. Remotive (free, no key, best for remote roles) ────────────────────
+    if job_type in ("any", "remote") and len(results) < limit:
+        try:
+            async with httpx.AsyncClient(timeout=10) as c:
+                r = await c.get(
+                    "https://remotive.com/api/remote-jobs",
+                    params={"search": query, "limit": limit},
+                )
+            if r.status_code == 200:
+                for job in r.json().get("jobs", [])[:limit]:
+                    results.append({
+                        "title": job.get("title", ""),
+                        "company": job.get("company_name", ""),
+                        "location": job.get("candidate_required_location") or "Remote",
+                        "salary": job.get("salary") or "",
+                        "type": job.get("job_type") or "remote",
+                        "posted": (job.get("publication_date") or "")[:10],
+                        "url": job.get("url") or job.get("apply_url") or "",
+                        "source": "Remotive",
+                    })
+        except Exception:
+            pass
+
+    # ── 2. The Muse (free, no key, broad coverage) ───────────────────────────
+    if len(results) < limit:
+        try:
+            params: dict[str, Any] = {"page": 1, "descending": "true"}
+            if query:
+                params["name"] = query
+            if location and location != "remote":
+                params["location"] = location
+            async with httpx.AsyncClient(timeout=10) as c:
+                r = await c.get("https://www.themuse.com/api/public/jobs", params=params)
+            if r.status_code == 200:
+                for job in r.json().get("results", [])[:limit]:
+                    locs = [l.get("name", "") for l in (job.get("locations") or [])]
+                    cats = [c.get("name", "") for c in (job.get("categories") or [])]
+                    lvl = ", ".join(l.get("name", "") for l in (job.get("levels") or []))
+                    results.append({
+                        "title": job.get("name", ""),
+                        "company": job.get("company", {}).get("name", ""),
+                        "location": ", ".join(locs) or "Not specified",
+                        "salary": "",
+                        "type": lvl or "Full-time",
+                        "posted": (job.get("publication_date") or "")[:10],
+                        "url": job.get("refs", {}).get("landing_page") or "",
+                        "category": ", ".join(cats),
+                        "source": "The Muse",
+                    })
+        except Exception:
+            pass
+
+    # ── 3. Web search fallback ────────────────────────────────────────────────
+    if not results:
+        search_q = f"{query} jobs{' ' + location if location else ''} site:linkedin.com OR site:indeed.com"
+        return await _tool_web_search(search_q, {})
+
+    # De-duplicate by title+company
+    seen: set[str] = set()
+    unique: list[dict] = []
+    for job in results:
+        key = f"{job['title'].lower()}|{job['company'].lower()}"
+        if key not in seen:
+            seen.add(key)
+            unique.append(job)
+
+    lines = [f"Found {len(unique)} job(s) matching **{query}**:\n"]
+    for i, job in enumerate(unique[:limit], 1):
+        lines.append(f"**{i}. {job['title']}** — {job['company']}")
+        lines.append(f"   📍 {job['location']}  •  {job.get('type','')}")
+        if job.get("salary"):
+            lines.append(f"   💰 {job['salary']}")
+        if job.get("category"):
+            lines.append(f"   🏷️  {job['category']}")
+        lines.append(f"   📅 Posted: {job.get('posted','N/A')}  •  Source: {job['source']}")
+        lines.append(f"   🔗 {job['url']}\n")
+
+    return "\n".join(lines)
 
 
 def _tool_calculate_faraid(inputs: dict) -> str:
