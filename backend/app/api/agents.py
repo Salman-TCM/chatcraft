@@ -416,6 +416,66 @@ async def public_extract_attachment(
     }
 
 
+# ─── Document conversion endpoints ────────────────────────────────────────────
+
+
+@router.post("/{agent_id}/convert")
+async def convert_agent_document(
+    agent_id: uuid.UUID,
+    user: CurrentUser,
+    db: DBSession,
+    file: UploadFile,
+):
+    """Convert an uploaded Office document to PDF and stream it back."""
+    from fastapi.responses import Response as _Response
+    from app.services.convert import ConversionError, convert_to_pdf
+
+    await _get_owned_agent(agent_id, user.id, db)
+    data = await file.read()
+    if not data:
+        raise HTTPException(status_code=400, detail="Empty file")
+    if len(data) > 50 * 1024 * 1024:
+        raise HTTPException(status_code=413, detail="File exceeds 50 MB")
+    try:
+        pdf_bytes, pdf_name = await convert_to_pdf(data, file.filename or "document.docx")
+    except ConversionError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+    return _Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="{pdf_name}"'},
+    )
+
+
+@public_router.post("/{share_token}/convert")
+@limiter.limit("5/minute")
+async def public_convert_document(
+    share_token: str,
+    request: Request,
+    db: DBSession,
+    file: UploadFile,
+):
+    """Convert an uploaded Office document to PDF on a public share page."""
+    from fastapi.responses import Response as _Response
+    from app.services.convert import ConversionError, convert_to_pdf
+
+    await _get_shared_agent(share_token, db)
+    data = await file.read()
+    if not data:
+        raise HTTPException(status_code=400, detail="Empty file")
+    if len(data) > 50 * 1024 * 1024:
+        raise HTTPException(status_code=413, detail="File exceeds 50 MB")
+    try:
+        pdf_bytes, pdf_name = await convert_to_pdf(data, file.filename or "document.docx")
+    except ConversionError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+    return _Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="{pdf_name}"'},
+    )
+
+
 # ─── Memory endpoints ─────────────────────────────────────────────────────────
 
 
@@ -1066,6 +1126,7 @@ _BUILTIN_TOOL_NAMES = frozenset(
         "calculate_faraid",
         "get_current_datetime",
         "generate_image",
+        "convert_document",
     }
 )
 
@@ -2342,6 +2403,33 @@ def _build_builtin_tools(tools_config: dict) -> list[dict]:
             }
         )
 
+    if tools_config.get("document_conversion"):
+        defs.append(
+            {
+                "name": "convert_document",
+                "description": (
+                    "Download a document from a URL and convert it to PDF. "
+                    "Supports DOCX, DOC, PPTX, XLSX, ODS, ODT, RTF, HTML, and TXT. "
+                    "Returns a download URL for the converted PDF. "
+                    "Use this when the user asks to convert a file they've shared via URL."
+                ),
+                "input_schema": {
+                    "type": "object",
+                    "properties": {
+                        "url": {
+                            "type": "string",
+                            "description": "Public URL of the document to convert",
+                        },
+                        "filename": {
+                            "type": "string",
+                            "description": "Original filename (used to detect the input format, e.g. 'report.docx')",
+                        },
+                    },
+                    "required": ["url", "filename"],
+                },
+            }
+        )
+
     if tools_config.get("faraid"):
         defs.append(
             {
@@ -2614,6 +2702,8 @@ async def _execute_tool_impl(name: str, inputs: dict, mcp_map: dict, ctx: dict |
             return _tool_get_current_datetime(inputs)
         elif name == "generate_image":
             return await _tool_generate_image(inputs, ctx or {})
+        elif name == "convert_document":
+            return await _tool_convert_document(inputs)
         return f"Unknown tool: {name}"
     except Exception as exc:
         return f"Tool error: {exc}"
@@ -3588,6 +3678,52 @@ async def _tool_generate_image(inputs: dict, ctx: dict) -> str:
         )
     except Exception as exc:
         return f"Image generation failed: {str(exc).split(chr(10))[0]}"
+
+
+async def _tool_convert_document(inputs: dict) -> str:
+    """Download a document from a URL, convert it to PDF via LibreOffice,
+    upload the result to storage, and return a public download URL."""
+    url = (inputs.get("url") or "").strip()
+    filename = (inputs.get("filename") or "document.docx").strip()
+
+    if not url:
+        return "Error: url is required."
+    if not _is_ssrf_safe(url):
+        return "Error: URL is not allowed (private/internal addresses are blocked)."
+
+    # Download the source file
+    try:
+        async with httpx.AsyncClient(timeout=30, follow_redirects=True) as client:
+            resp = await client.get(url)
+        if resp.status_code != 200:
+            return f"Error: could not download file (HTTP {resp.status_code})."
+        data = resp.content
+    except Exception as exc:
+        return f"Error downloading file: {exc}"
+
+    if len(data) > 50 * 1024 * 1024:
+        return "Error: file exceeds 50 MB limit."
+
+    # Convert using LibreOffice
+    try:
+        from app.services.convert import ConversionError, convert_to_pdf
+
+        pdf_bytes, pdf_name = await convert_to_pdf(data, filename)
+    except Exception as exc:
+        return f"Conversion failed: {exc}"
+
+    # Upload result to storage and return a public URL
+    try:
+        from app.services.storage import upload_file
+
+        pdf_url = await upload_file(pdf_bytes, pdf_name, "application/pdf", f"conversions/{uuid.uuid4()}")
+        return (
+            f"Conversion complete. The PDF is ready to download:\n\n"
+            f"**[Download {pdf_name}]({pdf_url})**\n\n"
+            f"Share this link with the user."
+        )
+    except Exception as exc:
+        return f"Conversion succeeded but upload failed: {exc}"
 
 
 def _tool_calculate_faraid(inputs: dict) -> str:
