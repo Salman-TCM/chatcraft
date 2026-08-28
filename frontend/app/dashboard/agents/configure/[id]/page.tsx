@@ -7,7 +7,7 @@ import {
   ArrowLeft, Save, Loader2, Check, Settings,
   Brain, Zap, Terminal, Webhook, Plug, ChevronDown,
   ChevronUp, RefreshCw, Trash2, Plus, ExternalLink,
-  AlertCircle, Globe, Wrench, Sparkles, BookOpen, MessageSquare, Palette,
+  AlertCircle, Globe, Wrench, Sparkles, BookOpen, MessageSquare, Palette, X,
 } from "lucide-react";
 import { TestChatDrawer } from "./TestChatDrawer";
 import { Button } from "@/components/ui/button";
@@ -65,16 +65,18 @@ const SELF_HOSTED_PREFIX = "self-hosted/";
 const SELF_HOSTED_OPTION = "__self_hosted__";
 
 const TOOLS = [
-  { key: "web_search",   label: "Web Search",    description: "Search the internet for real-time information",  icon: "🔍" },
-  { key: "browser",      label: "Browser",       description: "Visit and interact with web pages",              icon: "🌐" },
-  { key: "code",         label: "Code Execution",description: "Run Python code and scripts",                    icon: "⚙️" },
-  { key: "http",         label: "HTTP Requests", description: "Call external REST APIs",                        icon: "🔗" },
-  { key: "sheets",       label: "Google Sheets", description: "Read and write spreadsheets",                    icon: "📊" },
-  { key: "email",        label: "Email",         description: "Compose and send emails",                        icon: "✉️" },
-  { key: "sms",          label: "SMS",           description: "Send text messages via Twilio",                  icon: "💬" },
-  { key: "verification", label: "Verification",  description: "Send and verify OTP codes",                      icon: "🔐" },
-  { key: "search_kb",    label: "Knowledge Base",description: "Search this agent's uploaded documents",         icon: "📚" },
-  { key: "agent_builder",label: "Agent Builder", description: "Spawn and manage other agents",                  icon: "🤖" },
+  { key: "web_search",       label: "Web Search",       description: "Search the internet for real-time information",  icon: "🔍" },
+  { key: "browser",          label: "Browser",          description: "Visit and interact with web pages",              icon: "🌐" },
+  { key: "code",             label: "Code Execution",   description: "Run Python code and scripts",                    icon: "⚙️" },
+  { key: "http",             label: "HTTP Requests",    description: "Call external REST APIs",                        icon: "🔗" },
+  { key: "sheets",           label: "Google Sheets",    description: "Read and write spreadsheets",                    icon: "📊" },
+  { key: "email",            label: "Email",            description: "Compose and send emails",                        icon: "✉️" },
+  { key: "sms",              label: "SMS",              description: "Send text messages via Twilio",                  icon: "💬" },
+  { key: "verification",     label: "Verification",     description: "Send and verify OTP codes",                      icon: "🔐" },
+  { key: "search_kb",        label: "Knowledge Base",   description: "Search this agent's uploaded documents",         icon: "📚" },
+  { key: "agent_builder",    label: "Agent Builder",    description: "Spawn and manage other agents",                  icon: "🤖" },
+  { key: "datetime",         label: "Date & Time",      description: "Get the current date and time in any timezone",  icon: "🕐" },
+  { key: "image_generation", label: "Image Generation", description: "Generate images with DALL-E (requires OpenAI key)", icon: "🎨" },
 ];
 
 // ─── Sub-components ───────────────────────────────────────────────────────────
@@ -324,6 +326,7 @@ export default function ConfigureAgentPage() {
         webhook_url: form.webhook_url.trim() || null,
         welcome_message: form.welcome_message.trim() || null,
         suggestions_enabled: form.suggestions_enabled,
+        welcome_suggestions: form.welcome_suggestions,
         tools: form.tools,
         primary_colour: form.primary_colour || "#6366f1",
         logo_url: form.logo_url.trim() || null,
@@ -540,6 +543,49 @@ export default function ConfigureAgentPage() {
                   checked={form.suggestions_enabled}
                   onCheckedChange={(v) => set("suggestions_enabled", v)}
                 />
+              </div>
+
+              <div className="space-y-2">
+                <Label>Welcome Suggestion Chips (up to 4)</Label>
+                <p className="text-xs text-muted-foreground">
+                  Quick-tap buttons shown below the welcome message. Leave empty to skip.
+                </p>
+                <div className="space-y-2">
+                  {(form.welcome_suggestions.length < 4 ? [...form.welcome_suggestions, ""] : form.welcome_suggestions).map((s, i) => (
+                    <div key={i} className="flex items-center gap-2">
+                      <Input
+                        value={s}
+                        onChange={(e) => {
+                          const next = [...form.welcome_suggestions];
+                          if (e.target.value) {
+                            next[i] = e.target.value;
+                          } else {
+                            next.splice(i, 1);
+                          }
+                          set("welcome_suggestions", next.slice(0, 4));
+                        }}
+                        placeholder={`Suggestion ${i + 1}…`}
+                        maxLength={80}
+                        className="text-sm flex-1"
+                      />
+                      {i < form.welcome_suggestions.length && (
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon"
+                          className="h-8 w-8 shrink-0"
+                          onClick={() => {
+                            const next = [...form.welcome_suggestions];
+                            next.splice(i, 1);
+                            set("welcome_suggestions", next);
+                          }}
+                        >
+                          <X className="h-3.5 w-3.5" />
+                        </Button>
+                      )}
+                    </div>
+                  ))}
+                </div>
               </div>
 
               <div className="space-y-1.5">
