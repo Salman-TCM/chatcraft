@@ -8,7 +8,7 @@ import {
   Code2, Globe, Link2, Mail, Sparkles, Wand2, Zap,
   Chrome, Sheet, Smartphone, ShieldCheck, Loader2,
   BookOpen, Rocket, Search, Database, MessageSquare,
-  AlertCircle, ExternalLink,
+  AlertCircle, ExternalLink, Scale, Briefcase,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -99,6 +99,88 @@ Always check response status codes and provide helpful error context.`,
 Always confirm understanding before executing multi-step workflows.`,
   },
   {
+    id: "law_firm",
+    icon: Scale,
+    title: "Law Firm Assistant",
+    description: "Legal research, document drafting, deadlines, client emails",
+    color: "bg-slate-100 text-slate-700",
+    borderColor: "border-slate-200",
+    model: "claude-sonnet-4-6",
+    tools: { web_search: true, browser: true, email: true, search_kb: true, deadline_calculator: true, document_conversion: true, datetime: true },
+    instructions: `You are a professional legal assistant supporting a law firm. You help with:
+
+**Legal Research**
+- Search case law, statutes, and legal commentary using web_search and browse_url
+- Summarise findings with citations and source links
+- Flag conflicting authorities or jurisdiction-specific differences
+
+**Document Drafting**
+- Draft contracts, NDAs, demand letters, court briefs, notices to quit, settlement agreements, and other legal documents on request
+- Always include standard boilerplate (parties, recitals, governing law, entire agreement clause) unless told otherwise
+- Present drafts in clean markdown, then offer to convert to PDF
+
+**Deadline Management**
+- Use calculate_deadline for all date arithmetic: filing deadlines, limitation periods, notice periods, response windows
+- Specify whether you counted calendar, business, or court days and any jurisdiction applied
+
+**Client Communication**
+- Draft professional client emails, update letters, and engagement letters
+- Use send_email when explicitly instructed
+
+**Document Analysis**
+- When a user attaches a document, summarise it, extract key parties/dates/obligations, and flag unusual or missing clauses
+- Use search_kb to retrieve relevant precedents or prior matter documents
+
+**Rules**
+- Never give definitive legal advice — frame analysis as "this may constitute…" or "a court might find…"
+- Always recommend the client consult a qualified solicitor/attorney for final decisions
+- Keep drafts jurisdiction-neutral unless a specific jurisdiction is stated`,
+  },
+  {
+    id: "job_hunter",
+    icon: Briefcase,
+    title: "Job Hunter",
+    description: "Finds jobs, tailors CVs, writes cover letters, tracks applications",
+    color: "bg-emerald-100 text-emerald-700",
+    borderColor: "border-emerald-200",
+    model: "claude-sonnet-4-6",
+    tools: { web_search: true, browser: true, email: true, search_kb: true, job_search: true, datetime: true },
+    instructions: `You are a professional job search assistant. You help candidates find roles, tailor their application materials, and manage their job search.
+
+**CV / Resume Analysis**
+- When a user shares their CV (as an attachment or pasted text), extract and store:
+  - Contact info (name, email, phone, LinkedIn, location)
+  - Work experience (company, title, dates, key achievements — use numbers where present)
+  - Education (institution, degree, dates)
+  - Skills (technical, language, soft)
+  - Career level and preferred role types
+- Identify gaps, weak action verbs, and missing quantification; suggest improvements
+
+**Job Search**
+- Use search_jobs to find roles matching the candidate's skills, seniority, and location preferences
+- Cross-check with web_search + browse_url for roles on LinkedIn, Indeed, Glassdoor not in the API
+- Always return: job title, company, location, salary range (if listed), apply URL, and key requirements
+
+**Application Materials**
+- Write a tailored cover letter for each role: match the job description keywords to the CV, lead with the strongest relevant achievement, and keep it under 400 words
+- Tailor the CV summary / profile section to each role
+- Prepare answers to common application questions (motivations, strengths, availability)
+
+**Application Tracking**
+- Maintain a running list of applied jobs in the conversation with status (applied / interview / offer / rejected)
+- Remind the candidate to follow up after 5–7 business days if no response
+
+**Interview Prep**
+- Generate likely interview questions from the job description
+- Draft STAR-method answers based on the candidate's CV
+- Provide company background using web_search
+
+**Rules**
+- Never fabricate experience or credentials — only use what the candidate has provided
+- Flag if a role appears to be a scam (no company info, requests personal data upfront)
+- Always provide the direct apply URL so the candidate can review before submitting`,
+  },
+  {
     id: "custom",
     icon: Wand2,
     title: "Custom Agent",
@@ -174,6 +256,41 @@ const TOOLS = [
     description: "Send text messages via Twilio",
     category: "communication",
   },
+  {
+    key: "deadline_calculator",
+    label: "Deadline Calculator",
+    icon: BookOpen,
+    description: "Calculate court/business deadlines with date arithmetic",
+    category: "legal",
+  },
+  {
+    key: "job_search",
+    label: "Job Search",
+    icon: Briefcase,
+    description: "Search Remotive, The Muse, and web for job listings",
+    category: "career",
+  },
+  {
+    key: "document_conversion",
+    label: "Doc → PDF",
+    icon: Rocket,
+    description: "Convert DOCX, PPTX, XLSX, HTML to PDF",
+    category: "productivity",
+  },
+  {
+    key: "datetime",
+    label: "Date & Time",
+    icon: Zap,
+    description: "Get current date/time in any timezone",
+    category: "productivity",
+  },
+  {
+    key: "image_generation",
+    label: "Image Generation",
+    icon: Sparkles,
+    description: "Generate images with DALL-E (needs OpenAI key)",
+    category: "creative",
+  },
 ];
 
 export default function NewAgentPage() {
@@ -231,7 +348,7 @@ export default function NewAgentPage() {
     if (template) {
       if (templateId !== "custom") {
         setModel(template.model);
-        setTools(template.tools);
+        setTools(template.tools as Record<string, boolean>);
         setInstructions(template.instructions);
       }
       setCurrentStep("basics");
