@@ -1,8 +1,11 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useCallback } from "react";
 import { useParams } from "next/navigation";
-import { AlertCircle, Bot, Check, ChevronDown, ChevronUp, Loader2, Send, Zap } from "lucide-react";
+import {
+  AlertCircle, Bot, Check, ChevronDown, ChevronUp, Loader2,
+  Mic, MicOff, Paperclip, Send, X, Zap,
+} from "lucide-react";
 import { APP_NAME } from "@/lib/constants";
 import { MarkdownContent } from "@/components/chat/markdown-content";
 import { RichContent, parseRichContent } from "@/components/chat/rich-content";
@@ -33,6 +36,13 @@ interface ChatMessage {
   tool?: string;
   step?: number;
   isWelcome?: boolean;
+  attachmentName?: string;
+}
+
+interface PendingAttachment {
+  filename: string;
+  text: string;
+  truncated: boolean;
 }
 
 // Derive readable foreground colour for a hex bg
@@ -41,7 +51,6 @@ function contrastColor(hex: string): string {
   const r = parseInt(c.slice(0, 2), 16);
   const g = parseInt(c.slice(2, 4), 16);
   const b = parseInt(c.slice(4, 6), 16);
-  // Perceived luminance
   return (0.299 * r + 0.587 * g + 0.114 * b) / 255 > 0.55 ? "#09090b" : "#ffffff";
 }
 
@@ -49,6 +58,41 @@ function bubbleRadius(style: string) {
   if (style === "pill")   return "9999px";
   if (style === "square") return "4px";
   return "12px";
+}
+
+// ── Web Speech API voice input ────────────────────────────────────────────────
+
+type SpeechState = "idle" | "listening" | "unsupported";
+
+function useWebSpeech(onResult: (text: string) => void) {
+  const [state, setState] = useState<SpeechState>("idle");
+  const recognitionRef = useRef<any>(null);
+
+  useEffect(() => {
+    const SR = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    if (!SR) { setState("unsupported"); return; }
+    const rec = new SR();
+    rec.continuous = false;
+    rec.interimResults = false;
+    rec.lang = "en-US";
+    rec.onresult = (e: any) => {
+      const text = e.results[0]?.[0]?.transcript || "";
+      if (text.trim()) onResult(text.trim());
+    };
+    rec.onend = () => setState("idle");
+    rec.onerror = () => setState("idle");
+    recognitionRef.current = rec;
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const toggle = useCallback(() => {
+    const rec = recognitionRef.current;
+    if (!rec) return;
+    if (state === "listening") { rec.stop(); setState("idle"); }
+    else { rec.start(); setState("listening"); }
+  }, [state]);
+
+  return { state, toggle };
 }
 
 export default function PublicAgentPage() {
@@ -64,7 +108,15 @@ export default function PublicAgentPage() {
   const [showTools, setShowTools] = useState(true);
   const chatEndRef = useRef<HTMLDivElement>(null);
 
+  const [pendingAttachment, setPendingAttachment] = useState<PendingAttachment | null>(null);
+  const [attachmentUploading, setAttachmentUploading] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
   const apiBase = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+
+  const { state: voiceState, toggle: toggleVoice } = useWebSpeech((text) => {
+    setChatInput((prev) => (prev ? `${prev} ${text}` : text));
+  });
 
   useEffect(() => {
     fetch(`${apiBase}/api/public/agents/${token}`)
@@ -81,17 +133,55 @@ export default function PublicAgentPage() {
       })
       .catch(() => setNotFound(true))
       .finally(() => setLoading(false));
-  }, [token]);
+  }, [token, apiBase]);
 
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
+  const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (file.size > 10 * 1024 * 1024) {
+      alert("File is too large — max 10 MB.");
+      e.target.value = "";
+      return;
+    }
+    setAttachmentUploading(true);
+    const form = new FormData();
+    form.append("file", file);
+    try {
+      const res = await fetch(`${apiBase}/api/public/agents/${token}/attachments/extract`, {
+        method: "POST",
+        body: form,
+      });
+      const data = await res.json();
+      if (data.success) {
+        setPendingAttachment(data.data);
+        if (data.data.truncated) alert(`${file.name} was long — only the first part will be sent.`);
+      } else {
+        alert(data.detail?.error || "Could not read file.");
+      }
+    } catch {
+      alert("File upload failed. Please try again.");
+    } finally {
+      setAttachmentUploading(false);
+      e.target.value = "";
+    }
+  };
+
   async function sendMessage(override?: string) {
     const text = (override ?? chatInput).trim();
     if (!text || running) return;
+
+    const attachment = pendingAttachment;
+    const messageToSend = attachment
+      ? `${text}\n\n--- Attached file: ${attachment.filename}${attachment.truncated ? " (truncated)" : ""} ---\n${attachment.text}\n--- end attachment ---`
+      : text;
+
     setChatInput("");
-    setMessages(prev => [...prev, { role: "user", content: text }]);
+    setPendingAttachment(null);
+    setMessages(prev => [...prev, { role: "user", content: text, attachmentName: attachment?.filename }]);
     setRunning(true);
     setStepCount(0);
 
@@ -106,7 +196,7 @@ export default function PublicAgentPage() {
       const resp = await fetch(`${apiBase}/api/public/agents/${token}/chat`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ message: text, conversation_history: history }),
+        body: JSON.stringify({ message: messageToSend, conversation_history: history }),
       });
 
       if (!resp.ok) {
@@ -335,6 +425,13 @@ export default function PublicAgentPage() {
 
           return (
             <div key={i} className={`flex flex-col ${isUser ? "items-end" : "items-start"}`}>
+              {isUser && msg.attachmentName && (
+                <div className="flex items-center gap-1 text-[11px] mb-1 opacity-70"
+                     style={{ color: isUser ? primaryFg : mutedText }}>
+                  <Paperclip className="h-3 w-3" />
+                  <span>{msg.attachmentName}</span>
+                </div>
+              )}
               <div style={bubbleStyle}>
                 {msg.role === "assistant" ? (
                   <MarkdownContent content={rich ? rich.text : msg.content} />
@@ -351,7 +448,7 @@ export default function PublicAgentPage() {
                   <RichContent block={block} onQuickReply={(reply) => sendMessage(reply)} />
                 </div>
               ))}
-              {/* Welcome suggestion chips — only after the first (welcome) message, before any user input */}
+              {/* Welcome suggestion chips */}
               {msg.isWelcome && messages.length === 1 && !running &&
                 agent.welcome_suggestions?.length > 0 && (
                 <div className="flex flex-wrap gap-1.5 mt-1.5" style={{ maxWidth: "85%" }}>
@@ -400,7 +497,69 @@ export default function PublicAgentPage() {
 
       {/* Input */}
       <div className="p-4 shrink-0" style={{ borderTop: `1px solid ${border}`, backgroundColor: bg }}>
-        <div className="max-w-3xl mx-auto flex gap-2">
+        {/* Pending attachment pill */}
+        {pendingAttachment && (
+          <div className="flex items-center gap-2 mb-2 rounded-full border px-3 py-1.5 text-xs w-fit max-w-full"
+               style={{ borderColor: border, color: mutedText }}>
+            <Paperclip className="h-3.5 w-3.5 shrink-0" />
+            <span className="truncate max-w-[200px]">{pendingAttachment.filename}</span>
+            {pendingAttachment.truncated && <span className="shrink-0 opacity-60">(truncated)</span>}
+            <button onClick={() => setPendingAttachment(null)} style={{ color: mutedText }}>
+              <X className="h-3.5 w-3.5" />
+            </button>
+          </div>
+        )}
+
+        <div className="max-w-3xl mx-auto flex gap-2 items-center">
+          {/* Hidden file input */}
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept=".pdf,.docx,.txt"
+            className="hidden"
+            onChange={handleFileSelect}
+          />
+
+          {/* Attach button */}
+          <button
+            onClick={() => fileInputRef.current?.click()}
+            disabled={running || attachmentUploading}
+            title="Attach PDF, DOCX, or TXT"
+            style={{
+              width: 36, height: 36, borderRadius: "50%", border: `1px solid ${border}`,
+              backgroundColor: surface, color: mutedText,
+              display: "flex", alignItems: "center", justifyContent: "center",
+              flexShrink: 0, cursor: running || attachmentUploading ? "not-allowed" : "pointer",
+              opacity: running || attachmentUploading ? 0.5 : 1,
+            }}
+          >
+            {attachmentUploading
+              ? <Loader2 className="h-4 w-4 animate-spin" />
+              : <Paperclip className="h-4 w-4" />}
+          </button>
+
+          {/* Voice button — only shown when Web Speech API is available */}
+          {voiceState !== "unsupported" && (
+            <button
+              onClick={toggleVoice}
+              disabled={running}
+              title={voiceState === "listening" ? "Stop listening" : "Voice input"}
+              style={{
+                width: 36, height: 36, borderRadius: "50%", border: `1px solid ${border}`,
+                backgroundColor: voiceState === "listening" ? primary : surface,
+                color: voiceState === "listening" ? primaryFg : mutedText,
+                display: "flex", alignItems: "center", justifyContent: "center",
+                flexShrink: 0, cursor: running ? "not-allowed" : "pointer",
+                opacity: running ? 0.5 : 1,
+                transition: "background .15s, color .15s",
+              }}
+            >
+              {voiceState === "listening"
+                ? <MicOff className="h-4 w-4" />
+                : <Mic className="h-4 w-4" />}
+            </button>
+          )}
+
           <input
             type="text"
             placeholder={agent.placeholder_text || `Message ${agent.name}…`}
