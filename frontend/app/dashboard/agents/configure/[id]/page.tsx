@@ -76,7 +76,8 @@ const TOOLS = [
   { key: "search_kb",        label: "Knowledge Base",   description: "Search this agent's uploaded documents",         icon: "📚" },
   { key: "agent_builder",    label: "Agent Builder",    description: "Spawn and manage other agents",                  icon: "🤖" },
   { key: "datetime",         label: "Date & Time",      description: "Get the current date and time in any timezone",  icon: "🕐" },
-  { key: "image_generation", label: "Image Generation", description: "Generate images with DALL-E (requires OpenAI key)", icon: "🎨" },
+  { key: "image_generation",    label: "Image Generation",   description: "Generate images with DALL-E (requires OpenAI key)",       icon: "🎨" },
+  { key: "document_conversion", label: "Doc → PDF",          description: "Convert DOCX/PPTX/XLSX/HTML to PDF via a shared URL",    icon: "📄" },
 ];
 
 // ─── Sub-components ───────────────────────────────────────────────────────────

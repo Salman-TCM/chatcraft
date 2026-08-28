@@ -9,6 +9,7 @@ import {
 import { APP_NAME } from "@/lib/constants";
 import { MarkdownContent } from "@/components/chat/markdown-content";
 import { RichContent, parseRichContent } from "@/components/chat/rich-content";
+import { ConvertButton } from "@/components/chat/convert-button";
 
 interface AgentDesign {
   primary_colour: string;
@@ -591,11 +592,16 @@ export default function PublicAgentPage() {
               : <Send className="h-4 w-4" />}
           </button>
         </div>
-        {agent.show_branding && (
-          <p className="text-center text-[10px] mt-2" style={{ color: mutedText + "80" }}>
-            Powered by {APP_NAME}
-          </p>
-        )}
+        <div className="max-w-3xl mx-auto mt-2 flex items-center justify-between">
+          <ConvertButton
+            endpoint={`${apiBase}/api/public/agents/${token}/convert`}
+          />
+          {agent.show_branding && (
+            <p className="text-[10px]" style={{ color: mutedText + "80" }}>
+              Powered by {APP_NAME}
+            </p>
+          )}
+        </div>
       </div>
     </div>
   );
