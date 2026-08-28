@@ -22,6 +22,7 @@ import { getSession } from "next-auth/react";
 import { MarkdownContent } from "@/components/chat/markdown-content";
 import { TtsPlayer } from "@/components/chat/tts-player";
 import { VoiceRecorder } from "@/components/chat/voice-recorder";
+import { ConvertButton } from "@/components/chat/convert-button";
 
 const ATTACHMENT_ACCEPT = ".pdf,.docx,.txt";
 const ATTACHMENT_MAX_BYTES = 10 * 1024 * 1024; // matches backend cap
@@ -732,10 +733,17 @@ export default function AgentRunPage() {
             </div>
 
             <div className="flex items-center justify-between mt-2 text-xs text-muted-foreground">
-              <span>
-                Enter to send, Shift+Enter for new line
-                {!agent.is_active && " • Agent is inactive"}
-              </span>
+              <div className="flex items-center gap-2">
+                <span>
+                  Enter to send, Shift+Enter for new line
+                  {!agent.is_active && " • Agent is inactive"}
+                </span>
+                <ConvertButton
+                  endpoint={`${apiBase}/api/v1/agents/${id}/convert`}
+                  accessToken={accessToken}
+                  iconOnly={false}
+                />
+              </div>
               <div className="flex gap-1">
                 <Button variant="ghost" size="sm" onClick={resetConversation} disabled={isRunning} title="Reset conversation">
                   <RotateCcw className="h-3 w-3" />
