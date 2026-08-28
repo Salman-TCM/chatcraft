@@ -11,6 +11,7 @@ import { Button } from "@/components/ui/button";
 import { apiClient } from "@/lib/api";
 import { RichContent, parseRichContent } from "@/components/chat/rich-content";
 import { VoiceRecorder } from "@/components/chat/voice-recorder";
+import { ConvertButton } from "@/components/chat/convert-button";
 import { toast } from "@/hooks/use-toast";
 import { getErrorMessage } from "@/lib/errors";
 
@@ -414,6 +415,12 @@ export function TestChatDrawer({ agentId, agentName, welcomeMessage, welcomeSugg
                 </Button>
               )}
             </div>
+          </div>
+          <div className="px-3 pb-2">
+            <ConvertButton
+              endpoint={`/api/v1/agents/${agentId}/convert`}
+              accessToken={accessToken}
+            />
           </div>
         </div>
       </aside>
