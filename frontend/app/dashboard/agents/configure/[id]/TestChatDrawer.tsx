@@ -6,17 +6,26 @@
  */
 
 import { useEffect, useRef, useState } from "react";
-import { Send, X, Loader2, Wrench, ArrowRight, MessageSquare } from "lucide-react";
+import { Send, X, Loader2, Wrench, ArrowRight, MessageSquare, Paperclip } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { apiClient } from "@/lib/api";
 import { RichContent, parseRichContent } from "@/components/chat/rich-content";
+import { VoiceRecorder } from "@/components/chat/voice-recorder";
+import { toast } from "@/hooks/use-toast";
+import { getErrorMessage } from "@/lib/errors";
 
 type Event =
-  | { kind: "user"; content: string }
+  | { kind: "user"; content: string; attachmentName?: string }
   | { kind: "assistant"; content: string }
   | { kind: "tool_call"; tool: string; input: unknown }
   | { kind: "tool_result"; tool: string; result: string }
   | { kind: "error"; content: string };
+
+interface PendingAttachment {
+  filename: string;
+  text: string;
+  truncated: boolean;
+}
 
 interface Props {
   agentId: string;
@@ -61,7 +70,6 @@ async function* streamAgentChat(
     const { value, done } = await reader.read();
     if (done) break;
     buf += decoder.decode(value, { stream: true });
-    // Split on the SSE "data: ..." lines, keep trailing partial in buf.
     let idx: number;
     while ((idx = buf.indexOf("\n")) >= 0) {
       const line = buf.slice(0, idx).trim();
@@ -79,15 +87,13 @@ async function* streamAgentChat(
         else if (evt.type === "error")
           yield { kind: "error", content: String(evt.content ?? "") };
       } catch {
-        // Ignore malformed frames; upstream should never send them but we
-        // don't want a bad byte to kill the whole stream.
+        // Ignore malformed frames
       }
     }
   }
 }
 
-// The apiClient stores the Authorization token in its default header — pull it
-// out so our streaming fetch reuses the same credential.
+// The apiClient stores the Authorization token in its default header
 function getAuthToken(): string {
   const h = apiClient.defaults.headers.common?.Authorization as string | undefined;
   if (h?.startsWith("Bearer ")) return h.slice(7);
@@ -98,8 +104,11 @@ export function TestChatDrawer({ agentId, agentName, welcomeMessage, welcomeSugg
   const [events, setEvents] = useState<Event[]>([]);
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
+  const [pendingAttachment, setPendingAttachment] = useState<PendingAttachment | null>(null);
+  const [attachmentUploading, setAttachmentUploading] = useState(false);
   const abortRef = useRef<AbortController | null>(null);
   const scrollRef = useRef<HTMLDivElement | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
@@ -113,7 +122,6 @@ export function TestChatDrawer({ agentId, agentName, welcomeMessage, welcomeSugg
   }, [open, welcomeMessage]);
 
   useEffect(() => {
-    // Cancel any inflight stream when the drawer closes so tokens aren't wasted.
     if (!open && abortRef.current) {
       abortRef.current.abort();
       abortRef.current = null;
@@ -121,11 +129,43 @@ export function TestChatDrawer({ agentId, agentName, welcomeMessage, welcomeSugg
     }
   }, [open]);
 
+  const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (file.size > 10 * 1024 * 1024) {
+      toast({ variant: "destructive", title: "File too large", description: "Max 10 MB." });
+      e.target.value = "";
+      return;
+    }
+    setAttachmentUploading(true);
+    const form = new FormData();
+    form.append("file", file);
+    try {
+      const { data } = await apiClient.post(`/api/v1/agents/${agentId}/attachments/extract`, form);
+      setPendingAttachment(data.data);
+      if (data.data.truncated) {
+        toast({ title: "File truncated", description: "Only the first part will be sent as context." });
+      }
+    } catch (err) {
+      toast({ variant: "destructive", title: "Failed to read file", description: getErrorMessage(err) });
+    } finally {
+      setAttachmentUploading(false);
+      e.target.value = "";
+    }
+  };
+
   async function send(override?: string) {
     const msg = (override ?? input).trim();
     if (!msg || sending) return;
+
+    const attachment = pendingAttachment;
+    const messageToSend = attachment
+      ? `${msg}\n\n--- Attached file: ${attachment.filename}${attachment.truncated ? " (truncated)" : ""} ---\n${attachment.text}\n--- end attachment ---`
+      : msg;
+
     setInput("");
-    setEvents((prev) => [...prev, { kind: "user", content: msg }]);
+    setPendingAttachment(null);
+    setEvents((prev) => [...prev, { kind: "user", content: msg, attachmentName: attachment?.filename }]);
     setSending(true);
     const controller = new AbortController();
     abortRef.current = controller;
@@ -133,10 +173,9 @@ export function TestChatDrawer({ agentId, agentName, welcomeMessage, welcomeSugg
     try {
       const token = getAuthToken();
       let currentAssistant: string | null = null;
-      for await (const evt of streamAgentChat(agentId, msg, token, controller.signal)) {
+      for await (const evt of streamAgentChat(agentId, messageToSend, token, controller.signal)) {
         setEvents((prev) => {
           if (evt.kind === "assistant") {
-            // Append streaming text into a single assistant bubble per turn.
             if (currentAssistant !== null && prev.length && prev[prev.length - 1].kind === "assistant") {
               const copy = prev.slice();
               (copy[copy.length - 1] as { kind: "assistant"; content: string }).content += evt.content;
@@ -145,7 +184,6 @@ export function TestChatDrawer({ agentId, agentName, welcomeMessage, welcomeSugg
             currentAssistant = evt.content;
             return [...prev, { kind: "assistant", content: evt.content }];
           }
-          // Tool activity breaks the assistant streak so the next text goes into a new bubble.
           currentAssistant = null;
           return [...prev, evt];
         });
@@ -166,10 +204,13 @@ export function TestChatDrawer({ agentId, agentName, welcomeMessage, welcomeSugg
 
   function reset() {
     stop();
+    setPendingAttachment(null);
     setEvents(welcomeMessage ? [{ kind: "assistant", content: welcomeMessage }] : []);
   }
 
   if (!open) return null;
+
+  const accessToken = getAuthToken();
 
   return (
     <>
@@ -211,7 +252,13 @@ export function TestChatDrawer({ agentId, agentName, welcomeMessage, welcomeSugg
           {events.map((e, i) => {
             if (e.kind === "user") {
               return (
-                <div key={i} className="flex justify-end">
+                <div key={i} className="flex flex-col items-end gap-1">
+                  {(e as any).attachmentName && (
+                    <div className="flex items-center gap-1 text-[11px] text-muted-foreground opacity-70">
+                      <Paperclip className="h-3 w-3" />
+                      <span>{(e as any).attachmentName}</span>
+                    </div>
+                  )}
                   <div className="max-w-[85%] rounded-2xl bg-primary text-primary-foreground px-3 py-2 text-sm whitespace-pre-wrap break-words">
                     {e.content}
                   </div>
@@ -295,8 +342,31 @@ export function TestChatDrawer({ agentId, agentName, welcomeMessage, welcomeSugg
           )}
         </div>
 
+        {/* Attachment pill */}
+        {pendingAttachment && (
+          <div className="px-3 pt-2">
+            <div className="flex items-center gap-2 rounded-full border bg-muted/40 px-2.5 py-1 text-xs w-fit max-w-full">
+              <Paperclip className="h-3 w-3 shrink-0 text-muted-foreground" />
+              <span className="truncate max-w-[200px]">{pendingAttachment.filename}</span>
+              {pendingAttachment.truncated && <span className="opacity-60 shrink-0">(truncated)</span>}
+              <button onClick={() => setPendingAttachment(null)} className="text-muted-foreground hover:text-foreground shrink-0">
+                <X className="h-3 w-3" />
+              </button>
+            </div>
+          </div>
+        )}
+
         <div className="border-t px-3 py-2">
           <div className="flex items-end gap-2">
+            {/* Hidden file input */}
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept=".pdf,.docx,.txt"
+              className="hidden"
+              onChange={handleFileSelect}
+            />
+
             <textarea
               value={input}
               onChange={(e) => setInput(e.target.value)}
@@ -306,20 +376,44 @@ export function TestChatDrawer({ agentId, agentName, welcomeMessage, welcomeSugg
                   send();
                 }
               }}
-              placeholder="Type a message… (Enter to send, Shift+Enter for newline)"
+              placeholder="Type a message… (Enter to send)"
               rows={2}
               className="flex-1 resize-none rounded-md border bg-background px-2.5 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-ring placeholder:text-muted-foreground"
               disabled={sending}
             />
-            {sending ? (
-              <Button size="icon" variant="outline" className="h-9 w-9" onClick={stop} title="Stop">
-                <X className="h-4 w-4" />
+
+            <div className="flex flex-col gap-1">
+              {/* Attach button */}
+              <Button
+                size="icon"
+                variant="ghost"
+                className="h-8 w-8"
+                onClick={() => fileInputRef.current?.click()}
+                disabled={sending || attachmentUploading}
+                title="Attach PDF, DOCX, or TXT"
+              >
+                {attachmentUploading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Paperclip className="h-3.5 w-3.5" />}
               </Button>
-            ) : (
-              <Button size="icon" className="h-9 w-9" onClick={() => send()} disabled={!input.trim()}>
-                <Send className="h-4 w-4" />
-              </Button>
-            )}
+
+              {/* Voice recorder */}
+              <VoiceRecorder
+                onTranscript={(text) => setInput((prev) => (prev ? `${prev} ${text}` : text))}
+                onError={(msg) => toast({ variant: "destructive", title: "Voice input failed", description: msg })}
+                accessToken={accessToken}
+                disabled={sending}
+              />
+
+              {/* Send / Stop */}
+              {sending ? (
+                <Button size="icon" variant="outline" className="h-8 w-8" onClick={stop} title="Stop">
+                  <X className="h-3.5 w-3.5" />
+                </Button>
+              ) : (
+                <Button size="icon" className="h-8 w-8" onClick={() => send()} disabled={!input.trim()}>
+                  <Send className="h-3.5 w-3.5" />
+                </Button>
+              )}
+            </div>
           </div>
         </div>
       </aside>
