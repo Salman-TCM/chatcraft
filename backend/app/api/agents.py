@@ -361,6 +361,61 @@ async def public_agent_chat(
     )
 
 
+# ─── Public attachment extraction (no auth) ───────────────────────────────────
+
+
+@public_router.post("/{share_token}/attachments/extract")
+@limiter.limit("10/minute")
+async def public_extract_attachment(
+    share_token: str, request: Request, db: DBSession, file: UploadFile
+):
+    """Extract text from an uploaded file for use in a public agent chat.
+    Rate-limited and scoped to agents with sharing enabled."""
+    await _get_shared_agent(share_token, db)
+
+    data = await file.read()
+    if not data:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={"success": False, "error": "Empty file", "code": "EMPTY_FILE"},
+        )
+    if len(data) > _ATTACHMENT_MAX_BYTES:
+        raise HTTPException(
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            detail={"success": False, "error": "File exceeds 10 MB", "code": "FILE_TOO_LARGE"},
+        )
+
+    doc_type = _resolve_attachment_doc_type(file.content_type, file.filename)
+    if not doc_type:
+        raise HTTPException(
+            status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
+            detail={
+                "success": False,
+                "error": "Only PDF, DOCX, and TXT files are supported",
+                "code": "UNSUPPORTED_TYPE",
+            },
+        )
+
+    try:
+        if doc_type == "pdf":
+            text = extract_pdf(data)
+        elif doc_type == "docx":
+            text = extract_docx(data)
+        else:
+            text = extract_txt(data)
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={"success": False, "error": f"Could not read file: {exc}", "code": "EXTRACT_FAILED"},
+        ) from exc
+
+    text, truncated = _truncate_attachment_text(text)
+    return {
+        "success": True,
+        "data": {"filename": file.filename or "attachment", "text": text, "truncated": truncated},
+    }
+
+
 # ─── Memory endpoints ─────────────────────────────────────────────────────────
 
 
@@ -1009,6 +1064,8 @@ _BUILTIN_TOOL_NAMES = frozenset(
         "create_agent",
         "search_kb",
         "calculate_faraid",
+        "get_current_datetime",
+        "generate_image",
     }
 )
 
@@ -2230,6 +2287,61 @@ def _build_builtin_tools(tools_config: dict) -> list[dict]:
             }
         )
 
+    if tools_config.get("datetime"):
+        defs.append(
+            {
+                "name": "get_current_datetime",
+                "description": (
+                    "Get the current date and time. Use this whenever the user asks about "
+                    "the current time, date, day of week, or any time-sensitive question."
+                ),
+                "input_schema": {
+                    "type": "object",
+                    "properties": {
+                        "timezone": {
+                            "type": "string",
+                            "description": (
+                                "IANA timezone name (e.g. 'Asia/Kuala_Lumpur', "
+                                "'America/New_York', 'Europe/London'). Defaults to UTC."
+                            ),
+                        }
+                    },
+                },
+            }
+        )
+
+    if tools_config.get("image_generation"):
+        defs.append(
+            {
+                "name": "generate_image",
+                "description": (
+                    "Generate an image from a text description using DALL-E. "
+                    "Returns a URL to the generated image. "
+                    "Always display the image inline using markdown: ![description](url)"
+                ),
+                "input_schema": {
+                    "type": "object",
+                    "properties": {
+                        "prompt": {
+                            "type": "string",
+                            "description": "Detailed description of the image to generate",
+                        },
+                        "size": {
+                            "type": "string",
+                            "enum": ["1024x1024", "1792x1024", "1024x1792"],
+                            "description": "Image dimensions. Default: 1024x1024 (square)",
+                        },
+                        "quality": {
+                            "type": "string",
+                            "enum": ["standard", "hd"],
+                            "description": "Image quality. HD costs more tokens.",
+                        },
+                    },
+                    "required": ["prompt"],
+                },
+            }
+        )
+
     if tools_config.get("faraid"):
         defs.append(
             {
@@ -2498,6 +2610,10 @@ async def _execute_tool_impl(name: str, inputs: dict, mcp_map: dict, ctx: dict |
             return await _tool_search_kb(inputs, ctx or {})
         elif name == "calculate_faraid":
             return _tool_calculate_faraid(inputs)
+        elif name == "get_current_datetime":
+            return _tool_get_current_datetime(inputs)
+        elif name == "generate_image":
+            return await _tool_generate_image(inputs, ctx or {})
         return f"Unknown tool: {name}"
     except Exception as exc:
         return f"Tool error: {exc}"
@@ -3406,6 +3522,72 @@ async def _tool_search_kb(inputs: dict, ctx: dict) -> str:
             f"[{i}] {c.document_name} (similarity {c.similarity:.2f})\n{c.content.strip()}"
         )
     return "\n\n---\n\n".join(parts)
+
+
+def _tool_get_current_datetime(inputs: dict) -> str:
+    """Return the current date/time in the requested timezone."""
+    import zoneinfo
+    from datetime import UTC, datetime as _dt
+
+    tz_name = (inputs.get("timezone") or "UTC").strip()
+    try:
+        tz: Any = zoneinfo.ZoneInfo(tz_name)
+    except Exception:
+        tz = UTC
+        tz_name = "UTC"
+
+    now = _dt.now(tz)
+    return (
+        f"{now.strftime('%A, %B %-d %Y')}  "
+        f"{now.strftime('%H:%M:%S')} {tz_name}  "
+        f"(UTC{now.strftime('%z')})"
+    )
+
+
+async def _tool_generate_image(inputs: dict, ctx: dict) -> str:
+    """Generate an image with DALL-E using the agent owner's OpenAI key."""
+    prompt = (inputs.get("prompt") or "").strip()
+    if not prompt:
+        return "Error: prompt is required."
+
+    size = inputs.get("size") or "1024x1024"
+    quality = inputs.get("quality") or "standard"
+
+    user_id_str = ctx.get("user_id")
+    api_key: str | None = None
+    if user_id_str:
+        try:
+            from app.db.session import AsyncSessionLocal
+
+            async with AsyncSessionLocal() as _db:
+                api_key = await _get_user_key(uuid.UUID(user_id_str), "openai", _db)
+        except Exception:
+            pass
+    if not api_key:
+        api_key = getattr(settings, "openai_api_key", None)
+    if not api_key:
+        return "Error: no OpenAI API key configured. Add one in Settings → Model Keys to use image generation."
+
+    try:
+        from openai import AsyncOpenAI
+
+        client = AsyncOpenAI(api_key=api_key)
+        response = await client.images.generate(
+            model="dall-e-3",
+            prompt=prompt,
+            size=size,  # type: ignore[arg-type]
+            quality=quality,  # type: ignore[arg-type]
+            n=1,
+        )
+        url = response.data[0].url
+        revised = response.data[0].revised_prompt or prompt
+        return (
+            f"Generated image for: {revised}\n\n"
+            f"![{prompt[:80]}]({url})\n\n"
+            f"URL: {url}"
+        )
+    except Exception as exc:
+        return f"Image generation failed: {str(exc).split(chr(10))[0]}"
 
 
 def _tool_calculate_faraid(inputs: dict) -> str:
