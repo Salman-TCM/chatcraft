@@ -30,6 +30,8 @@ class AgentToolsConfig(BaseModel):
     datetime: bool = False
     image_generation: bool = False
     document_conversion: bool = False
+    deadline_calculator: bool = False
+    job_search: bool = False
 
 
 _WEBHOOK_URL_RE = re.compile(r"^https?://[^\s]+$")
