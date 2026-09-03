@@ -60,6 +60,7 @@ celery_app = Celery(
         "app.workers.billing_worker",
         "app.workers.debug_worker",
         "app.workers.sync_worker",
+        "app.workers.agent_schedule_worker",
     ],
 )
 
@@ -122,6 +123,12 @@ celery_app.conf.update(
         "sync-docs-system-prompts": {
             "task": "workers.sync_docs_system_prompts",
             "schedule": 600,  # every 10 minutes
+            "options": {"queue": "default"},
+        },
+        # Agent schedules — check every minute and fire due jobs
+        "check-agent-schedules": {
+            "task": "workers.check_agent_schedules",
+            "schedule": 60,  # every 60 seconds
             "options": {"queue": "default"},
         },
     },
