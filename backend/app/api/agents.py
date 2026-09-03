@@ -4184,10 +4184,37 @@ async def _tool_scrape_products(inputs: dict) -> str:
             current_url = None
 
     if not all_products:
+        # Auto-detect failed — extract visible text + image/price hints so the LLM
+        # can parse the products itself and then call export_products_file.
+        _fallback_lines: list[str] = []
+        try:
+            # Re-fetch and parse the first page for fallback text
+            async with httpx.AsyncClient(timeout=15, headers=_SCRAPER_HEADERS, follow_redirects=True) as _c:
+                _r = await _c.get(url)
+            _soup = BeautifulSoup(_r.text, "lxml")
+            # Strip nav/footer/script noise
+            for _tag in _soup(["script", "style", "nav", "footer", "header", "aside"]):
+                _tag.decompose()
+            # Collect text in short lines (skip very long or very short ones)
+            for _el in _soup.find_all(["h1","h2","h3","p","span","td","li","a"]):
+                _txt = _el.get_text(strip=True)
+                if 3 < len(_txt) < 200:
+                    _fallback_lines.append(_txt)
+            # Collect image src hints
+            for _img in _soup.find_all("img", src=True)[:30]:
+                _src = _img.get("src","") or _img.get("data-src","")
+                if _src and not _src.startswith("data:"):
+                    _fallback_lines.append(f"[IMG] {_src}")
+            _text_blob = "\n".join(dict.fromkeys(_fallback_lines))[:6000]
+        except Exception:
+            _text_blob = ""
+
+        col_hint = f" Use these columns: {columns}." if columns else ""
         return (
-            "Could not detect product listings on this page. "
-            "Try using browse_url to fetch the page content and extract products manually, "
-            "then call export_products_file to generate the file."
+            f"Auto-detection found no products on {url}. "
+            f"Here is the page content — please extract the product list from it, "
+            f"build a JSON array, then call export_products_file to generate the file.{col_hint}\n\n"
+            f"PAGE CONTENT:\n{_text_blob}"
         )
 
     # Deduplicate by Name
