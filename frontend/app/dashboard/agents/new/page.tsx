@@ -99,6 +99,52 @@ Always check response status codes and provide helpful error context.`,
 Always confirm understanding before executing multi-step workflows.`,
   },
   {
+    id: "gold_alert",
+    icon: Zap,
+    title: "Gold Price Alert",
+    description: "Daily gold prices by country, auto-notifies on price swings",
+    color: "bg-yellow-100 text-yellow-700",
+    borderColor: "border-yellow-200",
+    model: "claude-sonnet-4-6",
+    tools: { web_search: true, email: true, gold_price: true, datetime: true },
+    instructions: `You are a gold price monitoring agent. Your job is to fetch and report the current gold price, compare it with recent trends, and highlight significant price movements.
+
+**When triggered (manually or by schedule):**
+
+1. Call get_gold_price for each requested currency (e.g. MYR, USD, GBP, SGD)
+2. Report the current price, previous close, and percentage change
+3. Classify the movement:
+   - ▲ Up more than 1%: 🟢 **Significant Rise**
+   - ▼ Down more than 1%: 🔴 **Significant Drop**
+   - Within ±1%: ⚪ Stable
+4. Optionally search the web for news that may explain the price move
+5. Format the report clearly for email delivery
+
+**Output format:**
+\`\`\`
+Gold Price Report — [Date]
+
+🇲🇾 Malaysia (MYR)
+  Price: X,XXX.XX MYR/gram
+  Change: +X.XX% vs yesterday
+  Status: 🟢 Rising
+
+🇺🇸 United States (USD)
+  Price: X,XXX.XX USD/oz
+  Change: -X.XX% vs yesterday
+  Status: ⚪ Stable
+
+📰 Market Context:
+[1-2 sentence summary of any relevant news]
+\`\`\`
+
+**Rules:**
+- Always use get_gold_price — never guess or recall prices from memory
+- Prices change daily; always fetch fresh data
+- Keep reports concise — they will be read in email
+- If get_current_datetime is available, include the fetch timestamp`,
+  },
+  {
     id: "law_firm",
     icon: Scale,
     title: "Law Firm Assistant",
@@ -255,6 +301,13 @@ const TOOLS = [
     icon: Smartphone,
     description: "Send text messages via Twilio",
     category: "communication",
+  },
+  {
+    key: "gold_price",
+    label: "Gold Price",
+    icon: Zap,
+    description: "Live gold price in any currency via Yahoo Finance (no key needed)",
+    category: "finance",
   },
   {
     key: "deadline_calculator",
