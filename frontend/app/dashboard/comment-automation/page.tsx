@@ -275,7 +275,7 @@ export default function CommentAutomationPage() {
             <form onSubmit={handleSubmit(onSubmit)} className="flex flex-col min-h-0">
               <div className="flex items-center justify-between p-4 border-b">
                 <h2 className="font-semibold">{editing ? "Edit Automation" : "New Comment Automation"}</h2>
-                <button type="button" onClick={() => setShowModal(false)}><X className="h-5 w-5 text-muted-foreground" /></button>
+                <button className="inline-flex items-center justify-center" type="button" onClick={() => setShowModal(false)}><X className="h-5 w-5 text-muted-foreground" /></button>
               </div>
               <div className="flex-1 overflow-y-auto p-4 space-y-4">
                 <div className="grid grid-cols-2 gap-3">
@@ -355,7 +355,7 @@ export default function CommentAutomationPage() {
                       {keywords.map((kw) => (
                         <span key={kw} className="flex items-center gap-1 text-xs bg-muted px-2 py-0.5 rounded-full">
                           {kw}
-                          <button type="button" onClick={() => setKeywords((p) => p.filter((k) => k !== kw))}>
+                          <button className="inline-flex items-center justify-center" type="button" onClick={() => setKeywords((p) => p.filter((k) => k !== kw))}>
                             <X className="h-3 w-3" />
                           </button>
                         </span>

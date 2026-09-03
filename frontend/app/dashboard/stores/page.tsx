@@ -427,7 +427,7 @@ export default function StoresPage() {
             <div className="bg-background rounded-xl shadow-xl w-full max-w-lg max-h-[90vh] flex flex-col">
               <div className="flex items-center justify-between p-4 border-b">
                 <h2 className="font-semibold">{editingProduct ? "Edit Product" : "Add Product"}</h2>
-                <button onClick={() => setShowProductModal(false)}><X className="h-5 w-5 text-muted-foreground" /></button>
+                <button className="inline-flex items-center justify-center" onClick={() => setShowProductModal(false)}><X className="h-5 w-5 text-muted-foreground" /></button>
               </div>
               <div className="flex-1 overflow-y-auto p-4 space-y-3">
                 <div className="space-y-1">
@@ -625,7 +625,7 @@ export default function StoresPage() {
           <div className="bg-background rounded-xl shadow-xl w-full max-w-lg max-h-[90vh] flex flex-col">
             <div className="flex items-center justify-between p-4 border-b">
               <h2 className="font-semibold">{editingStore ? "Store Settings" : "New Store"}</h2>
-              <button onClick={() => setShowStoreModal(false)}><X className="h-5 w-5 text-muted-foreground" /></button>
+              <button className="inline-flex items-center justify-center" onClick={() => setShowStoreModal(false)}><X className="h-5 w-5 text-muted-foreground" /></button>
             </div>
             <div className="flex-1 overflow-y-auto p-4 space-y-3">
               <div className="space-y-1">

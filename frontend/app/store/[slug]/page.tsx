@@ -186,13 +186,13 @@ export default function StorefrontPage() {
           ))}
           <div className="ml-auto flex items-center gap-1 shrink-0">
             <button
-              className={`p-1.5 rounded ${viewMode === "grid" ? "bg-gray-200" : "hover:bg-gray-100"}`}
+              className={`inline-flex items-center justify-center p-1.5 rounded ${viewMode === "grid" ? "bg-gray-200" : "hover:bg-gray-100"}`}
               onClick={() => setViewMode("grid")}
             >
               <LayoutGrid className="h-4 w-4" />
             </button>
             <button
-              className={`p-1.5 rounded ${viewMode === "list" ? "bg-gray-200" : "hover:bg-gray-100"}`}
+              className={`inline-flex items-center justify-center p-1.5 rounded ${viewMode === "list" ? "bg-gray-200" : "hover:bg-gray-100"}`}
               onClick={() => setViewMode("list")}
             >
               <List className="h-4 w-4" />
@@ -278,7 +278,7 @@ export default function StorefrontPage() {
               <h2 className="font-semibold">
                 {checkoutStep === "confirmed" ? "Order Confirmed" : checkoutStep === "details" ? "Your Details" : "Cart"}
               </h2>
-              <button onClick={() => setCartOpen(false)}><X className="h-5 w-5 text-gray-500" /></button>
+              <button className="inline-flex items-center justify-center" onClick={() => setCartOpen(false)}><X className="h-5 w-5 text-gray-500" /></button>
             </div>
 
             {checkoutStep === "confirmed" ? (
@@ -358,11 +358,11 @@ export default function StorefrontPage() {
                             <p className="text-sm font-medium line-clamp-1">{i.product.name}</p>
                             <p className="text-sm text-gray-500">{store.currency} {i.product.price.toFixed(2)}</p>
                             <div className="flex items-center gap-2 mt-1">
-                              <button className="p-1 rounded border" onClick={() => updateQty(i.product.id, -1)}>
+                              <button className="inline-flex items-center justify-center p-1 rounded border" onClick={() => updateQty(i.product.id, -1)}>
                                 <Minus className="h-3 w-3" />
                               </button>
                               <span className="text-sm w-5 text-center">{i.quantity}</span>
-                              <button className="p-1 rounded border" onClick={() => updateQty(i.product.id, 1)}>
+                              <button className="inline-flex items-center justify-center p-1 rounded border" onClick={() => updateQty(i.product.id, 1)}>
                                 <Plus className="h-3 w-3" />
                               </button>
                             </div>

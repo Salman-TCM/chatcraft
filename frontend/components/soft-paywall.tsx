@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { FiLock } from "react-icons/fi";
 import { useAppStore } from "@/store";
 import { Button } from "@/components/ui/button";
 import { APP_NAME } from "@/lib/constants";
@@ -48,20 +49,7 @@ export function SoftPaywall({
       {/* Overlay */}
       <div className="absolute inset-0 flex flex-col items-center justify-center gap-4 bg-background/70 backdrop-blur-[2px] p-6 text-center">
         <div className="rounded-full bg-muted p-3">
-          <svg
-            className="h-6 w-6 text-muted-foreground"
-            fill="none"
-            viewBox="0 0 24 24"
-            strokeWidth={1.5}
-            stroke="currentColor"
-            aria-hidden="true"
-          >
-            <path
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              d="M16.5 10.5V6.75a4.5 4.5 0 1 0-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 0 0 2.25-2.25v-6.75a2.25 2.25 0 0 0-2.25-2.25H6.75a2.25 2.25 0 0 0-2.25 2.25v6.75a2.25 2.25 0 0 0 2.25 2.25Z"
-            />
-          </svg>
+          <FiLock className="h-6 w-6 text-muted-foreground" aria-hidden="true" />
         </div>
 
         <div className="space-y-1">

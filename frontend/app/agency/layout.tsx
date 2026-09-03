@@ -42,7 +42,7 @@ export default function AgencyLayout({ children }: { children: React.ReactNode }
       >
         <div className="flex items-center justify-between h-14 px-4 border-b">
           <span className="font-bold text-sm">Agency Portal</span>
-          <button className="md:hidden" onClick={() => setMobileOpen(false)}>
+          <button className="inline-flex items-center justify-center md:hidden" onClick={() => setMobileOpen(false)}>
             <X className="h-4 w-4" />
           </button>
         </div>
@@ -80,7 +80,7 @@ export default function AgencyLayout({ children }: { children: React.ReactNode }
       {/* Main */}
       <div className="flex-1 flex flex-col md:ml-56 min-w-0">
         <header className="h-14 border-b bg-background flex items-center px-4 md:hidden">
-          <button onClick={() => setMobileOpen(true)}>
+          <button className="inline-flex items-center justify-center" onClick={() => setMobileOpen(true)}>
             <Menu className="h-5 w-5" />
           </button>
         </header>

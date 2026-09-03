@@ -364,7 +364,7 @@ ${f.fields.map((fd) => `  <!-- ${fd.label} -->\n  <input name="${fd.id}" type="$
           <div className="bg-background rounded-xl shadow-xl w-full max-w-2xl max-h-[90vh] flex flex-col">
             <div className="flex items-center justify-between p-4 border-b">
               <h2 className="font-semibold text-lg">{editing ? "Edit Form" : "New Form"}</h2>
-              <button onClick={() => setShowModal(false)}><X className="h-5 w-5 text-muted-foreground" /></button>
+              <button className="inline-flex items-center justify-center" onClick={() => setShowModal(false)}><X className="h-5 w-5 text-muted-foreground" /></button>
             </div>
             <div className="flex-1 overflow-y-auto p-4 space-y-5">
               {/* Basic info */}
@@ -419,13 +419,13 @@ ${f.fields.map((fd) => `  <!-- ${fd.label} -->\n  <input name="${fd.id}" type="$
                         <span className="text-xs text-muted-foreground">{FIELD_TYPES.find((t) => t.value === fd.type)?.label}</span>
                         {fd.required && <span className="text-xs text-rose-500">*</span>}
                         <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
-                          <button onClick={() => moveField(idx, -1)} disabled={idx === 0} className="p-0.5 rounded hover:bg-muted disabled:opacity-30">
+                          <button onClick={() => moveField(idx, -1)} disabled={idx === 0} className="inline-flex items-center justify-center p-0.5 rounded hover:bg-muted disabled:opacity-30">
                             <ChevronUp className="h-3.5 w-3.5" />
                           </button>
-                          <button onClick={() => moveField(idx, 1)} disabled={idx === fields.length - 1} className="p-0.5 rounded hover:bg-muted disabled:opacity-30">
+                          <button onClick={() => moveField(idx, 1)} disabled={idx === fields.length - 1} className="inline-flex items-center justify-center p-0.5 rounded hover:bg-muted disabled:opacity-30">
                             <ChevronDown className="h-3.5 w-3.5" />
                           </button>
-                          <button onClick={() => removeField(fd.id)} className="p-0.5 rounded hover:bg-red-100 text-destructive">
+                          <button onClick={() => removeField(fd.id)} className="inline-flex items-center justify-center p-0.5 rounded hover:bg-red-100 text-destructive">
                             <X className="h-3.5 w-3.5" />
                           </button>
                         </div>

@@ -982,7 +982,7 @@ export default function VoiceLabPage() {
                 <p className="text-sm font-semibold">Conversation Transcript</p>
                 <p className="text-[11px] text-muted-foreground font-mono">{selectedConv.id}</p>
               </div>
-              <button onClick={() => { setSelectedConv(null); setConvTranscript(null); }} className="text-muted-foreground hover:text-foreground">
+              <button onClick={() => { setSelectedConv(null); setConvTranscript(null); }} className="inline-flex items-center justify-center text-muted-foreground hover:text-foreground">
                 <X className="h-4 w-4" />
               </button>
             </div>

@@ -170,7 +170,7 @@ export default function ChatbotsPage() {
                 {/* Three-dot menu */}
                 <div className="relative shrink-0">
                   <button
-                    className="rounded p-1 hover:bg-muted"
+                    className="inline-flex items-center justify-center rounded p-1 hover:bg-muted"
                     onClick={() => setMenuOpen(menuOpen === bot.id ? null : bot.id)}
                   >
                     <MoreVertical className="h-4 w-4 text-muted-foreground" />

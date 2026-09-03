@@ -63,7 +63,7 @@ export default function ScanReceiptPage({ params }: { params: { serial: string }
       {/* Header */}
       <div className="flex items-center gap-3 px-4 py-4 border-b border-white/10">
         <Link href={`/pass/${serial}`}>
-          <button className="text-white/60 hover:text-white transition-colors">
+          <button className="inline-flex items-center justify-center text-white/60 hover:text-white transition-colors">
             <ArrowLeft className="h-5 w-5" />
           </button>
         </Link>

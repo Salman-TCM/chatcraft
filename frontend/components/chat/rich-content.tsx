@@ -86,7 +86,7 @@ function Carousel({ items, onPostback }: { items: CarouselItem[]; onPostback?: (
           <button
             onClick={() => setIndex((i) => Math.max(0, i - 1))}
             disabled={index === 0}
-            className="p-1 rounded hover:bg-muted disabled:opacity-30 transition-opacity"
+            className="inline-flex items-center justify-center p-1 rounded hover:bg-muted disabled:opacity-30 transition-opacity"
           >
             <ChevronLeft className="h-4 w-4" />
           </button>
@@ -96,7 +96,7 @@ function Carousel({ items, onPostback }: { items: CarouselItem[]; onPostback?: (
           <button
             onClick={() => setIndex((i) => Math.min(items.length - 1, i + 1))}
             disabled={index === items.length - 1}
-            className="p-1 rounded hover:bg-muted disabled:opacity-30 transition-opacity"
+            className="inline-flex items-center justify-center p-1 rounded hover:bg-muted disabled:opacity-30 transition-opacity"
           >
             <ChevronRight className="h-4 w-4" />
           </button>

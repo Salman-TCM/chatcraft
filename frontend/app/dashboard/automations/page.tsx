@@ -371,7 +371,7 @@ export default function AutomationsPage() {
             <form onSubmit={handleSubmit(onSubmit)}>
               <div className="flex items-center justify-between border-b px-5 py-4">
                 <h2 className="font-semibold">{editingId ? "Edit Automation" : "New Automation"}</h2>
-                <button type="button" onClick={() => setModalOpen(false)}><X className="h-4 w-4" /></button>
+                <button className="inline-flex items-center justify-center" type="button" onClick={() => setModalOpen(false)}><X className="h-4 w-4" /></button>
               </div>
               <div className="space-y-4 px-5 py-4 max-h-[70vh] overflow-y-auto">
                 <div className="space-y-1.5">

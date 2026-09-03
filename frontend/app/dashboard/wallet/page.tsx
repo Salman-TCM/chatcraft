@@ -281,7 +281,7 @@ function ImageUploadZone({ label, value, onChange, hint }: {
             <img src={value} alt="" className="h-9 max-w-[120px] object-contain rounded" />
             <span className="text-sm text-muted-foreground flex-1">Image ready</span>
             <button onClick={(e) => { e.stopPropagation(); onChange(""); }}
-              className="shrink-0 rounded-md p-1 hover:bg-muted text-muted-foreground hover:text-foreground transition-colors">
+              className="inline-flex items-center justify-center shrink-0 rounded-md p-1 hover:bg-muted text-muted-foreground hover:text-foreground transition-colors">
               <X className="h-4 w-4" />
             </button>
           </div>
@@ -364,7 +364,7 @@ function QrModal({ url, title, onClose }: { url: string; title: string; onClose:
       <div className="bg-background rounded-2xl shadow-2xl w-full max-w-xs">
         <div className="flex items-center justify-between px-4 py-3 border-b">
           <h2 className="font-semibold text-sm">{title}</h2>
-          <button onClick={onClose} className="rounded-md p-1 text-muted-foreground hover:text-foreground transition-colors">
+          <button onClick={onClose} className="inline-flex items-center justify-center rounded-md p-1 text-muted-foreground hover:text-foreground transition-colors">
             <X className="h-4 w-4" />
           </button>
         </div>
@@ -1291,7 +1291,7 @@ export default function WalletPage() {
             <div className="bg-background rounded-xl shadow-xl w-full max-w-sm">
               <div className="flex items-center justify-between p-4 border-b">
                 <h2 className="font-semibold">Issue new card</h2>
-                <button onClick={() => setShowIssueModal(false)} className="text-muted-foreground hover:text-foreground transition-colors">
+                <button onClick={() => setShowIssueModal(false)} className="inline-flex items-center justify-center text-muted-foreground hover:text-foreground transition-colors">
                   <X className="h-5 w-5" />
                 </button>
               </div>
@@ -1332,7 +1332,7 @@ export default function WalletPage() {
                   <h2 className="font-semibold">{actionCard.customer_name ?? "Guest"}</h2>
                   <p className="text-xs text-muted-foreground">{actionCard.serial}</p>
                 </div>
-                <button onClick={() => setActionCard(null)} className="text-muted-foreground hover:text-foreground transition-colors">
+                <button onClick={() => setActionCard(null)} className="inline-flex items-center justify-center text-muted-foreground hover:text-foreground transition-colors">
                   <X className="h-5 w-5" />
                 </button>
               </div>
@@ -1385,7 +1385,7 @@ export default function WalletPage() {
                   <Smartphone className="h-4 w-4" />
                   {pushTarget.type === "program" ? "Broadcast to all cards" : "Push notification"}
                 </h2>
-                <button onClick={() => setPushTarget(null)} className="text-muted-foreground hover:text-foreground transition-colors">
+                <button onClick={() => setPushTarget(null)} className="inline-flex items-center justify-center text-muted-foreground hover:text-foreground transition-colors">
                   <X className="h-5 w-5" />
                 </button>
               </div>
@@ -1536,7 +1536,7 @@ export default function WalletPage() {
                 {editingProgram ? `Edit "${editingProgram.name}"` : "Create wallet program"}
               </h2>
               <button onClick={() => setShowModal(false)}
-                className="rounded-md p-1 text-muted-foreground hover:text-foreground hover:bg-muted transition-colors shrink-0">
+                className="inline-flex items-center justify-center rounded-md p-1 text-muted-foreground hover:text-foreground hover:bg-muted transition-colors shrink-0">
                 <X className="h-5 w-5" />
               </button>
             </div>

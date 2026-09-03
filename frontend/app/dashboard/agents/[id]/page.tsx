@@ -915,7 +915,7 @@ Always prefer primary sources over aggregator sites.`}
                           <p className="truncate text-muted-foreground">{s.preview || "Empty session"}</p>
                           <p className="text-muted-foreground/50">{s.message_count} msgs · {s.tool_calls} tools · {new Date(s.created_at).toLocaleDateString()}</p>
                         </div>
-                        <button onClick={() => deleteMemorySession(s.id)} className="opacity-0 group-hover:opacity-100 text-red-400 hover:text-red-600">
+                        <button onClick={() => deleteMemorySession(s.id)} className="inline-flex items-center justify-center opacity-0 group-hover:opacity-100 text-red-400 hover:text-red-600">
                           <Trash2 className="h-3 w-3" />
                         </button>
                       </div>

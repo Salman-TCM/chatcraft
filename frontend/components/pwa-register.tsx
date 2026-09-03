@@ -59,7 +59,7 @@ export function PwaRegister() {
       </Button>
       <button
         onClick={handleDismiss}
-        className="p-1 rounded hover:bg-muted text-muted-foreground"
+        className="inline-flex items-center justify-center p-1 rounded hover:bg-muted text-muted-foreground"
         aria-label="Dismiss"
       >
         <X className="h-3.5 w-3.5" />

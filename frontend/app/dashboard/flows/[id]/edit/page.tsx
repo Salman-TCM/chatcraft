@@ -275,11 +275,11 @@ function NodeConfigPanel({
           <button
             title="Duplicate node"
             onClick={() => onCopy(node)}
-            className="rounded p-1 hover:bg-muted text-muted-foreground"
+            className="inline-flex items-center justify-center rounded p-1 hover:bg-muted text-muted-foreground"
           >
             <Copy className="h-3.5 w-3.5" />
           </button>
-          <button onClick={onClose} className="rounded p-1 hover:bg-muted">
+          <button onClick={onClose} className="inline-flex items-center justify-center rounded p-1 hover:bg-muted">
             <X className="h-4 w-4" />
           </button>
         </div>
@@ -909,7 +909,7 @@ function WebhookPanel({
         <span className="flex items-center gap-2 text-sm font-semibold">
           <Webhook className="h-4 w-4" /> Webhook
         </span>
-        <button onClick={onClose} className="rounded p-1 hover:bg-muted">
+        <button onClick={onClose} className="inline-flex items-center justify-center rounded p-1 hover:bg-muted">
           <X className="h-4 w-4" />
         </button>
       </div>
@@ -1018,7 +1018,7 @@ function RunHistoryPanel({
             <span className="rounded-full bg-muted px-1.5 py-0.5 text-[10px] font-medium">{total}</span>
           )}
         </span>
-        <button onClick={onClose} className="rounded p-1 hover:bg-muted">
+        <button onClick={onClose} className="inline-flex items-center justify-center rounded p-1 hover:bg-muted">
           <X className="h-4 w-4" />
         </button>
       </div>
@@ -1114,7 +1114,7 @@ function FlowSimulatorPanel({
         <span className="text-sm font-semibold flex items-center gap-1.5">
           <Zap className="h-4 w-4 text-primary" /> Simulator
         </span>
-        <button onClick={onClose} className="rounded p-1 hover:bg-muted">
+        <button onClick={onClose} className="inline-flex items-center justify-center rounded p-1 hover:bg-muted">
           <X className="h-4 w-4" />
         </button>
       </div>
