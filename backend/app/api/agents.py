@@ -1129,6 +1129,7 @@ _BUILTIN_TOOL_NAMES = frozenset(
         "convert_document",
         "calculate_deadline",
         "search_jobs",
+        "get_gold_price",
     }
 )
 
@@ -2482,6 +2483,33 @@ def _build_builtin_tools(tools_config: dict) -> list[dict]:
             }
         )
 
+    if tools_config.get("gold_price"):
+        defs.append(
+            {
+                "name": "get_gold_price",
+                "description": (
+                    "Get the live gold spot price in any currency and unit. "
+                    "Uses Yahoo Finance (no API key needed). "
+                    "Call this for price checks, daily updates, and change alerts. "
+                    "Supports any ISO 4217 currency: MYR, USD, GBP, EUR, SGD, AED, SAR, INR, PKR, AUD, CAD, etc."
+                ),
+                "input_schema": {
+                    "type": "object",
+                    "properties": {
+                        "currency": {
+                            "type": "string",
+                            "description": "ISO 4217 currency code, e.g. 'MYR', 'USD', 'GBP'. Default: USD",
+                        },
+                        "unit": {
+                            "type": "string",
+                            "enum": ["oz", "gram", "kg"],
+                            "description": "Price per troy oz (default), gram, or kilogram",
+                        },
+                    },
+                },
+            }
+        )
+
     if tools_config.get("document_conversion"):
         defs.append(
             {
@@ -2787,6 +2815,8 @@ async def _execute_tool_impl(name: str, inputs: dict, mcp_map: dict, ctx: dict |
             return _tool_calculate_deadline(inputs)
         elif name == "search_jobs":
             return await _tool_search_jobs(inputs)
+        elif name == "get_gold_price":
+            return await _tool_get_gold_price(inputs)
         return f"Unknown tool: {name}"
     except Exception as exc:
         return f"Tool error: {exc}"
@@ -3807,6 +3837,73 @@ async def _tool_convert_document(inputs: dict) -> str:
         )
     except Exception as exc:
         return f"Conversion succeeded but upload failed: {exc}"
+
+
+async def _tool_get_gold_price(inputs: dict) -> str:
+    """Live gold spot price in any currency via Yahoo Finance (free, no key)."""
+    from datetime import UTC, datetime as _dt
+
+    currency = (inputs.get("currency") or "USD").upper().strip()
+    unit = (inputs.get("unit") or "oz").lower()
+
+    _YF = "https://query1.finance.yahoo.com/v8/finance/chart"
+    _HDR = {"User-Agent": "Mozilla/5.0"}
+
+    # ── 1. Gold spot in USD ───────────────────────────────────────────────────
+    try:
+        async with httpx.AsyncClient(timeout=10, headers=_HDR) as c:
+            r = await c.get(f"{_YF}/GC=F")
+        meta = r.json()["chart"]["result"][0]["meta"]
+        usd_oz = float(meta["regularMarketPrice"])
+        prev_usd_oz = float(meta.get("chartPreviousClose") or meta.get("previousClose") or usd_oz)
+        mkt_time = meta.get("regularMarketTime")
+        ts = _dt.fromtimestamp(mkt_time, tz=UTC).strftime("%d %b %Y %H:%M UTC") if mkt_time else _dt.now(UTC).strftime("%d %b %Y %H:%M UTC")
+    except Exception as exc:
+        return f"Error fetching gold price: {exc}"
+
+    # ── 2. FX rate USD → requested currency ──────────────────────────────────
+    fx = 1.0
+    fx_label = ""
+    if currency != "USD":
+        try:
+            async with httpx.AsyncClient(timeout=10, headers=_HDR) as c:
+                r = await c.get(f"{_YF}/USD{currency}=X")
+            fx_meta = r.json()["chart"]["result"][0]["meta"]
+            fx = float(fx_meta["regularMarketPrice"])
+            fx_label = f"\n_FX rate: 1 USD = {fx:.4f} {currency}_"
+        except Exception:
+            return (
+                f"Gold spot (USD): ${usd_oz:,.2f}/oz — "
+                f"could not fetch USD/{currency} rate. Check the currency code."
+            )
+
+    # ── 3. Unit conversion ────────────────────────────────────────────────────
+    _UNITS = {"oz": (1.0, "troy oz"), "gram": (1 / 31.1035, "gram"), "kg": (1000 / 31.1035, "kg")}
+    factor, unit_label = _UNITS.get(unit, (1.0, "troy oz"))
+
+    price = usd_oz * fx * factor
+    prev = prev_usd_oz * fx * factor
+    chg = price - prev
+    pct = (chg / prev * 100) if prev else 0
+    arrow = "▲" if chg >= 0 else "▼"
+
+    _COUNTRIES = {
+        "MYR": "Malaysia", "SGD": "Singapore", "IDR": "Indonesia",
+        "GBP": "United Kingdom", "EUR": "Eurozone", "AUD": "Australia",
+        "CAD": "Canada", "AED": "UAE", "SAR": "Saudi Arabia",
+        "INR": "India", "PKR": "Pakistan", "BDT": "Bangladesh",
+        "THB": "Thailand", "PHP": "Philippines", "JPY": "Japan",
+        "CNY": "China", "HKD": "Hong Kong", "KWD": "Kuwait",
+    }
+    country = _COUNTRIES.get(currency, currency)
+
+    return (
+        f"**Gold Price — {country} ({currency})** · {ts}\n\n"
+        f"💰 **{price:,.2f} {currency}** per {unit_label}\n"
+        f"{arrow} {chg:+,.2f} {currency} ({pct:+.2f}%) vs previous close\n\n"
+        f"_Spot price (24K) · USD/oz: ${usd_oz:,.2f}_"
+        f"{fx_label}"
+    )
 
 
 def _tool_calculate_deadline(inputs: dict) -> str:
