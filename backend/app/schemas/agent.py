@@ -27,6 +27,13 @@ class AgentToolsConfig(BaseModel):
     # Exposes list_products/buy_product for the CommerceStore linked to this
     # agent via CommerceStore.agent_id — no-op if no store is linked.
     commerce: bool = False
+    datetime: bool = False
+    image_generation: bool = False
+    document_conversion: bool = False
+    deadline_calculator: bool = False
+    job_search: bool = False
+    gold_price: bool = False
+    product_scraper: bool = False
 
 
 _WEBHOOK_URL_RE = re.compile(r"^https?://[^\s]+$")

@@ -7,7 +7,7 @@ import {
   ArrowLeft, Save, Loader2, Check, Settings,
   Brain, Zap, Terminal, Webhook, Plug, ChevronDown,
   ChevronUp, RefreshCw, Trash2, Plus, ExternalLink,
-  AlertCircle, Globe, Wrench, Sparkles, BookOpen, MessageSquare, Palette,
+  AlertCircle, Globe, Wrench, Sparkles, BookOpen, MessageSquare, Palette, X, Clock,
 } from "lucide-react";
 import { TestChatDrawer } from "./TestChatDrawer";
 import { Button } from "@/components/ui/button";
@@ -65,16 +65,23 @@ const SELF_HOSTED_PREFIX = "self-hosted/";
 const SELF_HOSTED_OPTION = "__self_hosted__";
 
 const TOOLS = [
-  { key: "web_search",   label: "Web Search",    description: "Search the internet for real-time information",  icon: "🔍" },
-  { key: "browser",      label: "Browser",       description: "Visit and interact with web pages",              icon: "🌐" },
-  { key: "code",         label: "Code Execution",description: "Run Python code and scripts",                    icon: "⚙️" },
-  { key: "http",         label: "HTTP Requests", description: "Call external REST APIs",                        icon: "🔗" },
-  { key: "sheets",       label: "Google Sheets", description: "Read and write spreadsheets",                    icon: "📊" },
-  { key: "email",        label: "Email",         description: "Compose and send emails",                        icon: "✉️" },
-  { key: "sms",          label: "SMS",           description: "Send text messages via Twilio",                  icon: "💬" },
-  { key: "verification", label: "Verification",  description: "Send and verify OTP codes",                      icon: "🔐" },
-  { key: "search_kb",    label: "Knowledge Base",description: "Search this agent's uploaded documents",         icon: "📚" },
-  { key: "agent_builder",label: "Agent Builder", description: "Spawn and manage other agents",                  icon: "🤖" },
+  { key: "web_search",       label: "Web Search",       description: "Search the internet for real-time information",  icon: "🔍" },
+  { key: "browser",          label: "Browser",          description: "Visit and interact with web pages",              icon: "🌐" },
+  { key: "code",             label: "Code Execution",   description: "Run Python code and scripts",                    icon: "⚙️" },
+  { key: "http",             label: "HTTP Requests",    description: "Call external REST APIs",                        icon: "🔗" },
+  { key: "sheets",           label: "Google Sheets",    description: "Read and write spreadsheets",                    icon: "📊" },
+  { key: "email",            label: "Email",            description: "Compose and send emails",                        icon: "✉️" },
+  { key: "sms",              label: "SMS",              description: "Send text messages via Twilio",                  icon: "💬" },
+  { key: "verification",     label: "Verification",     description: "Send and verify OTP codes",                      icon: "🔐" },
+  { key: "search_kb",        label: "Knowledge Base",   description: "Search this agent's uploaded documents",         icon: "📚" },
+  { key: "agent_builder",    label: "Agent Builder",    description: "Spawn and manage other agents",                  icon: "🤖" },
+  { key: "datetime",         label: "Date & Time",      description: "Get the current date and time in any timezone",  icon: "🕐" },
+  { key: "image_generation",    label: "Image Generation",   description: "Generate images with DALL-E (requires OpenAI key)",                 icon: "🎨" },
+  { key: "document_conversion", label: "Doc → PDF",          description: "Convert DOCX/PPTX/XLSX/HTML to PDF via a shared URL",              icon: "📄" },
+  { key: "deadline_calculator", label: "Deadline Calculator",description: "Calculate court/business deadlines — calendar, business, or court days", icon: "⚖️" },
+  { key: "job_search",          label: "Job Search",         description: "Search Remotive, The Muse, and web for matching job listings",        icon: "💼" },
+  { key: "gold_price",          label: "Gold Price",         description: "Live gold spot price in any currency via Yahoo Finance (no key needed)", icon: "🥇" },
+  { key: "product_scraper",     label: "Product Scraper",    description: "Scrape any e-commerce site (Shopify, WooCommerce, Magento) → CSV/XLSX",  icon: "🛒" },
 ];
 
 // ─── Sub-components ───────────────────────────────────────────────────────────
@@ -235,6 +242,23 @@ export default function ConfigureAgentPage() {
   const [providers, setProviders]         = useState<ProviderModels[]>([]);
   const [modelsLoading, setModelsLoading] = useState(true);
 
+  // ── Schedules ──────────────────────────────────────────────────────────────
+  interface AgentSchedule {
+    id: string; name: string; trigger_prompt: string;
+    hour: number; minute: number; days_of_week: string;
+    notify_email: string | null; notify_phone: string | null;
+    alert_pct_threshold: number | null; is_active: boolean;
+    last_run_at: string | null; last_result_preview: string | null;
+  }
+  const [schedules, setSchedules] = useState<AgentSchedule[]>([]);
+  const [schedulesLoading, setSchedulesLoading] = useState(false);
+  const [scheduleForm, setScheduleForm] = useState({
+    name: "", trigger_prompt: "", hour: 8, minute: 0,
+    days_of_week: "*", notify_email: "", notify_phone: "",
+    alert_pct_threshold: "" as string | number,
+  });
+  const [scheduleSaving, setScheduleSaving] = useState(false);
+
   const [form, setForm] = useState({
     name: "",
     description: "",
@@ -307,6 +331,7 @@ export default function ConfigureAgentPage() {
 
   useEffect(() => {
     Promise.all([loadAgent(), loadMcpServers(), loadModels()]).finally(() => setLoading(false));
+    loadSchedules();
   }, [loadAgent, loadMcpServers, loadModels]);
 
   const handleSave = async () => {
@@ -324,6 +349,7 @@ export default function ConfigureAgentPage() {
         webhook_url: form.webhook_url.trim() || null,
         welcome_message: form.welcome_message.trim() || null,
         suggestions_enabled: form.suggestions_enabled,
+        welcome_suggestions: form.welcome_suggestions,
         tools: form.tools,
         primary_colour: form.primary_colour || "#6366f1",
         logo_url: form.logo_url.trim() || null,
@@ -366,6 +392,52 @@ export default function ConfigureAgentPage() {
       setMcpTools((t) => ({ ...t, [serverId]: res.data.data || [] }));
     } catch {}
     setLoadingMcpId(null);
+  };
+
+  const loadSchedules = async () => {
+    setSchedulesLoading(true);
+    try {
+      const res = await apiClient.get(`/api/v1/agents/${id}/schedules`);
+      setSchedules(res.data.data || []);
+    } catch {} finally { setSchedulesLoading(false); }
+  };
+
+  const saveSchedule = async () => {
+    if (!scheduleForm.name || !scheduleForm.trigger_prompt) return;
+    if (!scheduleForm.notify_email && !scheduleForm.notify_phone) {
+      alert("Add at least one notification channel (email or phone)."); return;
+    }
+    setScheduleSaving(true);
+    try {
+      await apiClient.post(`/api/v1/agents/${id}/schedules`, {
+        ...scheduleForm,
+        hour: Number(scheduleForm.hour),
+        minute: Number(scheduleForm.minute),
+        notify_email: scheduleForm.notify_email || null,
+        notify_phone: scheduleForm.notify_phone || null,
+        alert_pct_threshold: scheduleForm.alert_pct_threshold !== "" ? Number(scheduleForm.alert_pct_threshold) : null,
+      });
+      setScheduleForm({ name: "", trigger_prompt: "", hour: 8, minute: 0, days_of_week: "*", notify_email: "", notify_phone: "", alert_pct_threshold: "" });
+      await loadSchedules();
+    } catch (e: any) {
+      alert(e?.response?.data?.detail || "Failed to save schedule.");
+    } finally { setScheduleSaving(false); }
+  };
+
+  const deleteSchedule = async (scheduleId: string) => {
+    if (!confirm("Delete this schedule?")) return;
+    await apiClient.delete(`/api/v1/agents/${id}/schedules/${scheduleId}`);
+    await loadSchedules();
+  };
+
+  const toggleSchedule = async (s: AgentSchedule) => {
+    await apiClient.put(`/api/v1/agents/${id}/schedules/${s.id}`, { is_active: !s.is_active });
+    await loadSchedules();
+  };
+
+  const runScheduleNow = async (scheduleId: string) => {
+    await apiClient.post(`/api/v1/agents/${id}/schedules/${scheduleId}/run`);
+    alert("Triggered! Result will be delivered to the configured channels.");
   };
 
   if (loading) {
@@ -443,6 +515,7 @@ export default function ConfigureAgentPage() {
                 badge: enabledCount > 0 ? enabledCount : null },
               { value: "mcp",      icon: <Plug     className="h-3.5 w-3.5 shrink-0" />, label: "MCP",
                 badge: activeMcpCount > 0 ? activeMcpCount : null, badgeColor: "bg-emerald-500" },
+              { value: "schedule", icon: <Clock    className="h-3.5 w-3.5 shrink-0" />, label: "Schedule" },
               { value: "design",   icon: <Palette  className="h-3.5 w-3.5 shrink-0" />, label: "Design & Branding" },
               { value: "advanced", icon: <Webhook  className="h-3.5 w-3.5 shrink-0" />, label: "Advanced" },
             ].map(tab => (
@@ -540,6 +613,49 @@ export default function ConfigureAgentPage() {
                   checked={form.suggestions_enabled}
                   onCheckedChange={(v) => set("suggestions_enabled", v)}
                 />
+              </div>
+
+              <div className="space-y-2">
+                <Label>Welcome Suggestion Chips (up to 4)</Label>
+                <p className="text-xs text-muted-foreground">
+                  Quick-tap buttons shown below the welcome message. Leave empty to skip.
+                </p>
+                <div className="space-y-2">
+                  {(form.welcome_suggestions.length < 4 ? [...form.welcome_suggestions, ""] : form.welcome_suggestions).map((s, i) => (
+                    <div key={i} className="flex items-center gap-2">
+                      <Input
+                        value={s}
+                        onChange={(e) => {
+                          const next = [...form.welcome_suggestions];
+                          if (e.target.value) {
+                            next[i] = e.target.value;
+                          } else {
+                            next.splice(i, 1);
+                          }
+                          set("welcome_suggestions", next.slice(0, 4));
+                        }}
+                        placeholder={`Suggestion ${i + 1}…`}
+                        maxLength={80}
+                        className="text-sm flex-1"
+                      />
+                      {i < form.welcome_suggestions.length && (
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon"
+                          className="h-8 w-8 shrink-0"
+                          onClick={() => {
+                            const next = [...form.welcome_suggestions];
+                            next.splice(i, 1);
+                            set("welcome_suggestions", next);
+                          }}
+                        >
+                          <X className="h-3.5 w-3.5" />
+                        </Button>
+                      )}
+                    </div>
+                  ))}
+                </div>
               </div>
 
               <div className="space-y-1.5">
@@ -937,6 +1053,104 @@ export default function ConfigureAgentPage() {
                 </div>
               </div>
             </div>
+          </div>}
+
+          {/* ── Schedule ────────────────────────────────────────────────────── */}
+          {activeTab === "schedule" && <div className="space-y-5">
+            <SectionHeader
+              icon={<Clock className="h-4 w-4" />}
+              title="Automated Schedules"
+              description="Run this agent automatically on a schedule and deliver the result via email or SMS"
+            />
+
+            {/* Existing schedules */}
+            {schedulesLoading ? (
+              <div className="flex items-center gap-2 text-sm text-muted-foreground"><Loader2 className="h-4 w-4 animate-spin" />Loading…</div>
+            ) : schedules.length > 0 && (
+              <div className="space-y-3">
+                {schedules.map(s => (
+                  <div key={s.id} className={`rounded-xl border p-4 space-y-2 ${s.is_active ? "border-primary/30 bg-primary/5" : "border-border bg-muted/20"}`}>
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-semibold truncate">{s.name}</p>
+                        <p className="text-xs text-muted-foreground mt-0.5">
+                          {String(s.hour).padStart(2,"0")}:{String(s.minute).padStart(2,"0")} UTC
+                          {s.days_of_week !== "*" ? ` · Days: ${s.days_of_week}` : " · Every day"}
+                          {s.notify_email ? ` · 📧 ${s.notify_email}` : ""}
+                          {s.notify_phone ? ` · 📱 ${s.notify_phone}` : ""}
+                        </p>
+                        {s.last_run_at && (
+                          <p className="text-[11px] text-muted-foreground mt-1">
+                            Last run: {new Date(s.last_run_at).toLocaleString()}
+                            {s.last_result_preview && ` · "${s.last_result_preview.slice(0,60)}…"`}
+                          </p>
+                        )}
+                      </div>
+                      <div className="flex items-center gap-1 shrink-0">
+                        <Button size="sm" variant="ghost" className="h-7 text-xs" onClick={() => runScheduleNow(s.id)}>Run now</Button>
+                        <Switch checked={s.is_active} onCheckedChange={() => toggleSchedule(s)} />
+                        <Button size="icon" variant="ghost" className="h-7 w-7 text-destructive" onClick={() => deleteSchedule(s.id)}><Trash2 className="h-3.5 w-3.5" /></Button>
+                      </div>
+                    </div>
+                    <p className="text-xs font-mono bg-background rounded px-2 py-1 text-muted-foreground truncate">{s.trigger_prompt}</p>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* Add new schedule */}
+            <Card>
+              <CardHeader className="pb-3">
+                <CardTitle className="text-sm flex items-center gap-1.5"><Plus className="h-4 w-4" />Add Schedule</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                <div className="space-y-1.5">
+                  <Label className="text-xs">Schedule Name</Label>
+                  <Input value={scheduleForm.name} onChange={e => setScheduleForm(p=>({...p,name:e.target.value}))} placeholder="Daily Gold Price Update" className="text-sm" />
+                </div>
+                <div className="space-y-1.5">
+                  <Label className="text-xs">Trigger Prompt</Label>
+                  <Textarea value={scheduleForm.trigger_prompt} onChange={e => setScheduleForm(p=>({...p,trigger_prompt:e.target.value}))} placeholder="Get today's gold price in MYR and USD. Compare with yesterday and highlight if price rose or fell by more than 1%." rows={3} className="text-sm resize-none" />
+                  <p className="text-[11px] text-muted-foreground">This is sent to the agent each time the schedule fires.</p>
+                </div>
+                <div className="grid grid-cols-3 gap-3">
+                  <div className="space-y-1.5">
+                    <Label className="text-xs">Hour (UTC)</Label>
+                    <Input type="number" min={0} max={23} value={scheduleForm.hour} onChange={e=>setScheduleForm(p=>({...p,hour:Number(e.target.value)}))} className="text-sm" />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label className="text-xs">Minute</Label>
+                    <Input type="number" min={0} max={59} value={scheduleForm.minute} onChange={e=>setScheduleForm(p=>({...p,minute:Number(e.target.value)}))} className="text-sm" />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label className="text-xs">Days</Label>
+                    <select value={scheduleForm.days_of_week} onChange={e=>setScheduleForm(p=>({...p,days_of_week:e.target.value}))} className="w-full rounded-md border bg-background px-2 py-2 text-sm">
+                      <option value="*">Every day</option>
+                      <option value="1,2,3,4,5">Weekdays (Mon–Fri)</option>
+                      <option value="0,6">Weekends</option>
+                      <option value="1">Monday only</option>
+                    </select>
+                  </div>
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-1.5">
+                    <Label className="text-xs">Notify Email</Label>
+                    <Input value={scheduleForm.notify_email} onChange={e=>setScheduleForm(p=>({...p,notify_email:e.target.value}))} placeholder="you@example.com" type="email" className="text-sm" />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label className="text-xs">Notify Phone (SMS)</Label>
+                    <Input value={scheduleForm.notify_phone} onChange={e=>setScheduleForm(p=>({...p,notify_phone:e.target.value}))} placeholder="+60123456789" className="text-sm" />
+                  </div>
+                </div>
+                <div className="space-y-1.5">
+                  <Label className="text-xs">Price Alert Threshold % (optional)</Label>
+                  <Input type="number" min={0.1} step={0.1} value={scheduleForm.alert_pct_threshold} onChange={e=>setScheduleForm(p=>({...p,alert_pct_threshold:e.target.value}))} placeholder="e.g. 1.5 — send alert only if price changes ≥1.5%" className="text-sm" />
+                </div>
+                <Button onClick={saveSchedule} disabled={scheduleSaving} size="sm">
+                  {scheduleSaving ? <><Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin"/>Saving…</> : <><Plus className="h-3.5 w-3.5 mr-1.5"/>Add Schedule</>}
+                </Button>
+              </CardContent>
+            </Card>
           </div>}
 
           {/* ── Advanced ────────────────────────────────────────────────────── */}

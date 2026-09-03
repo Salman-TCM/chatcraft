@@ -16,6 +16,7 @@ from app.api.admin import router as admin_router
 from app.api.agent_functions import router as agent_functions_router
 from app.api.agent_integrations import router as agent_integrations_router
 from app.api.agent_kb import router as agent_kb_router
+from app.api.agent_schedules import router as agent_schedules_router
 from app.api.agents import public_router as agents_public_router
 from app.api.agents import router as agents_router
 from app.api.analytics import router as analytics_router
@@ -141,6 +142,7 @@ app.include_router(forms_public_router)
 app.include_router(landing_pages_router)
 app.include_router(commerce_router)
 app.include_router(agent_functions_router)
+app.include_router(agent_schedules_router)
 app.include_router(wallet_router)
 app.include_router(wallet_mgmt_router)
 app.include_router(broadcast_router)

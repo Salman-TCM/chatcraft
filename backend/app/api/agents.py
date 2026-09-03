@@ -361,6 +361,121 @@ async def public_agent_chat(
     )
 
 
+# ─── Public attachment extraction (no auth) ───────────────────────────────────
+
+
+@public_router.post("/{share_token}/attachments/extract")
+@limiter.limit("10/minute")
+async def public_extract_attachment(
+    share_token: str, request: Request, db: DBSession, file: UploadFile
+):
+    """Extract text from an uploaded file for use in a public agent chat.
+    Rate-limited and scoped to agents with sharing enabled."""
+    await _get_shared_agent(share_token, db)
+
+    data = await file.read()
+    if not data:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={"success": False, "error": "Empty file", "code": "EMPTY_FILE"},
+        )
+    if len(data) > _ATTACHMENT_MAX_BYTES:
+        raise HTTPException(
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            detail={"success": False, "error": "File exceeds 10 MB", "code": "FILE_TOO_LARGE"},
+        )
+
+    doc_type = _resolve_attachment_doc_type(file.content_type, file.filename)
+    if not doc_type:
+        raise HTTPException(
+            status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
+            detail={
+                "success": False,
+                "error": "Only PDF, DOCX, and TXT files are supported",
+                "code": "UNSUPPORTED_TYPE",
+            },
+        )
+
+    try:
+        if doc_type == "pdf":
+            text = extract_pdf(data)
+        elif doc_type == "docx":
+            text = extract_docx(data)
+        else:
+            text = extract_txt(data)
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={"success": False, "error": f"Could not read file: {exc}", "code": "EXTRACT_FAILED"},
+        ) from exc
+
+    text, truncated = _truncate_attachment_text(text)
+    return {
+        "success": True,
+        "data": {"filename": file.filename or "attachment", "text": text, "truncated": truncated},
+    }
+
+
+# ─── Document conversion endpoints ────────────────────────────────────────────
+
+
+@router.post("/{agent_id}/convert")
+async def convert_agent_document(
+    agent_id: uuid.UUID,
+    user: CurrentUser,
+    db: DBSession,
+    file: UploadFile,
+):
+    """Convert an uploaded Office document to PDF and stream it back."""
+    from fastapi.responses import Response as _Response
+    from app.services.convert import ConversionError, convert_to_pdf
+
+    await _get_owned_agent(agent_id, user.id, db)
+    data = await file.read()
+    if not data:
+        raise HTTPException(status_code=400, detail="Empty file")
+    if len(data) > 50 * 1024 * 1024:
+        raise HTTPException(status_code=413, detail="File exceeds 50 MB")
+    try:
+        pdf_bytes, pdf_name = await convert_to_pdf(data, file.filename or "document.docx")
+    except ConversionError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+    return _Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="{pdf_name}"'},
+    )
+
+
+@public_router.post("/{share_token}/convert")
+@limiter.limit("5/minute")
+async def public_convert_document(
+    share_token: str,
+    request: Request,
+    db: DBSession,
+    file: UploadFile,
+):
+    """Convert an uploaded Office document to PDF on a public share page."""
+    from fastapi.responses import Response as _Response
+    from app.services.convert import ConversionError, convert_to_pdf
+
+    await _get_shared_agent(share_token, db)
+    data = await file.read()
+    if not data:
+        raise HTTPException(status_code=400, detail="Empty file")
+    if len(data) > 50 * 1024 * 1024:
+        raise HTTPException(status_code=413, detail="File exceeds 50 MB")
+    try:
+        pdf_bytes, pdf_name = await convert_to_pdf(data, file.filename or "document.docx")
+    except ConversionError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+    return _Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="{pdf_name}"'},
+    )
+
+
 # ─── Memory endpoints ─────────────────────────────────────────────────────────
 
 
@@ -1009,6 +1124,14 @@ _BUILTIN_TOOL_NAMES = frozenset(
         "create_agent",
         "search_kb",
         "calculate_faraid",
+        "get_current_datetime",
+        "generate_image",
+        "convert_document",
+        "calculate_deadline",
+        "search_jobs",
+        "get_gold_price",
+        "scrape_products",
+        "export_products_file",
     }
 )
 
@@ -2230,6 +2353,268 @@ def _build_builtin_tools(tools_config: dict) -> list[dict]:
             }
         )
 
+    if tools_config.get("datetime"):
+        defs.append(
+            {
+                "name": "get_current_datetime",
+                "description": (
+                    "Get the current date and time. Use this whenever the user asks about "
+                    "the current time, date, day of week, or any time-sensitive question."
+                ),
+                "input_schema": {
+                    "type": "object",
+                    "properties": {
+                        "timezone": {
+                            "type": "string",
+                            "description": (
+                                "IANA timezone name (e.g. 'Asia/Kuala_Lumpur', "
+                                "'America/New_York', 'Europe/London'). Defaults to UTC."
+                            ),
+                        }
+                    },
+                },
+            }
+        )
+
+    if tools_config.get("image_generation"):
+        defs.append(
+            {
+                "name": "generate_image",
+                "description": (
+                    "Generate an image from a text description using DALL-E. "
+                    "Returns a URL to the generated image. "
+                    "Always display the image inline using markdown: ![description](url)"
+                ),
+                "input_schema": {
+                    "type": "object",
+                    "properties": {
+                        "prompt": {
+                            "type": "string",
+                            "description": "Detailed description of the image to generate",
+                        },
+                        "size": {
+                            "type": "string",
+                            "enum": ["1024x1024", "1792x1024", "1024x1792"],
+                            "description": "Image dimensions. Default: 1024x1024 (square)",
+                        },
+                        "quality": {
+                            "type": "string",
+                            "enum": ["standard", "hd"],
+                            "description": "Image quality. HD costs more tokens.",
+                        },
+                    },
+                    "required": ["prompt"],
+                },
+            }
+        )
+
+    if tools_config.get("deadline_calculator"):
+        defs.append(
+            {
+                "name": "calculate_deadline",
+                "description": (
+                    "Calculate a deadline date by adding a number of calendar, business, "
+                    "or court days to a start date. Accounts for weekends and common public "
+                    "holidays. Use this for any date arithmetic: court filing deadlines, "
+                    "contract notice periods, statutory time limits, project milestones."
+                ),
+                "input_schema": {
+                    "type": "object",
+                    "properties": {
+                        "start_date": {
+                            "type": "string",
+                            "description": "Start date in ISO format (YYYY-MM-DD), e.g. '2025-03-15'",
+                        },
+                        "days": {
+                            "type": "integer",
+                            "description": "Number of days to add (negative to subtract)",
+                        },
+                        "day_type": {
+                            "type": "string",
+                            "enum": ["calendar", "business", "court"],
+                            "description": (
+                                "calendar: all days. "
+                                "business: Mon–Fri only. "
+                                "court: Mon–Fri excluding common public holidays."
+                            ),
+                        },
+                        "jurisdiction": {
+                            "type": "string",
+                            "description": "Optional country/jurisdiction for holiday lookup, e.g. 'US', 'UK', 'MY'",
+                        },
+                    },
+                    "required": ["start_date", "days"],
+                },
+            }
+        )
+
+    if tools_config.get("job_search"):
+        defs.append(
+            {
+                "name": "search_jobs",
+                "description": (
+                    "Search for job listings across multiple job boards (Remotive for remote "
+                    "roles, The Muse for on-site/hybrid, and web search as fallback). "
+                    "Returns a list of matching roles with title, company, location, salary "
+                    "range (where available), and apply URL. "
+                    "Use this when the user asks to find jobs matching their skills or CV."
+                ),
+                "input_schema": {
+                    "type": "object",
+                    "properties": {
+                        "query": {
+                            "type": "string",
+                            "description": "Job title, skills, or keywords (e.g. 'senior Python engineer', 'family law solicitor')",
+                        },
+                        "location": {
+                            "type": "string",
+                            "description": "City, country, or 'remote' (optional)",
+                        },
+                        "job_type": {
+                            "type": "string",
+                            "enum": ["any", "remote", "full_time", "part_time", "contract"],
+                            "description": "Filter by employment type",
+                        },
+                        "limit": {
+                            "type": "integer",
+                            "description": "Max results to return (default 10, max 20)",
+                        },
+                    },
+                    "required": ["query"],
+                },
+            }
+        )
+
+    if tools_config.get("product_scraper"):
+        defs.append(
+            {
+                "name": "scrape_products",
+                "description": (
+                    "Scrape a product listing page from any e-commerce website and return a "
+                    "downloadable CSV or XLSX file. Works on Shopify, WooCommerce, Magento, "
+                    "BigCommerce, and custom stores. Auto-detects product cards using "
+                    "JSON-LD structured data, Shopify product JSON, and common CSS patterns. "
+                    "Use this when the user gives a shop/category URL and wants a product file."
+                ),
+                "input_schema": {
+                    "type": "object",
+                    "properties": {
+                        "url": {
+                            "type": "string",
+                            "description": "URL of the product listing/category page to scrape",
+                        },
+                        "max_pages": {
+                            "type": "integer",
+                            "description": "Number of pagination pages to scrape (default 1, max 10)",
+                        },
+                        "columns": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "description": (
+                                "Desired output columns in order. Examples: "
+                                "['Name','Price','Description','Image URL','Stock','SKU','Category','URL']. "
+                                "If omitted, all detected fields are included."
+                            ),
+                        },
+                        "output_format": {
+                            "type": "string",
+                            "enum": ["csv", "xlsx"],
+                            "description": "File format — csv (default) or xlsx",
+                        },
+                    },
+                    "required": ["url"],
+                },
+            }
+        )
+        defs.append(
+            {
+                "name": "export_products_file",
+                "description": (
+                    "Convert a list of products (as JSON) into a downloadable CSV or XLSX file "
+                    "using the user's own column structure. Use this after you have already "
+                    "gathered or extracted the product data yourself (e.g. from browse_url)."
+                ),
+                "input_schema": {
+                    "type": "object",
+                    "properties": {
+                        "products_json": {
+                            "type": "string",
+                            "description": "JSON array string of product objects, e.g. '[{\"Name\":\"...\",\"Price\":\"...\"}]'",
+                        },
+                        "columns": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "description": "Column names to include (in order). Must match keys in products_json.",
+                        },
+                        "filename": {
+                            "type": "string",
+                            "description": "Output filename without extension, e.g. 'laptop_products'",
+                        },
+                        "output_format": {
+                            "type": "string",
+                            "enum": ["csv", "xlsx"],
+                            "description": "File format — csv (default) or xlsx",
+                        },
+                    },
+                    "required": ["products_json"],
+                },
+            }
+        )
+
+    if tools_config.get("gold_price"):
+        defs.append(
+            {
+                "name": "get_gold_price",
+                "description": (
+                    "Get the live gold spot price in any currency and unit. "
+                    "Uses Yahoo Finance (no API key needed). "
+                    "Call this for price checks, daily updates, and change alerts. "
+                    "Supports any ISO 4217 currency: MYR, USD, GBP, EUR, SGD, AED, SAR, INR, PKR, AUD, CAD, etc."
+                ),
+                "input_schema": {
+                    "type": "object",
+                    "properties": {
+                        "currency": {
+                            "type": "string",
+                            "description": "ISO 4217 currency code, e.g. 'MYR', 'USD', 'GBP'. Default: USD",
+                        },
+                        "unit": {
+                            "type": "string",
+                            "enum": ["oz", "gram", "kg"],
+                            "description": "Price per troy oz (default), gram, or kilogram",
+                        },
+                    },
+                },
+            }
+        )
+
+    if tools_config.get("document_conversion"):
+        defs.append(
+            {
+                "name": "convert_document",
+                "description": (
+                    "Download a document from a URL and convert it to PDF. "
+                    "Supports DOCX, DOC, PPTX, XLSX, ODS, ODT, RTF, HTML, and TXT. "
+                    "Returns a download URL for the converted PDF. "
+                    "Use this when the user asks to convert a file they've shared via URL."
+                ),
+                "input_schema": {
+                    "type": "object",
+                    "properties": {
+                        "url": {
+                            "type": "string",
+                            "description": "Public URL of the document to convert",
+                        },
+                        "filename": {
+                            "type": "string",
+                            "description": "Original filename (used to detect the input format, e.g. 'report.docx')",
+                        },
+                    },
+                    "required": ["url", "filename"],
+                },
+            }
+        )
+
     if tools_config.get("faraid"):
         defs.append(
             {
@@ -2498,6 +2883,22 @@ async def _execute_tool_impl(name: str, inputs: dict, mcp_map: dict, ctx: dict |
             return await _tool_search_kb(inputs, ctx or {})
         elif name == "calculate_faraid":
             return _tool_calculate_faraid(inputs)
+        elif name == "get_current_datetime":
+            return _tool_get_current_datetime(inputs)
+        elif name == "generate_image":
+            return await _tool_generate_image(inputs, ctx or {})
+        elif name == "convert_document":
+            return await _tool_convert_document(inputs)
+        elif name == "calculate_deadline":
+            return _tool_calculate_deadline(inputs)
+        elif name == "search_jobs":
+            return await _tool_search_jobs(inputs)
+        elif name == "get_gold_price":
+            return await _tool_get_gold_price(inputs)
+        elif name == "scrape_products":
+            return await _tool_scrape_products(inputs)
+        elif name == "export_products_file":
+            return await _tool_export_products_file(inputs)
         return f"Unknown tool: {name}"
     except Exception as exc:
         return f"Tool error: {exc}"
@@ -3406,6 +3807,746 @@ async def _tool_search_kb(inputs: dict, ctx: dict) -> str:
             f"[{i}] {c.document_name} (similarity {c.similarity:.2f})\n{c.content.strip()}"
         )
     return "\n\n---\n\n".join(parts)
+
+
+def _tool_get_current_datetime(inputs: dict) -> str:
+    """Return the current date/time in the requested timezone."""
+    import zoneinfo
+    from datetime import UTC, datetime as _dt
+
+    tz_name = (inputs.get("timezone") or "UTC").strip()
+    try:
+        tz: Any = zoneinfo.ZoneInfo(tz_name)
+    except Exception:
+        tz = UTC
+        tz_name = "UTC"
+
+    now = _dt.now(tz)
+    return (
+        f"{now.strftime('%A, %B %-d %Y')}  "
+        f"{now.strftime('%H:%M:%S')} {tz_name}  "
+        f"(UTC{now.strftime('%z')})"
+    )
+
+
+async def _tool_generate_image(inputs: dict, ctx: dict) -> str:
+    """Generate an image with DALL-E using the agent owner's OpenAI key."""
+    prompt = (inputs.get("prompt") or "").strip()
+    if not prompt:
+        return "Error: prompt is required."
+
+    size = inputs.get("size") or "1024x1024"
+    quality = inputs.get("quality") or "standard"
+
+    user_id_str = ctx.get("user_id")
+    api_key: str | None = None
+    if user_id_str:
+        try:
+            from app.db.session import AsyncSessionLocal
+
+            async with AsyncSessionLocal() as _db:
+                api_key = await _get_user_key(uuid.UUID(user_id_str), "openai", _db)
+        except Exception:
+            pass
+    if not api_key:
+        api_key = getattr(settings, "openai_api_key", None)
+    if not api_key:
+        return "Error: no OpenAI API key configured. Add one in Settings → Model Keys to use image generation."
+
+    try:
+        from openai import AsyncOpenAI
+
+        client = AsyncOpenAI(api_key=api_key)
+        response = await client.images.generate(
+            model="dall-e-3",
+            prompt=prompt,
+            size=size,  # type: ignore[arg-type]
+            quality=quality,  # type: ignore[arg-type]
+            n=1,
+        )
+        url = response.data[0].url
+        revised = response.data[0].revised_prompt or prompt
+        return (
+            f"Generated image for: {revised}\n\n"
+            f"![{prompt[:80]}]({url})\n\n"
+            f"URL: {url}"
+        )
+    except Exception as exc:
+        return f"Image generation failed: {str(exc).split(chr(10))[0]}"
+
+
+async def _tool_convert_document(inputs: dict) -> str:
+    """Download a document from a URL, convert it to PDF via LibreOffice,
+    upload the result to storage, and return a public download URL."""
+    url = (inputs.get("url") or "").strip()
+    filename = (inputs.get("filename") or "document.docx").strip()
+
+    if not url:
+        return "Error: url is required."
+    if not _is_ssrf_safe(url):
+        return "Error: URL is not allowed (private/internal addresses are blocked)."
+
+    # Download the source file
+    try:
+        async with httpx.AsyncClient(timeout=30, follow_redirects=True) as client:
+            resp = await client.get(url)
+        if resp.status_code != 200:
+            return f"Error: could not download file (HTTP {resp.status_code})."
+        data = resp.content
+    except Exception as exc:
+        return f"Error downloading file: {exc}"
+
+    if len(data) > 50 * 1024 * 1024:
+        return "Error: file exceeds 50 MB limit."
+
+    # Convert using LibreOffice
+    try:
+        from app.services.convert import ConversionError, convert_to_pdf
+
+        pdf_bytes, pdf_name = await convert_to_pdf(data, filename)
+    except Exception as exc:
+        return f"Conversion failed: {exc}"
+
+    # Upload result to storage and return a public URL
+    try:
+        from app.services.storage import upload_file
+
+        pdf_url = await upload_file(pdf_bytes, pdf_name, "application/pdf", f"conversions/{uuid.uuid4()}")
+        return (
+            f"Conversion complete. The PDF is ready to download:\n\n"
+            f"**[Download {pdf_name}]({pdf_url})**\n\n"
+            f"Share this link with the user."
+        )
+    except Exception as exc:
+        return f"Conversion succeeded but upload failed: {exc}"
+
+
+_SCRAPER_HEADERS = {
+    "User-Agent": (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+        "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+    ),
+    "Accept-Language": "en-US,en;q=0.9",
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
+}
+_SCRAPER_MAX_PAGES = 10
+_SCRAPER_MAX_PRODUCTS = 500
+
+
+def _extract_products_jsonld(soup: "BeautifulSoup") -> list[dict]:
+    """Pull products from JSON-LD structured data — works on Shopify, WooCommerce, BigCommerce."""
+    import json as _json
+    products: list[dict] = []
+    for tag in soup.find_all("script", type="application/ld+json"):
+        try:
+            data = _json.loads(tag.string or "")
+        except Exception:
+            continue
+        if isinstance(data, list):
+            items = data
+        elif isinstance(data, dict):
+            t = data.get("@type", "")
+            if t in ("Product",):
+                items = [data]
+            elif t in ("ItemList", "CollectionPage"):
+                items = [e.get("item", e) for e in data.get("itemListElement", [])]
+            else:
+                items = [data]
+        else:
+            continue
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            if item.get("@type") not in ("Product", None, ""):
+                if item.get("@type") and item.get("@type") != "Product":
+                    continue
+            name = item.get("name", "")
+            if not name:
+                continue
+            offer = item.get("offers", item.get("Offers", {}))
+            if isinstance(offer, list):
+                offer = offer[0] if offer else {}
+            price = str(offer.get("price", offer.get("Price", "")))
+            currency = offer.get("priceCurrency", "")
+            availability = offer.get("availability", "")
+            stock = "instock" if "InStock" in availability else ("outofstock" if availability else "")
+            img = item.get("image", "")
+            if isinstance(img, list):
+                img = img[0] if img else ""
+            if isinstance(img, dict):
+                img = img.get("url", "")
+            desc = item.get("description", "")
+            sku = item.get("sku", item.get("mpn", ""))
+            brand = item.get("brand", {})
+            if isinstance(brand, dict):
+                brand = brand.get("name", "")
+            url = item.get("url", "")
+            products.append({
+                "Name": name, "Price": price, "Currency": currency,
+                "Description": desc, "Image URL": img, "SKU": sku,
+                "Brand": brand, "Stock": stock, "URL": url,
+            })
+    return products
+
+
+def _extract_products_shopify_json(base_url: str) -> list[dict]:
+    """Try Shopify's built-in /products.json endpoint."""
+    import requests as _req
+    products = []
+    try:
+        from urllib.parse import urlparse
+        parsed = urlparse(base_url)
+        api_url = f"{parsed.scheme}://{parsed.netloc}/products.json?limit=250"
+        r = _req.get(api_url, headers=_SCRAPER_HEADERS, timeout=10)
+        if r.status_code == 200:
+            for p in r.json().get("products", []):
+                variant = p.get("variants", [{}])[0]
+                img = p.get("images", [{}])
+                img_url = img[0].get("src", "") if img else ""
+                products.append({
+                    "Name": p.get("title", ""),
+                    "Price": str(variant.get("price", "")),
+                    "Description": p.get("body_html", ""),
+                    "Image URL": img_url,
+                    "SKU": variant.get("sku", ""),
+                    "Stock": "instock" if variant.get("available") else "outofstock",
+                    "URL": f"{parsed.scheme}://{parsed.netloc}/products/{p.get('handle','')}",
+                    "Category": ", ".join(p.get("tags", [])),
+                })
+    except Exception:
+        pass
+    return products
+
+
+def _extract_products_css(soup: "BeautifulSoup", page_url: str) -> list[dict]:
+    """CSS-based extraction covering WooCommerce, Shopify storefronts, Magento, and generic stores."""
+    import re as _re
+    from urllib.parse import urljoin
+
+    products = []
+
+    # Selector sets: (card, title, price, image, link, stock)
+    PATTERNS = [
+        # WooCommerce
+        (".product", "h2.woocommerce-loop-product__title,.product-title", ".price,.woocommerce-Price-amount", "img", "a.woocommerce-loop-product__link,a", ".stock"),
+        # Shopify (Dawn theme and common themes)
+        (".product-item,.grid__item,.product-card-wrapper", ".product-item__title,.card__heading,.product-title", ".price__regular,.price,.product-item__price", "img", "a", None),
+        # Magento
+        (".product-item,.item.product", ".product-item-name,.product-name", ".price-wrapper,.price", "img.product-image-photo", "a", ".stock"),
+        # BigCommerce
+        (".productGrid .product,.product-item", ".card-title,.productCard-title", ".price,.productView-price", "img", "a", None),
+        # Generic e-commerce cards
+        ("[class*='product-card'],[class*='product_card'],[class*='ProductCard']", "h2,h3,[class*='title'],[class*='name']", "[class*='price'],[class*='Price']", "img", "a", None),
+        ("[class*='item'][class*='product'],[class*='product'][class*='item']", "h2,h3,[class*='title']", "[class*='price']", "img", "a", None),
+        # StarTech / similar Asian e-commerce
+        (".p-item", ".p-item-name a,.product-name a", ".p-item-price,.product-price", "img", "a", ".stock-status"),
+    ]
+
+    for card_sel, title_sel, price_sel, img_sel, link_sel, stock_sel in PATTERNS:
+        cards = soup.select(card_sel)
+        if len(cards) < 2:
+            continue
+        for card in cards[:_SCRAPER_MAX_PRODUCTS]:
+            title_el = card.select_one(title_sel)
+            if not title_el:
+                continue
+            title = title_el.get_text(strip=True)
+            if not title or len(title) < 3:
+                continue
+
+            price_el = card.select_one(price_sel)
+            price_raw = price_el.get_text(strip=True) if price_el else ""
+            price = _re.sub(r"[^\d.,]", "", price_raw).strip(".").strip(",") if price_raw else ""
+
+            img_el = card.select_one(img_sel)
+            img_url = ""
+            if img_el:
+                img_url = img_el.get("src") or img_el.get("data-src") or img_el.get("data-lazy-src") or ""
+                if img_url and img_url.startswith("//"):
+                    img_url = "https:" + img_url
+                elif img_url and not img_url.startswith("http") and not img_url.startswith("data:"):
+                    img_url = urljoin(page_url, img_url)
+
+            link_el = card.select_one(link_sel) if link_sel else None
+            if link_el is None:
+                link_el = title_el.find_parent("a") or title_el.select_one("a")
+            product_url = ""
+            if link_el and link_el.name == "a":
+                product_url = urljoin(page_url, link_el.get("href", ""))
+
+            stock = ""
+            if stock_sel:
+                stock_el = card.select_one(stock_sel)
+                if stock_el:
+                    txt = stock_el.get_text(strip=True).lower()
+                    stock = "instock" if any(w in txt for w in ("in stock", "available", "add to")) else "outofstock"
+
+            products.append({
+                "Name": title, "Price": price, "Image URL": img_url,
+                "URL": product_url, "Stock": stock,
+                "Description": "", "SKU": "", "Brand": "", "Category": "",
+            })
+        if products:
+            break  # use the first pattern that yielded results
+
+    return products
+
+
+def _next_page_url(soup: "BeautifulSoup", current_url: str) -> str | None:
+    """Find the next-page link in pagination."""
+    from urllib.parse import urljoin
+    for sel in (
+        "a[rel='next']", ".next a", "a.next", ".pagination__next a",
+        ".woocommerce-pagination .next", "[class*='pagination'] a[class*='next']",
+        "a:contains('Next')", "a[aria-label='Next page']",
+    ):
+        el = soup.select_one(sel)
+        if el and el.get("href"):
+            return urljoin(current_url, el["href"])
+    return None
+
+
+def _apply_columns(products: list[dict], columns: list[str] | None) -> list[dict]:
+    """Reorder/filter columns; fill missing keys with empty string."""
+    if not columns:
+        return products
+    return [{col: p.get(col, "") for col in columns} for p in products]
+
+
+async def _tool_scrape_products(inputs: dict) -> str:
+    """Generic e-commerce product scraper with multi-strategy extraction."""
+    import io
+    from bs4 import BeautifulSoup
+
+    url = (inputs.get("url") or "").strip()
+    if not url:
+        return "Error: url is required."
+    if not _is_ssrf_safe(url):
+        return "Error: URL is not allowed (private/internal addresses are blocked)."
+
+    max_pages = min(int(inputs.get("max_pages") or 1), _SCRAPER_MAX_PAGES)
+    columns: list[str] | None = inputs.get("columns") or None
+    fmt = (inputs.get("output_format") or "csv").lower()
+    if fmt not in ("csv", "xlsx"):
+        fmt = "csv"
+
+    all_products: list[dict] = []
+    current_url: str | None = url
+    pages_scraped = 0
+
+    # ── Try Shopify /products.json first (instant, clean, no HTML needed) ────
+    shopify = _extract_products_shopify_json(url)
+    if shopify:
+        all_products = shopify
+        current_url = None  # skip pagination — Shopify API already returned everything
+
+    while current_url and pages_scraped < max_pages and len(all_products) < _SCRAPER_MAX_PRODUCTS:
+        try:
+            async with httpx.AsyncClient(timeout=15, headers=_SCRAPER_HEADERS, follow_redirects=True) as c:
+                r = await c.get(current_url)
+            if r.status_code != 200:
+                break
+            html = r.text
+        except Exception as exc:
+            return f"Error fetching {current_url}: {exc}"
+
+        soup = BeautifulSoup(html, "lxml")
+        pages_scraped += 1
+
+        # Strategy 1: JSON-LD
+        page_products = _extract_products_jsonld(soup)
+
+        # Strategy 2: CSS patterns
+        if not page_products:
+            page_products = _extract_products_css(soup, current_url)
+
+        # Strategy 3: Open Graph (single product pages)
+        if not page_products:
+            og_title = soup.select_one("meta[property='og:title']")
+            og_price = soup.select_one("meta[property='og:price:amount'],meta[property='product:price:amount']")
+            og_img = soup.select_one("meta[property='og:image']")
+            og_desc = soup.select_one("meta[property='og:description']")
+            if og_title:
+                page_products = [{
+                    "Name": og_title.get("content", ""),
+                    "Price": og_price.get("content", "") if og_price else "",
+                    "Image URL": og_img.get("content", "") if og_img else "",
+                    "Description": og_desc.get("content", "") if og_desc else "",
+                    "URL": current_url,
+                    "Stock": "", "SKU": "", "Brand": "", "Category": "",
+                }]
+
+        all_products.extend(page_products)
+
+        if pages_scraped < max_pages and not shopify:
+            current_url = _next_page_url(soup, current_url)
+        else:
+            current_url = None
+
+    if not all_products:
+        # Auto-detect failed — extract visible text + image/price hints so the LLM
+        # can parse the products itself and then call export_products_file.
+        _fallback_lines: list[str] = []
+        try:
+            # Re-fetch and parse the first page for fallback text
+            async with httpx.AsyncClient(timeout=15, headers=_SCRAPER_HEADERS, follow_redirects=True) as _c:
+                _r = await _c.get(url)
+            _soup = BeautifulSoup(_r.text, "lxml")
+            # Strip nav/footer/script noise
+            for _tag in _soup(["script", "style", "nav", "footer", "header", "aside"]):
+                _tag.decompose()
+            # Collect text in short lines (skip very long or very short ones)
+            for _el in _soup.find_all(["h1","h2","h3","p","span","td","li","a"]):
+                _txt = _el.get_text(strip=True)
+                if 3 < len(_txt) < 200:
+                    _fallback_lines.append(_txt)
+            # Collect image src hints
+            for _img in _soup.find_all("img", src=True)[:30]:
+                _src = _img.get("src","") or _img.get("data-src","")
+                if _src and not _src.startswith("data:"):
+                    _fallback_lines.append(f"[IMG] {_src}")
+            _text_blob = "\n".join(dict.fromkeys(_fallback_lines))[:6000]
+        except Exception:
+            _text_blob = ""
+
+        col_hint = f" Use these columns: {columns}." if columns else ""
+        return (
+            f"Auto-detection found no products on {url}. "
+            f"Here is the page content — please extract the product list from it, "
+            f"build a JSON array, then call export_products_file to generate the file.{col_hint}\n\n"
+            f"PAGE CONTENT:\n{_text_blob}"
+        )
+
+    # Deduplicate by Name
+    seen: set[str] = set()
+    unique: list[dict] = []
+    for p in all_products:
+        key = (p.get("Name") or "").lower().strip()
+        if key and key not in seen:
+            seen.add(key)
+            unique.append(p)
+
+    products_for_export = _apply_columns(unique, columns)
+
+    # ── Generate file ─────────────────────────────────────────────────────────
+    import pandas as _pd
+    df = _pd.DataFrame(products_for_export)
+
+    buf = io.BytesIO()
+    if fmt == "xlsx":
+        with _pd.ExcelWriter(buf, engine="openpyxl") as writer:
+            df.to_excel(writer, index=False, sheet_name="Products")
+        mime = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        ext = ".xlsx"
+    else:
+        csv_str = df.to_csv(index=False, encoding="utf-8-sig")
+        buf.write(csv_str.encode("utf-8-sig"))
+        mime = "text/csv"
+        ext = ".csv"
+
+    buf.seek(0)
+    file_bytes = buf.read()
+
+    try:
+        from app.services.storage import upload_file
+        from urllib.parse import urlparse
+        host = urlparse(url).netloc.replace("www.", "").split(".")[0]
+        filename = f"{host}_products{ext}"
+        dl_url = await upload_file(file_bytes, filename, mime, f"scrapes/{uuid.uuid4()}")
+    except Exception as exc:
+        return f"Scraped {len(unique)} products but upload failed: {exc}"
+
+    cols_preview = list(products_for_export[0].keys()) if products_for_export else []
+    sample = unique[:3]
+    sample_lines = "\n".join(f"  • {p.get('Name','?')} — {p.get('Price','?')}" for p in sample)
+
+    return (
+        f"✅ Scraped **{len(unique)} products** from {pages_scraped} page(s).\n\n"
+        f"**Columns:** {', '.join(cols_preview)}\n\n"
+        f"**Sample:**\n{sample_lines}\n\n"
+        f"**[Download {filename}]({dl_url})**\n\n"
+        f"_Share this link with the user or use export_products_file to reformat._"
+    )
+
+
+async def _tool_export_products_file(inputs: dict) -> str:
+    """Convert a JSON product list to CSV/XLSX and return a download URL."""
+    import io
+    import json as _json
+
+    raw = (inputs.get("products_json") or "").strip()
+    if not raw:
+        return "Error: products_json is required."
+
+    try:
+        products = _json.loads(raw)
+        if not isinstance(products, list):
+            return "Error: products_json must be a JSON array."
+    except Exception as exc:
+        return f"Error: could not parse products_json as JSON — {exc}"
+
+    if not products:
+        return "Error: products list is empty."
+
+    columns: list[str] | None = inputs.get("columns") or None
+    fmt = (inputs.get("output_format") or "csv").lower()
+    filename_stem = (inputs.get("filename") or "products").strip().rstrip(".")
+    if fmt not in ("csv", "xlsx"):
+        fmt = "csv"
+
+    products_out = _apply_columns(products, columns)
+
+    import pandas as _pd
+    df = _pd.DataFrame(products_out)
+
+    buf = io.BytesIO()
+    if fmt == "xlsx":
+        with _pd.ExcelWriter(buf, engine="openpyxl") as writer:
+            df.to_excel(writer, index=False, sheet_name="Products")
+        mime = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        ext = ".xlsx"
+    else:
+        csv_str = df.to_csv(index=False, encoding="utf-8-sig")
+        buf.write(csv_str.encode("utf-8-sig"))
+        mime = "text/csv"
+        ext = ".csv"
+
+    buf.seek(0)
+    file_bytes = buf.read()
+
+    try:
+        from app.services.storage import upload_file
+        filename = f"{filename_stem}{ext}"
+        dl_url = await upload_file(file_bytes, filename, mime, f"exports/{uuid.uuid4()}")
+    except Exception as exc:
+        return f"File generation succeeded but upload failed: {exc}"
+
+    return (
+        f"✅ Exported **{len(products)} products** ({len(df.columns)} columns) as {fmt.upper()}.\n\n"
+        f"**[Download {filename}]({dl_url})**"
+    )
+
+
+async def _tool_get_gold_price(inputs: dict) -> str:
+    """Live gold spot price in any currency via Yahoo Finance (free, no key)."""
+    from datetime import UTC, datetime as _dt
+
+    currency = (inputs.get("currency") or "USD").upper().strip()
+    unit = (inputs.get("unit") or "oz").lower()
+
+    _YF = "https://query1.finance.yahoo.com/v8/finance/chart"
+    _HDR = {"User-Agent": "Mozilla/5.0"}
+
+    # ── 1. Gold spot in USD ───────────────────────────────────────────────────
+    try:
+        async with httpx.AsyncClient(timeout=10, headers=_HDR) as c:
+            r = await c.get(f"{_YF}/GC=F")
+        meta = r.json()["chart"]["result"][0]["meta"]
+        usd_oz = float(meta["regularMarketPrice"])
+        prev_usd_oz = float(meta.get("chartPreviousClose") or meta.get("previousClose") or usd_oz)
+        mkt_time = meta.get("regularMarketTime")
+        ts = _dt.fromtimestamp(mkt_time, tz=UTC).strftime("%d %b %Y %H:%M UTC") if mkt_time else _dt.now(UTC).strftime("%d %b %Y %H:%M UTC")
+    except Exception as exc:
+        return f"Error fetching gold price: {exc}"
+
+    # ── 2. FX rate USD → requested currency ──────────────────────────────────
+    fx = 1.0
+    fx_label = ""
+    if currency != "USD":
+        try:
+            async with httpx.AsyncClient(timeout=10, headers=_HDR) as c:
+                r = await c.get(f"{_YF}/USD{currency}=X")
+            fx_meta = r.json()["chart"]["result"][0]["meta"]
+            fx = float(fx_meta["regularMarketPrice"])
+            fx_label = f"\n_FX rate: 1 USD = {fx:.4f} {currency}_"
+        except Exception:
+            return (
+                f"Gold spot (USD): ${usd_oz:,.2f}/oz — "
+                f"could not fetch USD/{currency} rate. Check the currency code."
+            )
+
+    # ── 3. Unit conversion ────────────────────────────────────────────────────
+    _UNITS = {"oz": (1.0, "troy oz"), "gram": (1 / 31.1035, "gram"), "kg": (1000 / 31.1035, "kg")}
+    factor, unit_label = _UNITS.get(unit, (1.0, "troy oz"))
+
+    price = usd_oz * fx * factor
+    prev = prev_usd_oz * fx * factor
+    chg = price - prev
+    pct = (chg / prev * 100) if prev else 0
+    arrow = "▲" if chg >= 0 else "▼"
+
+    _COUNTRIES = {
+        "MYR": "Malaysia", "SGD": "Singapore", "IDR": "Indonesia",
+        "GBP": "United Kingdom", "EUR": "Eurozone", "AUD": "Australia",
+        "CAD": "Canada", "AED": "UAE", "SAR": "Saudi Arabia",
+        "INR": "India", "PKR": "Pakistan", "BDT": "Bangladesh",
+        "THB": "Thailand", "PHP": "Philippines", "JPY": "Japan",
+        "CNY": "China", "HKD": "Hong Kong", "KWD": "Kuwait",
+    }
+    country = _COUNTRIES.get(currency, currency)
+
+    return (
+        f"**Gold Price — {country} ({currency})** · {ts}\n\n"
+        f"💰 **{price:,.2f} {currency}** per {unit_label}\n"
+        f"{arrow} {chg:+,.2f} {currency} ({pct:+.2f}%) vs previous close\n\n"
+        f"_Spot price (24K) · USD/oz: ${usd_oz:,.2f}_"
+        f"{fx_label}"
+    )
+
+
+def _tool_calculate_deadline(inputs: dict) -> str:
+    """Business/court date arithmetic using dateutil."""
+    from datetime import date, timedelta
+
+    start_str = (inputs.get("start_date") or "").strip()
+    try:
+        days = int(inputs.get("days", 0))
+    except (TypeError, ValueError):
+        return "Error: 'days' must be an integer."
+    day_type = (inputs.get("day_type") or "calendar").lower()
+    jurisdiction = (inputs.get("jurisdiction") or "").upper().strip()
+
+    try:
+        start = date.fromisoformat(start_str)
+    except ValueError:
+        return f"Error: invalid start_date '{start_str}'. Use ISO format YYYY-MM-DD."
+
+    # Common public holidays for supported jurisdictions (non-exhaustive but covers key dates)
+    _US_FIXED = {(1, 1), (7, 4), (11, 11), (12, 25), (12, 26)}   # NY, MLK, etc. omitted for simplicity
+    _UK_FIXED = {(1, 1), (12, 25), (12, 26)}
+    _MY_FIXED = {(1, 1), (2, 1), (5, 1), (8, 31), (9, 16), (12, 25)}
+
+    holiday_sets = {"US": _US_FIXED, "UK": _UK_FIXED, "MY": _MY_FIXED}
+    holidays = holiday_sets.get(jurisdiction, set())
+
+    def is_working_day(d: date) -> bool:
+        if d.weekday() >= 5:  # Sat/Sun
+            return False
+        if day_type == "court" and (d.month, d.day) in holidays:
+            return False
+        return True
+
+    if day_type == "calendar":
+        result = start + timedelta(days=days)
+    elif day_type in ("business", "court"):
+        direction = 1 if days >= 0 else -1
+        remaining = abs(days)
+        current = start
+        while remaining > 0:
+            current += timedelta(days=direction)
+            if is_working_day(current):
+                remaining -= 1
+        result = current
+    else:
+        return f"Error: unknown day_type '{day_type}'. Use calendar, business, or court."
+
+    note = ""
+    if day_type in ("business", "court") and not is_working_day(result):
+        # Nudge to next working day
+        while not is_working_day(result):
+            result += timedelta(days=1)
+        note = " (adjusted forward to next working day)"
+
+    day_label = f"{abs(days)} {day_type} day{'s' if abs(days) != 1 else ''}"
+    direction_word = "after" if days >= 0 else "before"
+    return (
+        f"**Deadline: {result.strftime('%A, %-d %B %Y')}** ({result.isoformat()}){note}\n\n"
+        f"Calculation: {start.strftime('%-d %B %Y')} + {day_label} ({direction_word}) "
+        f"= {result.strftime('%-d %B %Y')}"
+        + (f"\nJurisdiction holidays applied: {jurisdiction}" if jurisdiction and day_type == "court" else "")
+    )
+
+
+async def _tool_search_jobs(inputs: dict) -> str:
+    """Search job boards — Remotive (remote) + The Muse (all) + web search fallback."""
+    query = (inputs.get("query") or "").strip()
+    location = (inputs.get("location") or "").strip().lower()
+    job_type = (inputs.get("job_type") or "any").lower()
+    limit = min(int(inputs.get("limit") or 10), 20)
+
+    if not query:
+        return "Error: query is required."
+
+    results: list[dict] = []
+
+    # ── 1. Remotive (free, no key, best for remote roles) ────────────────────
+    if job_type in ("any", "remote") and len(results) < limit:
+        try:
+            async with httpx.AsyncClient(timeout=10) as c:
+                r = await c.get(
+                    "https://remotive.com/api/remote-jobs",
+                    params={"search": query, "limit": limit},
+                )
+            if r.status_code == 200:
+                for job in r.json().get("jobs", [])[:limit]:
+                    results.append({
+                        "title": job.get("title", ""),
+                        "company": job.get("company_name", ""),
+                        "location": job.get("candidate_required_location") or "Remote",
+                        "salary": job.get("salary") or "",
+                        "type": job.get("job_type") or "remote",
+                        "posted": (job.get("publication_date") or "")[:10],
+                        "url": job.get("url") or job.get("apply_url") or "",
+                        "source": "Remotive",
+                    })
+        except Exception:
+            pass
+
+    # ── 2. The Muse (free, no key, broad coverage) ───────────────────────────
+    if len(results) < limit:
+        try:
+            params: dict[str, Any] = {"page": 1, "descending": "true"}
+            if query:
+                params["name"] = query
+            if location and location != "remote":
+                params["location"] = location
+            async with httpx.AsyncClient(timeout=10) as c:
+                r = await c.get("https://www.themuse.com/api/public/jobs", params=params)
+            if r.status_code == 200:
+                for job in r.json().get("results", [])[:limit]:
+                    locs = [l.get("name", "") for l in (job.get("locations") or [])]
+                    cats = [c.get("name", "") for c in (job.get("categories") or [])]
+                    lvl = ", ".join(l.get("name", "") for l in (job.get("levels") or []))
+                    results.append({
+                        "title": job.get("name", ""),
+                        "company": job.get("company", {}).get("name", ""),
+                        "location": ", ".join(locs) or "Not specified",
+                        "salary": "",
+                        "type": lvl or "Full-time",
+                        "posted": (job.get("publication_date") or "")[:10],
+                        "url": job.get("refs", {}).get("landing_page") or "",
+                        "category": ", ".join(cats),
+                        "source": "The Muse",
+                    })
+        except Exception:
+            pass
+
+    # ── 3. Web search fallback ────────────────────────────────────────────────
+    if not results:
+        search_q = f"{query} jobs{' ' + location if location else ''} site:linkedin.com OR site:indeed.com"
+        return await _tool_web_search(search_q, {})
+
+    # De-duplicate by title+company
+    seen: set[str] = set()
+    unique: list[dict] = []
+    for job in results:
+        key = f"{job['title'].lower()}|{job['company'].lower()}"
+        if key not in seen:
+            seen.add(key)
+            unique.append(job)
+
+    lines = [f"Found {len(unique)} job(s) matching **{query}**:\n"]
+    for i, job in enumerate(unique[:limit], 1):
+        lines.append(f"**{i}. {job['title']}** — {job['company']}")
+        lines.append(f"   📍 {job['location']}  •  {job.get('type','')}")
+        if job.get("salary"):
+            lines.append(f"   💰 {job['salary']}")
+        if job.get("category"):
+            lines.append(f"   🏷️  {job['category']}")
+        lines.append(f"   📅 Posted: {job.get('posted','N/A')}  •  Source: {job['source']}")
+        lines.append(f"   🔗 {job['url']}\n")
+
+    return "\n".join(lines)
 
 
 def _tool_calculate_faraid(inputs: dict) -> str:
