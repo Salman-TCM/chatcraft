@@ -5,6 +5,7 @@ from app.models.agent import Agent  # noqa: F401
 from app.models.agent_conversation import AgentConversation  # noqa: F401
 from app.models.agent_function import AgentFunction  # noqa: F401
 from app.models.agent_integration import AgentIntegration, IntegrationCredential  # noqa: F401
+from app.models.agent_schedule import AgentSchedule  # noqa: F401
 from app.models.agent_knowledge_base import (  # noqa: F401
     AgentKnowledgeChunk,
     AgentKnowledgeDocument,
