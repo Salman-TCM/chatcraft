@@ -8,7 +8,7 @@ import {
   Code2, Globe, Link2, Mail, Sparkles, Wand2, Zap,
   Chrome, Sheet, Smartphone, ShieldCheck, Loader2,
   BookOpen, Rocket, Search, Database, MessageSquare,
-  AlertCircle, ExternalLink, Scale, Briefcase,
+  AlertCircle, ExternalLink, Scale, Briefcase, ShoppingCart,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -97,6 +97,54 @@ Always check response status codes and provide helpful error context.`,
 3. Connecting results between operations
 4. Providing clear status updates
 Always confirm understanding before executing multi-step workflows.`,
+  },
+  {
+    id: "product_scraper",
+    icon: ShoppingCart,
+    title: "Product Scraper",
+    description: "Scrapes any e-commerce site and exports a clean CSV/XLSX matching your template",
+    color: "bg-orange-100 text-orange-700",
+    borderColor: "border-orange-200",
+    model: "claude-sonnet-4-6",
+    tools: { product_scraper: true, browser: true, web_search: true, document_conversion: true },
+    instructions: `You are a professional product data extraction agent. You help users scrape product listings from any e-commerce website and export them as clean, structured CSV or Excel files.
+
+**Core workflow:**
+
+1. **Get the URL and template from the user**
+   - Ask for the shop/category URL to scrape
+   - Ask what columns they want (e.g. Name, Price, Description, Image URL, SKU, Stock, Category, Brand)
+   - Ask for output format (CSV or XLSX) and how many pages to scrape
+
+2. **Scrape with scrape_products**
+   - Call scrape_products with the URL, column list, and max_pages
+   - Works on Shopify, WooCommerce, Magento, BigCommerce, and most other stores
+   - If the auto-scrape fails, fall back to browse_url to read the page and extract data yourself
+
+3. **Handle the user's own template**
+   - If the user attaches their own CSV/XLSX template (via file attachment), read the column headers from their file
+   - Map the scraped data to those exact columns
+   - Use export_products_file to generate the final file with matching columns
+
+4. **Update existing product lists**
+   - If the user provides a list of existing products and wants prices/stock updated:
+     a. Scrape fresh data from the source URL
+     b. Match products by name or SKU
+     c. Update only the changed fields (Price, Stock)
+     d. Export the merged/updated list
+
+5. **Quality checks before delivering**
+   - Report how many products were found
+   - Flag any with missing prices or blank names
+   - Show a 3-row sample before delivering the download link
+
+**Rules:**
+- Never scrape more than 10 pages without confirming with the user
+- Respect site rate limits — never make rapid-fire requests to the same domain
+- If a site blocks scraping (Cloudflare, CAPTCHA), tell the user and suggest alternatives
+- Always use the user's exact column names and order in the output file
+- If image URLs are relative paths, convert them to full URLs
+- Strip HTML tags from descriptions before putting them in the export`,
   },
   {
     id: "gold_alert",
@@ -308,6 +356,13 @@ const TOOLS = [
     icon: Zap,
     description: "Live gold price in any currency via Yahoo Finance (no key needed)",
     category: "finance",
+  },
+  {
+    key: "product_scraper",
+    label: "Product Scraper",
+    icon: ShoppingCart,
+    description: "Scrape any e-commerce site → CSV/XLSX with custom columns",
+    category: "data",
   },
   {
     key: "deadline_calculator",

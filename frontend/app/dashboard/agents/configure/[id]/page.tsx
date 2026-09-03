@@ -81,6 +81,7 @@ const TOOLS = [
   { key: "deadline_calculator", label: "Deadline Calculator",description: "Calculate court/business deadlines — calendar, business, or court days", icon: "⚖️" },
   { key: "job_search",          label: "Job Search",         description: "Search Remotive, The Muse, and web for matching job listings",        icon: "💼" },
   { key: "gold_price",          label: "Gold Price",         description: "Live gold spot price in any currency via Yahoo Finance (no key needed)", icon: "🥇" },
+  { key: "product_scraper",     label: "Product Scraper",    description: "Scrape any e-commerce site (Shopify, WooCommerce, Magento) → CSV/XLSX",  icon: "🛒" },
 ];
 
 // ─── Sub-components ───────────────────────────────────────────────────────────
