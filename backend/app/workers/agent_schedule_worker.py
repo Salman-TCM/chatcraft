@@ -30,7 +30,7 @@ from app.workers.celery_app import celery_app
 )
 def check_agent_schedules() -> dict:
     """Find all active schedules due right now and kick off their agent runs."""
-    return asyncio.get_event_loop().run_until_complete(_check_and_dispatch())
+    return asyncio.run(_check_and_dispatch())
 
 
 async def _check_and_dispatch() -> dict:
@@ -85,7 +85,7 @@ async def _check_and_dispatch() -> dict:
 )
 def run_scheduled_agent(self, schedule_id: str) -> dict:
     """Execute one scheduled agent run end-to-end."""
-    return asyncio.get_event_loop().run_until_complete(_run(schedule_id))
+    return asyncio.run(_run(schedule_id))
 
 
 async def _run(schedule_id: str) -> dict:

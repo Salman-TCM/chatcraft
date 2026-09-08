@@ -91,6 +91,10 @@ compose up -d --no-deps "$IDLE_NAME"
 IDLE_CONTAINER="$(compose ps -q "$IDLE_NAME")"
 
 if ! wait_healthy "$IDLE_CONTAINER" "$DEEP_PATH" "$PORT" 180; then
+  log "=== Last 80 lines of ${IDLE_NAME} logs ==="
+  docker logs --tail=80 "$IDLE_CONTAINER" 2>&1 || true
+  log "=== /health response from failing container ==="
+  docker exec "$IDLE_CONTAINER" wget -qO- "http://localhost:${PORT}${DEEP_PATH}" 2>/dev/null | python3 -m json.tool || true
   compose stop "$IDLE_NAME" || true
   fail "${IDLE_NAME} never became healthy — old slot (${ACTIVE_NAME}) is still serving traffic, nothing was cut over"
 fi
