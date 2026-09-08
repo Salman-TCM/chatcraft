@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useSession } from "next-auth/react";
+import { FiX } from "react-icons/fi";
 import { Button } from "@/components/ui/button";
 
 const DISMISS_KEY = "chatcraft:trial-banner-dismissed";
@@ -59,12 +60,10 @@ export function TrialBanner() {
           <button
             type="button"
             onClick={dismiss}
-            className="rounded p-0.5 opacity-75 hover:opacity-100 focus:outline-none focus:ring-2 focus:ring-white"
+            className="inline-flex items-center justify-center rounded p-0.5 opacity-75 hover:opacity-100 focus:outline-none focus:ring-2 focus:ring-white"
             aria-label="Dismiss"
           >
-            <svg className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
-              <path d="M6.28 5.22a.75.75 0 0 0-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 1 0 1.06 1.06L10 11.06l3.72 3.72a.75.75 0 1 0 1.06-1.06L11.06 10l3.72-3.72a.75.75 0 0 0-1.06-1.06L10 8.94 6.28 5.22Z" />
-            </svg>
+            <FiX className="h-4 w-4" aria-hidden="true" />
           </button>
         </div>
       </div>

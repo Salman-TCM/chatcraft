@@ -270,7 +270,7 @@ export default function KeywordsPage() {
             <form onSubmit={handleSubmit(onSubmit)}>
               <div className="flex items-center justify-between border-b px-5 py-4">
                 <h2 className="font-semibold">{editingId ? "Edit Keyword Rule" : "New Keyword Rule"}</h2>
-                <button type="button" onClick={() => setModalOpen(false)}><X className="h-4 w-4" /></button>
+                <button className="inline-flex items-center justify-center" type="button" onClick={() => setModalOpen(false)}><X className="h-4 w-4" /></button>
               </div>
               <div className="space-y-4 px-5 py-4">
                 {/* Keywords input */}
@@ -291,7 +291,7 @@ export default function KeywordsPage() {
                       {currentKeywords.map(k => (
                         <span key={k} className="flex items-center gap-1 rounded-full bg-muted px-2 py-0.5 text-xs font-mono">
                           {k}
-                          <button type="button" onClick={() => removeKw(k)} className="text-muted-foreground hover:text-foreground">
+                          <button type="button" onClick={() => removeKw(k)} className="inline-flex items-center justify-center text-muted-foreground hover:text-foreground">
                             <X className="h-3 w-3" />
                           </button>
                         </span>

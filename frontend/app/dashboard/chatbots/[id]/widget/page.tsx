@@ -458,7 +458,7 @@ export default function WidgetPage() {
                 </div>
                 <button
                   onClick={() => removeMenuItem(index)}
-                  className="shrink-0 p-1 rounded hover:bg-destructive/10 text-destructive"
+                  className="inline-flex items-center justify-center shrink-0 p-1 rounded hover:bg-destructive/10 text-destructive"
                 >
                   <Trash2 className="h-3.5 w-3.5" />
                 </button>

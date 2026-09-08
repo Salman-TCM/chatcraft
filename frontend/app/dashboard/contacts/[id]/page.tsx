@@ -231,7 +231,7 @@ export default function ContactDetailPage() {
                   style={{ backgroundColor: t.color }}
                 >
                   {t.name}
-                  <button onClick={() => removeTag(t.id)} className="opacity-80 hover:opacity-100">
+                  <button onClick={() => removeTag(t.id)} className="inline-flex items-center justify-center opacity-80 hover:opacity-100">
                     <X className="h-3 w-3" />
                   </button>
                 </span>

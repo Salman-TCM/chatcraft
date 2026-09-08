@@ -187,7 +187,7 @@ export default function AgencyTeamPage() {
           <span className="text-sm font-medium">Members ({members.length})</span>
           <button
             onClick={load}
-            className="rounded-md p-1.5 text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
+            className="inline-flex items-center justify-center rounded-md p-1.5 text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
           >
             <RefreshCcw className="h-3.5 w-3.5" />
           </button>
@@ -224,7 +224,7 @@ export default function AgencyTeamPage() {
                   <button
                     onClick={() => remove(m.id)}
                     disabled={removingId === m.id}
-                    className="rounded p-1 text-muted-foreground hover:bg-red-50 hover:text-red-600 transition-colors disabled:opacity-60"
+                    className="inline-flex items-center justify-center rounded p-1 text-muted-foreground hover:bg-red-50 hover:text-red-600 transition-colors disabled:opacity-60"
                     title="Remove"
                   >
                     <Trash2 className="h-3.5 w-3.5" />

@@ -486,7 +486,7 @@ export default function LandingPagesPage() {
           <div className="bg-background rounded-xl shadow-xl w-full max-w-md">
             <div className="flex items-center justify-between p-4 border-b">
               <h2 className="font-semibold">New Landing Page</h2>
-              <button onClick={() => setShowCreate(false)}><X className="h-5 w-5 text-muted-foreground" /></button>
+              <button className="inline-flex items-center justify-center" onClick={() => setShowCreate(false)}><X className="h-5 w-5 text-muted-foreground" /></button>
             </div>
             <div className="p-4 space-y-3">
               <div className="space-y-1">
@@ -523,7 +523,7 @@ export default function LandingPagesPage() {
               <h2 className="font-semibold flex items-center gap-2">
                 <QrCode className="h-4 w-4" /> QR Code
               </h2>
-              <button onClick={() => { setQrPage(null); if (qrBlobUrl) URL.revokeObjectURL(qrBlobUrl); setQrBlobUrl(null); }}>
+              <button className="inline-flex items-center justify-center" onClick={() => { setQrPage(null); if (qrBlobUrl) URL.revokeObjectURL(qrBlobUrl); setQrBlobUrl(null); }}>
                 <X className="h-5 w-5 text-muted-foreground" />
               </button>
             </div>
@@ -576,7 +576,7 @@ export default function LandingPagesPage() {
           <div className="relative w-full max-w-md rounded-xl border bg-background p-6 shadow-xl">
             <button
               onClick={() => setAttrPage(null)}
-              className="absolute right-4 top-4 rounded-full p-1 hover:bg-muted"
+              className="inline-flex items-center justify-center absolute right-4 top-4 rounded-full p-1 hover:bg-muted"
             >
               <X className="h-4 w-4" />
             </button>

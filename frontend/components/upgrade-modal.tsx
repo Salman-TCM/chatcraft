@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { FiCheck } from "react-icons/fi";
 import { useAppStore } from "@/store";
 import { Button } from "@/components/ui/button";
 import { APP_NAME } from "@/lib/constants";
@@ -42,18 +43,7 @@ export function UpgradeModal() {
         <ul className="space-y-2 py-2">
           {PLAN_FEATURES.map((f) => (
             <li key={f} className="flex items-center gap-2 text-sm">
-              <svg
-                className="h-4 w-4 shrink-0 text-green-500"
-                viewBox="0 0 20 20"
-                fill="currentColor"
-                aria-hidden="true"
-              >
-                <path
-                  fillRule="evenodd"
-                  d="M16.704 4.153a.75.75 0 0 1 .143 1.052l-8 10.5a.75.75 0 0 1-1.127.075l-4.5-4.5a.75.75 0 0 1 1.06-1.06l3.894 3.893 7.48-9.817a.75.75 0 0 1 1.05-.143Z"
-                  clipRule="evenodd"
-                />
-              </svg>
+              <FiCheck className="h-4 w-4 shrink-0 text-green-500" aria-hidden="true" />
               {f}
             </li>
           ))}

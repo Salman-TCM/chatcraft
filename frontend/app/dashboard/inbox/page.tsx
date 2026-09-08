@@ -296,7 +296,7 @@ export default function InboxPage() {
               onChange={(e) => setQuery(e.target.value)}
             />
             {query && (
-              <button className="absolute right-2.5 top-1/2 -translate-y-1/2" onClick={() => setQuery("")}>
+              <button className="inline-flex items-center justify-center absolute right-2.5 top-1/2 -translate-y-1/2" onClick={() => setQuery("")}>
                 <X className="h-3 w-3 text-muted-foreground" />
               </button>
             )}

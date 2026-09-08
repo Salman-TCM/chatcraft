@@ -258,7 +258,7 @@ export function AgentKnowledgeManager({
         <Card className="p-3 space-y-2.5">
           <div className="flex items-center justify-between">
             <p className="text-xs font-medium">Upload Document</p>
-            <button onClick={() => setAddMode(null)}>
+            <button className="inline-flex items-center justify-center" onClick={() => setAddMode(null)}>
               <X className="h-3.5 w-3.5 text-muted-foreground" />
             </button>
           </div>
@@ -304,7 +304,7 @@ export function AgentKnowledgeManager({
         <Card className="p-3 space-y-2.5">
           <div className="flex items-center justify-between">
             <p className="text-xs font-medium">Add URL</p>
-            <button onClick={() => setAddMode(null)}>
+            <button className="inline-flex items-center justify-center" onClick={() => setAddMode(null)}>
               <X className="h-3.5 w-3.5 text-muted-foreground" />
             </button>
           </div>
@@ -348,7 +348,7 @@ export function AgentKnowledgeManager({
         <Card className="p-3 space-y-2.5">
           <div className="flex items-center justify-between">
             <p className="text-xs font-medium">Paste Text</p>
-            <button onClick={() => setAddMode(null)}>
+            <button className="inline-flex items-center justify-center" onClick={() => setAddMode(null)}>
               <X className="h-3.5 w-3.5 text-muted-foreground" />
             </button>
           </div>

@@ -340,7 +340,7 @@ export default function PipelinesPage() {
                         </div>
                         <div className="flex items-center gap-0.5 shrink-0">
                           <button
-                            className="rounded p-0.5 hover:bg-muted"
+                            className="inline-flex items-center justify-center rounded p-0.5 hover:bg-muted"
                             onClick={() => {
                               setEditDeal(deal);
                               setEditNotes(deal.notes ?? "");
@@ -350,7 +350,7 @@ export default function PipelinesPage() {
                             <Pencil className="h-3 w-3 text-muted-foreground" />
                           </button>
                           <button
-                            className="rounded p-0.5 hover:bg-muted"
+                            className="inline-flex items-center justify-center rounded p-0.5 hover:bg-muted"
                             onClick={() => handleRemoveDeal(deal.id)}
                           >
                             <Trash2 className="h-3 w-3 text-muted-foreground" />

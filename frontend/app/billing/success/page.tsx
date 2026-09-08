@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useSession } from "next-auth/react";
+import { FiCheck } from "react-icons/fi";
 import { Button } from "@/components/ui/button";
 import { APP_NAME } from "@/lib/constants";
 import {
@@ -45,16 +46,7 @@ export default function BillingSuccessPage() {
       <Card className="w-full max-w-md text-center">
         <CardHeader className="space-y-3 pb-2">
           <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-full bg-green-100">
-            <svg
-              className="h-8 w-8 text-green-600"
-              fill="none"
-              viewBox="0 0 24 24"
-              strokeWidth={2}
-              stroke="currentColor"
-              aria-hidden="true"
-            >
-              <path strokeLinecap="round" strokeLinejoin="round" d="m4.5 12.75 6 6 9-13.5" />
-            </svg>
+            <FiCheck className="h-8 w-8 text-green-600" strokeWidth={2.5} aria-hidden="true" />
           </div>
           <CardTitle className="text-2xl font-bold">Payment successful!</CardTitle>
           <CardDescription>

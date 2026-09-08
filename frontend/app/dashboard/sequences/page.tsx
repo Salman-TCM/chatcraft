@@ -262,7 +262,7 @@ export default function SequencesPage() {
             <form onSubmit={handleSubmit(onSubmit)} className="flex flex-col min-h-0">
               <div className="flex items-center justify-between border-b px-5 py-4 shrink-0">
                 <h2 className="font-semibold">{editingId ? "Edit Sequence" : "New Sequence"}</h2>
-                <button type="button" onClick={() => setModalOpen(false)}><X className="h-4 w-4" /></button>
+                <button className="inline-flex items-center justify-center" type="button" onClick={() => setModalOpen(false)}><X className="h-4 w-4" /></button>
               </div>
               <div className="flex-1 overflow-y-auto px-5 py-4 space-y-4">
                 <div className="grid grid-cols-2 gap-3">
@@ -305,7 +305,7 @@ export default function SequencesPage() {
                     <div key={step.id} className="rounded-lg border bg-muted/20 p-3 space-y-3">
                       <div className="flex items-center justify-between">
                         <span className="text-xs font-medium text-muted-foreground">Step {idx + 1}</span>
-                        <button type="button" onClick={() => removeStep(idx)} className="text-destructive hover:text-destructive/80">
+                        <button type="button" onClick={() => removeStep(idx)} className="inline-flex items-center justify-center text-destructive hover:text-destructive/80">
                           <X className="h-3.5 w-3.5" />
                         </button>
                       </div>

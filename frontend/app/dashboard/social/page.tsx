@@ -278,7 +278,7 @@ export default function SocialPage() {
               {a.avatar_url && <img src={a.avatar_url} alt="" className="w-5 h-5 rounded-full" />}
               <span className={`text-xs px-1.5 py-0.5 rounded font-medium ${PLATFORM_COLORS[a.platform] ?? ""}`}>{a.platform}</span>
               <span className="text-sm font-medium">{a.name}</span>
-              <button onClick={() => disconnectAccount(a.id)} className="text-muted-foreground hover:text-destructive ml-1">
+              <button onClick={() => disconnectAccount(a.id)} className="inline-flex items-center justify-center text-muted-foreground hover:text-destructive ml-1">
                 <X className="h-3.5 w-3.5" />
               </button>
             </div>
@@ -351,7 +351,7 @@ export default function SocialPage() {
           <div className="bg-background rounded-xl shadow-xl w-full max-w-xl max-h-[90vh] flex flex-col">
             <div className="flex items-center justify-between p-4 border-b">
               <h2 className="font-semibold">Compose Post</h2>
-              <button onClick={() => setShowCompose(false)}><X className="h-5 w-5 text-muted-foreground" /></button>
+              <button className="inline-flex items-center justify-center" onClick={() => setShowCompose(false)}><X className="h-5 w-5 text-muted-foreground" /></button>
             </div>
             <div className="flex-1 overflow-y-auto p-4 space-y-4">
               {/* Account selector */}
@@ -470,7 +470,7 @@ export default function SocialPage() {
           <div className="bg-background rounded-xl shadow-xl w-full max-w-md">
             <div className="flex items-center justify-between p-4 border-b">
               <h2 className="font-semibold">Connect Social Account</h2>
-              <button onClick={() => setShowConnect(false)}><X className="h-5 w-5 text-muted-foreground" /></button>
+              <button className="inline-flex items-center justify-center" onClick={() => setShowConnect(false)}><X className="h-5 w-5 text-muted-foreground" /></button>
             </div>
             <div className="p-4 space-y-3">
               <div className="space-y-1">

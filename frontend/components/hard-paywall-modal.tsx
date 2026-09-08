@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { FiXCircle } from "react-icons/fi";
 import { useAppStore } from "@/store";
 import { Button } from "@/components/ui/button";
 import {
@@ -46,20 +47,7 @@ export function HardPaywallModal() {
       >
         <DialogHeader className="space-y-3">
           <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-destructive/10">
-            <svg
-              className="h-7 w-7 text-destructive"
-              fill="none"
-              viewBox="0 0 24 24"
-              strokeWidth={1.5}
-              stroke="currentColor"
-              aria-hidden="true"
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                d="M18.364 18.364A9 9 0 0 0 5.636 5.636m12.728 12.728A9 9 0 0 1 5.636 5.636m12.728 12.728L5.636 5.636"
-              />
-            </svg>
+            <FiXCircle className="h-7 w-7 text-destructive" aria-hidden="true" />
           </div>
           <DialogTitle className="text-center text-xl">
             Monthly message limit reached

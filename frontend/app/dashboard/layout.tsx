@@ -317,7 +317,7 @@ function SidebarContent({
         <button
           title="Collapse sidebar"
           onClick={onToggleCollapse}
-          className="shrink-0 rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground transition-colors ml-auto"
+          className="inline-flex items-center justify-center shrink-0 rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground transition-colors ml-auto"
         >
           <PanelLeftClose className="h-3.5 w-3.5" />
         </button>
@@ -456,7 +456,7 @@ function SidebarContent({
           <button
             title="Sign out"
             onClick={() => signOut({ callbackUrl: "/login" })}
-            className="shrink-0 rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
+            className="inline-flex items-center justify-center shrink-0 rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
           >
             <LogOut className="h-3.5 w-3.5" />
           </button>

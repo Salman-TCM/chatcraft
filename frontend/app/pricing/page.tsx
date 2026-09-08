@@ -4,6 +4,7 @@ import { useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useSession } from "next-auth/react";
+import { FiCheck } from "react-icons/fi";
 import { Button } from "@/components/ui/button";
 import { APP_NAME } from "@/lib/constants";
 import {
@@ -84,11 +85,7 @@ const PLANS: Plan[] = [
   },
 ];
 
-const CHECK = (
-  <svg className="h-4 w-4 text-green-500 shrink-0" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
-    <path fillRule="evenodd" d="M16.704 4.153a.75.75 0 0 1 .143 1.052l-8 10.5a.75.75 0 0 1-1.127.075l-4.5-4.5a.75.75 0 0 1 1.06-1.06l3.894 3.893 7.48-9.817a.75.75 0 0 1 1.05-.143Z" clipRule="evenodd" />
-  </svg>
-);
+const CHECK = <FiCheck className="h-4 w-4 text-green-500 shrink-0" aria-hidden="true" />;
 
 export default function PricingPage() {
   const { data: session } = useSession();

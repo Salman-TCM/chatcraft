@@ -199,7 +199,7 @@ export default function AgencyPricingPage() {
                   </label>
                   <button
                     onClick={() => removeTier(i)}
-                    className="rounded p-1 text-muted-foreground hover:bg-red-50 hover:text-red-600 transition-colors"
+                    className="inline-flex items-center justify-center rounded p-1 text-muted-foreground hover:bg-red-50 hover:text-red-600 transition-colors"
                   >
                     <Trash2 className="h-3.5 w-3.5" />
                   </button>
@@ -300,7 +300,7 @@ export default function AgencyPricingPage() {
                       />
                       <button
                         onClick={() => removeFeature(i, fi)}
-                        className="rounded p-1 text-muted-foreground hover:text-red-600 transition-colors"
+                        className="inline-flex items-center justify-center rounded p-1 text-muted-foreground hover:text-red-600 transition-colors"
                       >
                         <Trash2 className="h-3 w-3" />
                       </button>

@@ -372,7 +372,7 @@ export default function BroadcastPage() {
           <div className="bg-background rounded-xl shadow-xl w-full max-w-xl max-h-[90vh] flex flex-col">
             <div className="flex items-center justify-between p-4 border-b">
               <h2 className="font-semibold">{editing ? "Edit Campaign" : "New Campaign"}</h2>
-              <button onClick={() => setShowModal(false)}><X className="h-5 w-5 text-muted-foreground" /></button>
+              <button className="inline-flex items-center justify-center" onClick={() => setShowModal(false)}><X className="h-5 w-5 text-muted-foreground" /></button>
             </div>
             <form onSubmit={form.handleSubmit(onSubmit)} className="flex flex-col flex-1 min-h-0">
               <div className="flex-1 overflow-y-auto p-4 space-y-4">
@@ -475,7 +475,7 @@ export default function BroadcastPage() {
                   <p className="text-xs text-muted-foreground mt-0.5">Subject: {previewTarget.subject}</p>
                 )}
               </div>
-              <button onClick={() => setPreviewTarget(null)}><X className="h-5 w-5 text-muted-foreground" /></button>
+              <button className="inline-flex items-center justify-center" onClick={() => setPreviewTarget(null)}><X className="h-5 w-5 text-muted-foreground" /></button>
             </div>
             <div className="flex-1 overflow-auto p-5">
               {previewTarget.html_content ? (
@@ -503,7 +503,7 @@ export default function BroadcastPage() {
           <div className="bg-background rounded-xl shadow-xl w-full max-w-sm">
             <div className="flex items-center justify-between p-4 border-b">
               <h2 className="font-semibold">Test Send — {testTarget.name}</h2>
-              <button onClick={() => setTestTarget(null)}><X className="h-5 w-5 text-muted-foreground" /></button>
+              <button className="inline-flex items-center justify-center" onClick={() => setTestTarget(null)}><X className="h-5 w-5 text-muted-foreground" /></button>
             </div>
             <div className="p-4 space-y-3">
               <p className="text-sm text-muted-foreground">
@@ -548,7 +548,7 @@ export default function BroadcastPage() {
           <div className="bg-background rounded-xl shadow-xl w-full max-w-sm">
             <div className="flex items-center justify-between p-4 border-b">
               <h2 className="font-semibold">{statsTarget.name} — Delivery Report</h2>
-              <button onClick={() => { setStatsTarget(null); setStats(null); }}><X className="h-5 w-5 text-muted-foreground" /></button>
+              <button className="inline-flex items-center justify-center" onClick={() => { setStatsTarget(null); setStats(null); }}><X className="h-5 w-5 text-muted-foreground" /></button>
             </div>
             <div className="p-4 space-y-4">
               <div className="grid grid-cols-2 gap-3">
@@ -743,9 +743,9 @@ function EmailTemplateBuilder({ value, onChange }: { value: string; onChange: (v
                     <div className="flex items-center justify-between mb-1">
                       <span className="text-[10px] text-muted-foreground capitalize font-medium">{b.type}</span>
                       <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
-                        <button onClick={(e) => { e.stopPropagation(); moveBlock(b.id, -1); }} disabled={i === 0} className="p-0.5 hover:text-foreground text-muted-foreground disabled:opacity-30"><ChevronUp className="h-3 w-3" /></button>
-                        <button onClick={(e) => { e.stopPropagation(); moveBlock(b.id, 1); }} disabled={i === blocks.length - 1} className="p-0.5 hover:text-foreground text-muted-foreground disabled:opacity-30"><ChevronDown className="h-3 w-3" /></button>
-                        <button onClick={(e) => { e.stopPropagation(); removeBlock(b.id); }} className="p-0.5 hover:text-destructive text-muted-foreground"><X className="h-3 w-3" /></button>
+                        <button onClick={(e) => { e.stopPropagation(); moveBlock(b.id, -1); }} disabled={i === 0} className="inline-flex items-center justify-center p-0.5 hover:text-foreground text-muted-foreground disabled:opacity-30"><ChevronUp className="h-3 w-3" /></button>
+                        <button onClick={(e) => { e.stopPropagation(); moveBlock(b.id, 1); }} disabled={i === blocks.length - 1} className="inline-flex items-center justify-center p-0.5 hover:text-foreground text-muted-foreground disabled:opacity-30"><ChevronDown className="h-3 w-3" /></button>
+                        <button onClick={(e) => { e.stopPropagation(); removeBlock(b.id); }} className="inline-flex items-center justify-center p-0.5 hover:text-destructive text-muted-foreground"><X className="h-3 w-3" /></button>
                       </div>
                     </div>
                     {b.type === "divider" ? (

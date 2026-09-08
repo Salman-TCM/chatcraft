@@ -669,7 +669,7 @@ export default function AgentRunPage() {
                 )}
                 <button
                   onClick={() => setPendingAttachment(null)}
-                  className="text-muted-foreground hover:text-foreground shrink-0"
+                  className="inline-flex items-center justify-center text-muted-foreground hover:text-foreground shrink-0"
                   title="Remove attachment"
                 >
                   <X className="h-3.5 w-3.5" />

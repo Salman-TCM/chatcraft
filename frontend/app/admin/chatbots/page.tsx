@@ -54,7 +54,7 @@ export default function AdminChatbotsPage() {
         <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
         <Input className="pl-9" placeholder="Search by name…" value={query} onChange={(e) => setQuery(e.target.value)} />
         {query && (
-          <button className="absolute right-3 top-1/2 -translate-y-1/2" onClick={() => setQuery("")}>
+          <button className="inline-flex items-center justify-center absolute right-3 top-1/2 -translate-y-1/2" onClick={() => setQuery("")}>
             <X className="h-4 w-4 text-muted-foreground" />
           </button>
         )}

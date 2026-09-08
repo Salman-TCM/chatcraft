@@ -213,7 +213,7 @@ export default function ContactsPage() {
           onChange={(e) => setQuery(e.target.value)}
         />
         {query && (
-          <button className="absolute right-3 top-1/2 -translate-y-1/2" onClick={() => setQuery("")}>
+          <button className="inline-flex items-center justify-center absolute right-3 top-1/2 -translate-y-1/2" onClick={() => setQuery("")}>
             <X className="h-4 w-4 text-muted-foreground hover:text-foreground" />
           </button>
         )}
