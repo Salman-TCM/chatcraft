@@ -3,12 +3,15 @@
 import { useEffect, useRef, useState, useCallback } from "react";
 import {
   FileText, Globe, Link2, Loader2, Search, Trash2, Upload, X,
-  CheckCircle2, AlertCircle, Clock,
+  CheckCircle2, AlertCircle, Clock, Pencil,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import {
+  Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
+} from "@/components/ui/dialog";
 import { apiClient } from "@/lib/api";
 import { toast } from "@/hooks/use-toast";
 import { getErrorMessage } from "@/lib/errors";
@@ -55,6 +58,12 @@ export function AgentKnowledgeManager({
   const [loading, setLoading] = useState(true);
   const [addMode, setAddMode] = useState<AddMode>(null);
   const [deleting, setDeleting] = useState<string | null>(null);
+
+  const [editingDoc, setEditingDoc] = useState<KBDocument | null>(null);
+  const [editName, setEditName] = useState("");
+  const [editContent, setEditContent] = useState("");
+  const [loadingEditContent, setLoadingEditContent] = useState(false);
+  const [savingEdit, setSavingEdit] = useState(false);
 
   const fileRef = useRef<HTMLInputElement>(null);
   const [uploading, setUploading] = useState(false);
@@ -189,6 +198,49 @@ export function AgentKnowledgeManager({
       });
     } finally {
       setDeleting(null);
+    }
+  }
+
+  async function openEdit(doc: KBDocument) {
+    setEditingDoc(doc);
+    setEditName(doc.name);
+    setEditContent("");
+    setLoadingEditContent(true);
+    try {
+      const { data } = await apiClient.get(
+        `/api/agent-kb/${agentId}/documents/${doc.id}/content`
+      );
+      setEditContent(data.data.content);
+    } catch (err) {
+      toast({
+        variant: "destructive",
+        title: "Failed to load document content",
+        description: getErrorMessage(err),
+      });
+      setEditingDoc(null);
+    } finally {
+      setLoadingEditContent(false);
+    }
+  }
+
+  async function handleSaveEdit() {
+    if (!editingDoc || !editContent.trim()) return;
+    setSavingEdit(true);
+    try {
+      const { data } = await apiClient.patch(
+        `/api/agent-kb/${agentId}/documents/${editingDoc.id}`,
+        { content: editContent.trim(), name: editName.trim() || undefined }
+      );
+      setDocs((prev) => prev.map((d) => (d.id === editingDoc.id ? data.data : d)));
+      setEditingDoc(null);
+    } catch (err) {
+      toast({
+        variant: "destructive",
+        title: "Failed to update document",
+        description: getErrorMessage(err),
+      });
+    } finally {
+      setSavingEdit(false);
     }
   }
 
@@ -438,17 +490,28 @@ export function AgentKnowledgeManager({
                     <p className="text-[11px] text-destructive mt-1">{doc.error_message}</p>
                   )}
                 </div>
-                <button
-                  className="rounded p-1.5 hover:bg-muted text-muted-foreground hover:text-destructive shrink-0"
-                  onClick={() => handleDelete(doc.id)}
-                  disabled={deleting === doc.id}
-                >
-                  {deleting === doc.id ? (
-                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                  ) : (
-                    <Trash2 className="h-3.5 w-3.5" />
-                  )}
-                </button>
+                <div className="flex items-center gap-0.5 shrink-0">
+                  <button
+                    className="rounded p-1.5 hover:bg-muted text-muted-foreground hover:text-primary"
+                    onClick={() => openEdit(doc)}
+                    disabled={doc.status === "processing"}
+                    title="Edit content"
+                  >
+                    <Pencil className="h-3.5 w-3.5" />
+                  </button>
+                  <button
+                    className="rounded p-1.5 hover:bg-muted text-muted-foreground hover:text-destructive"
+                    onClick={() => handleDelete(doc.id)}
+                    disabled={deleting === doc.id}
+                    title="Delete"
+                  >
+                    {deleting === doc.id ? (
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                    ) : (
+                      <Trash2 className="h-3.5 w-3.5" />
+                    )}
+                  </button>
+                </div>
               </div>
             </Card>
           ))}
@@ -501,6 +564,55 @@ export function AgentKnowledgeManager({
           )}
         </div>
       )}
+
+      <Dialog open={editingDoc !== null} onOpenChange={(open) => !open && setEditingDoc(null)}>
+        <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>Edit Document</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3">
+            <div>
+              <Label className="text-[11px] text-muted-foreground mb-1 block">Name</Label>
+              <Input
+                value={editName}
+                onChange={(e) => setEditName(e.target.value)}
+                className="h-8 text-sm"
+              />
+            </div>
+            <div>
+              <Label className="text-[11px] text-muted-foreground mb-1 block">Content</Label>
+              {loadingEditContent ? (
+                <div className="flex justify-center py-10">
+                  <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+                </div>
+              ) : (
+                <textarea
+                  value={editContent}
+                  onChange={(e) => setEditContent(e.target.value)}
+                  rows={14}
+                  className="w-full rounded-md border bg-background px-3 py-2 text-xs resize-y focus:outline-none focus:ring-1 focus:ring-ring font-mono"
+                />
+              )}
+              <p className="text-[11px] text-muted-foreground mt-1">
+                Saving replaces the document's full content and re-indexes it — the
+                agent's answers reflect the update once processing finishes.
+              </p>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" size="sm" onClick={() => setEditingDoc(null)}>
+              Cancel
+            </Button>
+            <Button
+              size="sm"
+              disabled={savingEdit || loadingEditContent || !editContent.trim()}
+              onClick={handleSaveEdit}
+            >
+              {savingEdit ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : "Save & Re-index"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

@@ -74,6 +74,7 @@ const TOOLS = [
   { key: "sms",              label: "SMS",              description: "Send text messages via Twilio",                  icon: "💬" },
   { key: "verification",     label: "Verification",     description: "Send and verify OTP codes",                      icon: "🔐" },
   { key: "search_kb",        label: "Knowledge Base",   description: "Search this agent's uploaded documents",         icon: "📚" },
+  { key: "update_kb",        label: "Update Knowledge Base", description: "Create, replace, or append to a knowledge base document", icon: "📝" },
   { key: "agent_builder",    label: "Agent Builder",    description: "Spawn and manage other agents",                  icon: "🤖" },
   { key: "datetime",         label: "Date & Time",      description: "Get the current date and time in any timezone",  icon: "🕐" },
   { key: "image_generation",    label: "Image Generation",   description: "Generate images with DALL-E (requires OpenAI key)",                 icon: "🎨" },
