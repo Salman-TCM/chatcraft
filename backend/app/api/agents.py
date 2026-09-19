@@ -1124,6 +1124,7 @@ _BUILTIN_TOOL_NAMES = frozenset(
         "create_agent",
         "search_kb",
         "update_kb_document",
+        "edit_kb_document",
         "calculate_faraid",
         "get_current_datetime",
         "generate_image",
@@ -2400,6 +2401,37 @@ def _build_builtin_tools(tools_config: dict) -> list[dict]:
                 },
             }
         )
+        defs.append(
+            {
+                "name": "edit_kb_document",
+                "description": (
+                    "Apply a natural-language edit to an EXISTING knowledge base "
+                    "document without retyping its full content — good for targeted "
+                    "changes ('update the refund window to 30 days') to documents "
+                    "that are long or where you only know what should change, not "
+                    "the whole text. For short documents, or to replace the whole "
+                    "thing, use update_kb_document instead. Fails if no document "
+                    "with that name exists yet — create one with update_kb_document first."
+                ),
+                "input_schema": {
+                    "type": "object",
+                    "properties": {
+                        "document_name": {
+                            "type": "string",
+                            "description": (
+                                "Name of the existing document to edit — matched "
+                                "case-insensitively against this agent's documents"
+                            ),
+                        },
+                        "instruction": {
+                            "type": "string",
+                            "description": "Natural-language description of the change to make",
+                        },
+                    },
+                    "required": ["document_name", "instruction"],
+                },
+            }
+        )
 
     if tools_config.get("datetime"):
         defs.append(
@@ -2931,6 +2963,8 @@ async def _execute_tool_impl(name: str, inputs: dict, mcp_map: dict, ctx: dict |
             return await _tool_search_kb(inputs, ctx or {})
         elif name == "update_kb_document":
             return await _tool_update_kb_document(inputs, ctx or {})
+        elif name == "edit_kb_document":
+            return await _tool_edit_kb_document(inputs, ctx or {})
         elif name == "calculate_faraid":
             return _tool_calculate_faraid(inputs)
         elif name == "get_current_datetime":
@@ -3912,7 +3946,7 @@ async def _tool_update_kb_document(inputs: dict, ctx: dict) -> str:
             )
             db.add(doc)
 
-        set_document_content(doc, content, mode=mode)
+        set_document_content(db, doc, content, mode=mode, source="agent")
         await db.commit()
         await db.refresh(doc)
         dispatch_agent_document_processing(str(doc.id))
@@ -3921,6 +3955,80 @@ async def _tool_update_kb_document(inputs: dict, ctx: dict) -> str:
     return (
         f"{action} knowledge base document '{document_name}'. It's being re-indexed "
         f"now and will be searchable via search_kb within moments."
+    )
+
+
+async def _tool_edit_kb_document(inputs: dict, ctx: dict) -> str:
+    """Apply a natural-language instruction to an existing KB document via
+    one cheap merge LLM call, so the caller doesn't have to retype the
+    whole thing just to make a targeted change."""
+    document_name = (inputs.get("document_name") or "").strip()
+    instruction = (inputs.get("instruction") or "").strip()
+
+    if not document_name:
+        return "Error: document_name is required"
+    if not instruction:
+        return "Error: instruction is required"
+
+    agent_id_str = ctx.get("agent_id")
+    user_id_str = ctx.get("user_id")
+    if not agent_id_str or not user_id_str:
+        return "Error: no agent context available for KB edit"
+    try:
+        agent_uuid = uuid.UUID(agent_id_str)
+        user_uuid = uuid.UUID(user_id_str)
+    except ValueError:
+        return "Error: malformed agent_id/user_id"
+
+    from sqlalchemy import func, select
+
+    from app.db.session import AsyncSessionLocal
+    from app.models.agent_knowledge_base import AgentKnowledgeDocument
+    from app.services.kb.agent_kb_service import (
+        dispatch_agent_document_processing,
+        get_current_content,
+        merge_document_with_instruction,
+        set_document_content,
+    )
+
+    async with AsyncSessionLocal() as db:
+        result = await db.execute(
+            select(AgentKnowledgeDocument).where(
+                AgentKnowledgeDocument.agent_id == agent_uuid,
+                func.lower(AgentKnowledgeDocument.name) == document_name.lower(),
+            )
+        )
+        doc = result.scalars().first()
+        if doc is None:
+            return (
+                f"Error: no knowledge base document named '{document_name}' found. "
+                f"Use update_kb_document to create one first."
+            )
+
+        try:
+            current_content = await get_current_content(doc)
+        except Exception as exc:
+            return f"Error: could not read current content of '{document_name}': {exc}"
+
+        try:
+            new_content = await merge_document_with_instruction(
+                current_content, instruction, user_uuid, db
+            )
+        except Exception as exc:
+            return f"Error: instruction-based edit failed: {exc}"
+
+        set_document_content(
+            db, doc, new_content, mode="replace", source="agent", instruction=instruction
+        )
+        await db.commit()
+        await db.refresh(doc)
+        dispatch_agent_document_processing(str(doc.id))
+        new_version = doc.version
+
+    return (
+        f"Updated knowledge base document '{document_name}' per your instruction "
+        f"(now at version {new_version}). It's being re-indexed and will be "
+        f"searchable via search_kb within moments."
     )
 
 
@@ -4787,11 +4895,14 @@ async def _build_system_prompt(
 
     if agent_tools_cfg.get("update_kb"):
         parts.append(
-            "You have the update_kb_document tool: when the user shares a corrected or "
-            "updated version of a document, gives you new information to remember for "
-            "future conversations, or asks you to revise existing knowledge base notes, "
-            "compose the final text yourself and call update_kb_document rather than just "
-            "answering in chat — otherwise the update is lost once this conversation ends."
+            "You have two knowledge base write tools: when the user shares a corrected "
+            "or updated version of a document, gives you new information to remember for "
+            "future conversations, or asks you to revise existing notes, use one of "
+            "them rather than just answering in chat — otherwise the update is lost once "
+            "this conversation ends. Use update_kb_document (composing the full text "
+            "yourself) to create a new document or replace/append to a short one. Use "
+            "edit_kb_document (giving it only a natural-language instruction) for a "
+            "targeted change to a document that's long or that you haven't fully seen."
         )
 
     if agent_tools_cfg.get("faraid"):
