@@ -13,6 +13,8 @@ from app.models.agent_knowledge_base import AgentKnowledgeDocument, AgentKnowled
 from app.models.knowledge_base import DocumentStatus
 from app.services.kb.extractor import fix_legacy_bengali_encoding
 
+_MAX_CONTENT_CHARS = 500_000
+
 
 class VersionConflict(Exception):
     """Raised when a caller's expected_version doesn't match the document's
@@ -22,6 +24,20 @@ class VersionConflict(Exception):
         self.expected = expected
         self.actual = actual
         super().__init__(f"expected version {expected}, document is at {actual}")
+
+
+class ContentTooLarge(Exception):
+    """Raised when the resulting content would exceed _MAX_CONTENT_CHARS.
+
+    Enforced centrally here (not just at the request-schema layer) because
+    append mode combines the new text with whatever's already stored — two
+    schema-legal pieces can still add up to an over-limit document, and the
+    agent tools don't go through the HTTP schema at all."""
+
+    def __init__(self, length: int) -> None:
+        self.length = length
+        self.limit = _MAX_CONTENT_CHARS
+        super().__init__(f"content is {length} chars, limit is {_MAX_CONTENT_CHARS}")
 
 
 def set_document_content(
@@ -40,12 +56,15 @@ def set_document_content(
     original file/URL and re-chunks/re-embeds straight from this text, so
     edits work the same way regardless of the document's original type.
 
-    Every prior state that actually had text captured is snapshotted into
-    agent_kb_document_versions before being overwritten, and `doc.version`
-    is bumped — giving every edit a rollback point and an optimistic-
-    concurrency token. Pass `expected_version` to reject a write against a
-    version that's no longer current (raises VersionConflict) instead of
-    silently clobbering a newer edit.
+    `doc.version` is bumped on every accepted edit of a persisted document
+    (not just when there's prior content to snapshot into
+    agent_kb_document_versions — a pdf/docx/txt/url document's first-ever
+    edit still needs the bump, or a second concurrent writer racing against
+    that same expected_version would never see a conflict). A snapshot row
+    is only added when there's actual prior text to preserve. Pass
+    `expected_version` to reject a write against a version that's no
+    longer current (raises VersionConflict) instead of silently clobbering
+    a newer edit.
 
     The version row is added straight to `db` rather than through
     `doc.versions` — appending to that relationship would force an implicit
@@ -58,6 +77,10 @@ def set_document_content(
     text that came in through file extraction. No-op on already-correct
     Unicode text (English or otherwise).
 
+    Raises ContentTooLarge (checked before anything is mutated, so a
+    rejected write has no side effects) if the resulting text — after
+    append merges with existing content — would exceed _MAX_CONTENT_CHARS.
+
     Caller is responsible for committing and dispatching reprocessing.
     """
     if expected_version is not None and expected_version != doc.version:
@@ -67,17 +90,21 @@ def set_document_content(
     if mode == "append" and doc.raw_content:
         content = f"{doc.raw_content.rstrip()}\n\n{content}"
 
-    if doc.id is not None and doc.raw_content:
-        db.add(
-            AgentKnowledgeDocumentVersion(
-                document_id=doc.id,
-                version=doc.version,
-                name=doc.name,
-                content=doc.raw_content,
-                source=source,
-                instruction=instruction,
+    if len(content) > _MAX_CONTENT_CHARS:
+        raise ContentTooLarge(len(content))
+
+    if doc.id is not None:
+        if doc.raw_content:
+            db.add(
+                AgentKnowledgeDocumentVersion(
+                    document_id=doc.id,
+                    version=doc.version,
+                    name=doc.name,
+                    content=doc.raw_content,
+                    source=source,
+                    instruction=instruction,
+                )
             )
-        )
         doc.version += 1
 
     doc.raw_content = content

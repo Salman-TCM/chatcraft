@@ -6,16 +6,31 @@ update_kb_document / edit_kb_document agent tools. It must:
     legacy-Bengali fix used for file extraction, since copy-pasted text can
     carry the same mis-encoded byte sequences a legacy-encoded PDF/DOCX
     would;
-  - snapshot the document's prior state into a version row and bump
-    doc.version on every real edit, but not on first creation; and
-  - enforce optimistic concurrency when a caller passes expected_version.
+  - snapshot the document's prior state into a version row (when there is
+    prior text to snapshot) and bump doc.version on every edit of a
+    persisted document, even its first — the version bump can't be
+    conditioned on there being something to snapshot, or optimistic
+    concurrency silently breaks for a document's first-ever edit (two
+    concurrent writers both checking expected_version==1 would both
+    succeed, since nothing would move it to 2);
+  - enforce optimistic concurrency when a caller passes expected_version;
+    and
+  - reject (not silently truncate) content beyond the size limit, checked
+    before anything is mutated so a rejected write has no side effects —
+    enforced here centrally, not just in the HTTP request schema, since
+    append mode can push two schema-legal pieces over the limit together,
+    and the agent tools don't go through that schema at all.
 """
 
 import pytest
 
 from app.models.agent_knowledge_base import AgentKnowledgeDocument, AgentKnowledgeDocumentVersion
 from app.models.knowledge_base import DocumentStatus, DocumentType
-from app.services.kb.agent_kb_service import VersionConflict, set_document_content
+from app.services.kb.agent_kb_service import (
+    ContentTooLarge,
+    VersionConflict,
+    set_document_content,
+)
 
 _BIJOY_SAMPLE = (
     "mvwjkx cwil` MwVZ n‡e|\n"
@@ -112,16 +127,22 @@ def test_editing_a_persisted_document_snapshots_prior_content_and_bumps_version(
     assert snapshot.source == "user"
 
 
-def test_editing_a_persisted_document_with_no_prior_content_does_not_snapshot():
+def test_first_edit_of_a_persisted_document_with_no_prior_content_still_bumps_version():
     # A pdf/url-type document that's never been edited before has no
-    # raw_content captured yet — nothing to snapshot.
+    # raw_content captured yet, so there's nothing to snapshot — but the
+    # version must still bump, or a second writer racing on the same
+    # expected_version=1 would never see a conflict (the exact regression
+    # this test guards against).
     db, doc = _FakeDB(), _new_doc(persisted=True)
     doc.version = 1
 
-    set_document_content(db, doc, "First edit.", mode="replace")
+    set_document_content(db, doc, "First edit.", mode="replace", expected_version=1)
 
     assert db.added == []
-    assert doc.version == 1
+    assert doc.version == 2
+
+    with pytest.raises(VersionConflict):
+        set_document_content(db, doc, "Second edit.", mode="replace", expected_version=1)
 
 
 def test_matching_expected_version_succeeds():
@@ -148,3 +169,41 @@ def test_stale_expected_version_raises_version_conflict():
     assert doc.raw_content == "Old content."
     assert doc.version == 3
     assert db.added == []
+
+
+def test_replace_over_limit_raises_content_too_large_without_mutating():
+    db, doc = _FakeDB(), _new_doc(persisted=True)
+    doc.raw_content = "Old content."
+    doc.version = 1
+
+    with pytest.raises(ContentTooLarge) as exc_info:
+        set_document_content(db, doc, "x" * 500_001, mode="replace")
+
+    assert exc_info.value.length == 500_001
+    assert exc_info.value.limit == 500_000
+    assert doc.raw_content == "Old content."
+    assert doc.version == 1
+    assert db.added == []
+
+
+def test_append_that_pushes_combined_content_over_limit_raises_content_too_large():
+    # Each piece alone would be schema-legal (under 500,000 chars) — only
+    # the combined result exceeds the limit, which only a check inside
+    # set_document_content (not a per-request schema field) can catch.
+    db, doc = _FakeDB(), _new_doc(persisted=True)
+    doc.raw_content = "x" * 400_000
+    doc.version = 1
+
+    with pytest.raises(ContentTooLarge):
+        set_document_content(db, doc, "y" * 200_000, mode="append")
+
+    assert doc.raw_content == "x" * 400_000
+    assert doc.version == 1
+    assert db.added == []
+
+
+def test_content_within_limit_succeeds():
+    db, doc = _FakeDB(), _new_doc(persisted=True)
+    doc.version = 1
+    set_document_content(db, doc, "x" * 500_000, mode="replace")
+    assert len(doc.raw_content) == 500_000

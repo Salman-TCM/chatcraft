@@ -3923,6 +3923,7 @@ async def _tool_update_kb_document(inputs: dict, ctx: dict) -> str:
     from app.models.agent_knowledge_base import AgentKnowledgeDocument
     from app.models.knowledge_base import DocumentStatus, DocumentType
     from app.services.kb.agent_kb_service import (
+        ContentTooLarge,
         dispatch_agent_document_processing,
         set_document_content,
     )
@@ -3946,7 +3947,13 @@ async def _tool_update_kb_document(inputs: dict, ctx: dict) -> str:
             )
             db.add(doc)
 
-        set_document_content(db, doc, content, mode=mode, source="agent")
+        try:
+            set_document_content(db, doc, content, mode=mode, source="agent")
+        except ContentTooLarge as exc:
+            return (
+                f"Error: content is {exc.length:,} characters, over the "
+                f"{exc.limit:,}-character limit for a knowledge base document."
+            )
         await db.commit()
         await db.refresh(doc)
         dispatch_agent_document_processing(str(doc.id))
@@ -3985,6 +3992,7 @@ async def _tool_edit_kb_document(inputs: dict, ctx: dict) -> str:
     from app.db.session import AsyncSessionLocal
     from app.models.agent_knowledge_base import AgentKnowledgeDocument
     from app.services.kb.agent_kb_service import (
+        ContentTooLarge,
         dispatch_agent_document_processing,
         get_current_content,
         merge_document_with_instruction,
@@ -4017,9 +4025,15 @@ async def _tool_edit_kb_document(inputs: dict, ctx: dict) -> str:
         except Exception as exc:
             return f"Error: instruction-based edit failed: {exc}"
 
-        set_document_content(
-            db, doc, new_content, mode="replace", source="agent", instruction=instruction
-        )
+        try:
+            set_document_content(
+                db, doc, new_content, mode="replace", source="agent", instruction=instruction
+            )
+        except ContentTooLarge as exc:
+            return (
+                f"Error: the updated content is {exc.length:,} characters, over the "
+                f"{exc.limit:,}-character limit for a knowledge base document."
+            )
         await db.commit()
         await db.refresh(doc)
         dispatch_agent_document_processing(str(doc.id))

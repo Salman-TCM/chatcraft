@@ -8,7 +8,7 @@ Celery task. Storage keys are namespaced under `kb/agent/{agent_id}/…`.
 
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, status
+from fastapi import APIRouter, Body, Depends, HTTPException, UploadFile, status
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 
@@ -29,6 +29,7 @@ from app.schemas.agent_kb import (
     AgentUrlIngestRequest,
 )
 from app.services.kb.agent_kb_service import (
+    ContentTooLarge,
     VersionConflict,
     dispatch_agent_document_processing,
     get_current_content,
@@ -173,7 +174,10 @@ async def ingest_text(
     )
     # Runs the same legacy Bijoy/SutonnyMJ Bengali-font fix used for file
     # extraction — pasted text can carry the same mis-encoded byte sequences.
-    set_document_content(db, doc, body.content, mode="replace")
+    try:
+        set_document_content(db, doc, body.content, mode="replace")
+    except ContentTooLarge as exc:
+        raise _content_too_large_response(exc) from exc
     db.add(doc)
     await db.commit()
     await db.refresh(doc)
@@ -287,18 +291,9 @@ async def update_document(
             db, doc, body.content, mode="replace", expected_version=body.expected_version
         )
     except VersionConflict as exc:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail={
-                "success": False,
-                "error": (
-                    f"Document was edited since you loaded it (now at version "
-                    f"{exc.actual}, expected {exc.expected}). Reload and reapply your change."
-                ),
-                "code": "VERSION_CONFLICT",
-                "current_version": exc.actual,
-            },
-        ) from exc
+        raise _version_conflict_response(exc) from exc
+    except ContentTooLarge as exc:
+        raise _content_too_large_response(exc) from exc
 
     if body.name:
         doc.name = body.name
@@ -350,6 +345,7 @@ async def restore_document_version(
     version: int,
     user: CurrentUser,
     db: DBSession,
+    expected_version: int | None = Body(None, embed=True),
 ) -> dict:
     await _assert_owns_agent(agent_id, user.id, db)
     doc = await db.get(AgentKnowledgeDocument, document_id)
@@ -374,15 +370,24 @@ async def restore_document_version(
 
     # Restoring is itself an edit: the content being replaced (the current,
     # post-snapshot state) gets its own version row first, so restoring an
-    # old version never loses the state you restored away from.
-    set_document_content(
-        db,
-        doc,
-        snapshot.content,
-        mode="replace",
-        source="restore",
-        instruction=f"Restored v{version}",
-    )
+    # old version never loses the state you restored away from. Passing
+    # expected_version through means restoring against a stale view (e.g.
+    # someone else edited after this history list was loaded) 409s instead
+    # of silently discarding their edit.
+    try:
+        set_document_content(
+            db,
+            doc,
+            snapshot.content,
+            mode="replace",
+            source="restore",
+            instruction=f"Restored v{version}",
+            expected_version=expected_version,
+        )
+    except VersionConflict as exc:
+        raise _version_conflict_response(exc) from exc
+    except ContentTooLarge as exc:
+        raise _content_too_large_response(exc) from exc
     doc.name = snapshot.name
 
     await db.commit()
@@ -413,19 +418,12 @@ async def instruct_document_edit(
             detail={"success": False, "error": "Document not found", "code": "NOT_FOUND"},
         )
 
+    # Fast-fail before the slow merge call below, but this alone isn't
+    # enough: expected_version is re-checked atomically at the actual write
+    # (see set_document_content call below) to close the race where someone
+    # else edits the document during the LLM round-trip.
     if body.expected_version is not None and body.expected_version != doc.version:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail={
-                "success": False,
-                "error": (
-                    f"Document was edited since you loaded it (now at version "
-                    f"{doc.version}, expected {body.expected_version}). Reload and try again."
-                ),
-                "code": "VERSION_CONFLICT",
-                "current_version": doc.version,
-            },
-        )
+        raise _version_conflict_response(VersionConflict(body.expected_version, doc.version))
 
     try:
         current_content = await get_current_content(doc)
@@ -453,9 +451,20 @@ async def instruct_document_edit(
             },
         ) from exc
 
-    set_document_content(
-        db, doc, new_content, mode="replace", source="instruction", instruction=body.instruction
-    )
+    try:
+        set_document_content(
+            db,
+            doc,
+            new_content,
+            mode="replace",
+            source="instruction",
+            instruction=body.instruction,
+            expected_version=body.expected_version,
+        )
+    except VersionConflict as exc:
+        raise _version_conflict_response(exc) from exc
+    except ContentTooLarge as exc:
+        raise _content_too_large_response(exc) from exc
     await db.commit()
     await db.refresh(doc)
 
@@ -526,6 +535,32 @@ async def test_search(
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
+
+
+def _version_conflict_response(exc: VersionConflict) -> HTTPException:
+    return HTTPException(
+        status_code=status.HTTP_409_CONFLICT,
+        detail={
+            "success": False,
+            "error": (
+                f"Document was edited since you loaded it (now at version "
+                f"{exc.actual}, expected {exc.expected}). Reload and reapply your change."
+            ),
+            "code": "VERSION_CONFLICT",
+            "current_version": exc.actual,
+        },
+    )
+
+
+def _content_too_large_response(exc: ContentTooLarge) -> HTTPException:
+    return HTTPException(
+        status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+        detail={
+            "success": False,
+            "error": f"Content is {exc.length:,} characters — the limit is {exc.limit:,}.",
+            "code": "CONTENT_TOO_LARGE",
+        },
+    )
 
 
 async def _assert_owns_agent(agent_id: uuid.UUID, user_id: uuid.UUID, db) -> Agent:

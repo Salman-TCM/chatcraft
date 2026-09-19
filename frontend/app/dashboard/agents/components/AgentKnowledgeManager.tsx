@@ -305,17 +305,26 @@ export function AgentKnowledgeManager({
     setRestoringVersion(version);
     try {
       const { data } = await apiClient.post(
-        `/api/agent-kb/${agentId}/documents/${historyDoc.id}/versions/${version}/restore`
+        `/api/agent-kb/${agentId}/documents/${historyDoc.id}/versions/${version}/restore`,
+        { expected_version: historyDoc.version }
       );
       setDocs((prev) => prev.map((d) => (d.id === historyDoc.id ? data.data : d)));
       toast({ title: `Restored to v${version}`, description: "Re-indexing now." });
       setHistoryDoc(null);
     } catch (err) {
-      toast({
-        variant: "destructive",
-        title: "Failed to restore version",
-        description: getErrorMessage(err),
-      });
+      if ((err as { response?: { status?: number } })?.response?.status === 409) {
+        toast({
+          variant: "destructive",
+          title: "Someone else edited this document",
+          description: "It changed since this history list loaded. Reopen it and try again.",
+        });
+      } else {
+        toast({
+          variant: "destructive",
+          title: "Failed to restore version",
+          description: getErrorMessage(err),
+        });
+      }
     } finally {
       setRestoringVersion(null);
     }

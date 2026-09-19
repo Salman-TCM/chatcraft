@@ -1,9 +1,19 @@
 import uuid
 from datetime import datetime
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from app.models.knowledge_base import DocumentStatus, DocumentType
+
+
+def _v_not_blank(v: str) -> str:
+    """min_length only counts raw characters, so a string of pure whitespace
+    (e.g. one space) passes it — then set_document_content strips it to "",
+    which is falsy and silently falls back to re-extracting the document's
+    original source instead of actually becoming empty. Reject it upfront."""
+    if not v.strip():
+        raise ValueError("cannot be empty or whitespace-only")
+    return v
 
 
 class AgentDocumentResponse(BaseModel):
@@ -46,6 +56,8 @@ class AgentTextIngestRequest(BaseModel):
     content: str = Field(..., min_length=1, max_length=500_000)
     name: str = Field(..., min_length=1, max_length=500)
 
+    _v_content = field_validator("content")(lambda cls, v: _v_not_blank(v))
+
 
 class AgentDocumentUpdateRequest(BaseModel):
     content: str = Field(..., min_length=1, max_length=500_000)
@@ -55,10 +67,14 @@ class AgentDocumentUpdateRequest(BaseModel):
     # else, or the agent, edited it in between) — see set_document_content.
     expected_version: int | None = Field(None, ge=1)
 
+    _v_content = field_validator("content")(lambda cls, v: _v_not_blank(v))
+
 
 class AgentDocumentInstructRequest(BaseModel):
     instruction: str = Field(..., min_length=1, max_length=2000)
     expected_version: int | None = Field(None, ge=1)
+
+    _v_instruction = field_validator("instruction")(lambda cls, v: _v_not_blank(v))
 
 
 class AgentDocumentVersionResponse(BaseModel):
