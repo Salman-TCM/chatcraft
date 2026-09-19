@@ -185,9 +185,18 @@ async def extract_text_for_document(
     """
     Dispatch to the right extractor based on document type.
     Returns raw extracted text.
+
+    `raw_content` wins over re-fetching the original source whenever it's
+    set: for type='text' it always has been, and for pdf/docx/txt/url it
+    gets populated once a document is edited via the update-content API/tool
+    (see agent_kb_service.set_document_content), making that edited text the
+    source of truth for every reprocessing run from then on.
     """
+    if raw_content:
+        return raw_content
+
     if doc_type == "text":
-        return raw_content or ""
+        return ""
 
     if doc_type == "url":
         return await extract_url(source_url or file_url or "")

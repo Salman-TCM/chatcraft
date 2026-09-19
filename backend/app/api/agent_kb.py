@@ -20,10 +20,15 @@ from app.models.knowledge_base import DocumentStatus, DocumentType
 from app.schemas.agent_kb import (
     AgentDocumentDetailResponse,
     AgentDocumentResponse,
+    AgentDocumentUpdateRequest,
     AgentSearchRequest,
     AgentSearchResultItem,
     AgentTextIngestRequest,
     AgentUrlIngestRequest,
+)
+from app.services.kb.agent_kb_service import (
+    dispatch_agent_document_processing,
+    set_document_content,
 )
 from app.services.kb.agent_rag import AgentRAGService
 from app.services.storage import (
@@ -216,6 +221,81 @@ async def get_document(
     return {"success": True, "data": AgentDocumentDetailResponse.model_validate(doc)}
 
 
+# ── Current editable content ─────────────────────────────────────────────────
+
+
+@router.get("/{agent_id}/documents/{document_id}/content")
+async def get_document_content(
+    agent_id: uuid.UUID,
+    document_id: uuid.UUID,
+    user: CurrentUser,
+    db: DBSession,
+) -> dict:
+    await _assert_owns_agent(agent_id, user.id, db)
+    doc = await db.get(AgentKnowledgeDocument, document_id)
+    if not doc or doc.agent_id != agent_id:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"success": False, "error": "Document not found", "code": "NOT_FOUND"},
+        )
+
+    if doc.raw_content:
+        content = doc.raw_content
+    else:
+        # Never edited before — pull the current text straight from the
+        # original source (file/URL) so the editor starts from real content.
+        from app.services.kb.extractor import extract_text_for_document
+
+        try:
+            content = await extract_text_for_document(
+                doc_type=doc.type.value,
+                file_url=doc.file_url,
+                source_url=doc.source_url,
+                raw_content=doc.raw_content,
+            )
+        except Exception as exc:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail={
+                    "success": False,
+                    "error": f"Could not read current content: {exc}",
+                    "code": "EXTRACT_FAILED",
+                },
+            ) from exc
+
+    return {"success": True, "data": {"content": content}}
+
+
+# ── Update document content ──────────────────────────────────────────────────
+
+
+@router.patch("/{agent_id}/documents/{document_id}")
+async def update_document(
+    agent_id: uuid.UUID,
+    document_id: uuid.UUID,
+    body: AgentDocumentUpdateRequest,
+    user: CurrentUser,
+    db: DBSession,
+) -> dict:
+    await _assert_owns_agent(agent_id, user.id, db)
+    doc = await db.get(AgentKnowledgeDocument, document_id)
+    if not doc or doc.agent_id != agent_id:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"success": False, "error": "Document not found", "code": "NOT_FOUND"},
+        )
+
+    if body.name:
+        doc.name = body.name
+    set_document_content(doc, body.content, mode="replace")
+
+    await db.commit()
+    await db.refresh(doc)
+
+    dispatch_agent_document_processing(str(doc.id))
+    return {"success": True, "data": AgentDocumentResponse.model_validate(doc)}
+
+
 # ── Delete document ───────────────────────────────────────────────────────────
 
 
@@ -292,11 +372,4 @@ async def _assert_owns_agent(agent_id: uuid.UUID, user_id: uuid.UUID, db) -> Age
 
 
 def _dispatch_processing(document_id: str) -> None:
-    try:
-        from app.workers.embedding_worker import process_agent_document
-
-        process_agent_document.delay(document_id)
-    except Exception as exc:
-        from app.core.logging import logger
-
-        logger.warning(f"Failed to enqueue process_agent_document for {document_id}: {exc!r}")
+    dispatch_agent_document_processing(document_id)

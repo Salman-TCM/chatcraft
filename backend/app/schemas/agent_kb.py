@@ -46,6 +46,11 @@ class AgentTextIngestRequest(BaseModel):
     name: str = Field(..., min_length=1, max_length=500)
 
 
+class AgentDocumentUpdateRequest(BaseModel):
+    content: str = Field(..., min_length=1, max_length=500_000)
+    name: str | None = Field(None, min_length=1, max_length=500)
+
+
 class AgentSearchRequest(BaseModel):
     query: str = Field(..., min_length=1, max_length=1000)
     top_k: int = Field(5, ge=1, le=20)
