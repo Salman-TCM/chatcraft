@@ -15,19 +15,24 @@ from sqlalchemy.orm import selectinload
 from app.core.dependencies import CurrentUser, DBSession, require_feature
 from app.core.features import KNOWLEDGE_BASE
 from app.models.agent import Agent
-from app.models.agent_knowledge_base import AgentKnowledgeDocument
+from app.models.agent_knowledge_base import AgentKnowledgeDocument, AgentKnowledgeDocumentVersion
 from app.models.knowledge_base import DocumentStatus, DocumentType
 from app.schemas.agent_kb import (
     AgentDocumentDetailResponse,
+    AgentDocumentInstructRequest,
     AgentDocumentResponse,
     AgentDocumentUpdateRequest,
+    AgentDocumentVersionResponse,
     AgentSearchRequest,
     AgentSearchResultItem,
     AgentTextIngestRequest,
     AgentUrlIngestRequest,
 )
 from app.services.kb.agent_kb_service import (
+    VersionConflict,
     dispatch_agent_document_processing,
+    get_current_content,
+    merge_document_with_instruction,
     set_document_content,
 )
 from app.services.kb.agent_rag import AgentRAGService
@@ -168,7 +173,7 @@ async def ingest_text(
     )
     # Runs the same legacy Bijoy/SutonnyMJ Bengali-font fix used for file
     # extraction — pasted text can carry the same mis-encoded byte sequences.
-    set_document_content(doc, body.content, mode="replace")
+    set_document_content(db, doc, body.content, mode="replace")
     db.add(doc)
     await db.commit()
     await db.refresh(doc)
@@ -241,31 +246,19 @@ async def get_document_content(
             detail={"success": False, "error": "Document not found", "code": "NOT_FOUND"},
         )
 
-    if doc.raw_content:
-        content = doc.raw_content
-    else:
-        # Never edited before — pull the current text straight from the
-        # original source (file/URL) so the editor starts from real content.
-        from app.services.kb.extractor import extract_text_for_document
+    try:
+        content = await get_current_content(doc)
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={
+                "success": False,
+                "error": f"Could not read current content: {exc}",
+                "code": "EXTRACT_FAILED",
+            },
+        ) from exc
 
-        try:
-            content = await extract_text_for_document(
-                doc_type=doc.type.value,
-                file_url=doc.file_url,
-                source_url=doc.source_url,
-                raw_content=doc.raw_content,
-            )
-        except Exception as exc:
-            raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                detail={
-                    "success": False,
-                    "error": f"Could not read current content: {exc}",
-                    "code": "EXTRACT_FAILED",
-                },
-            ) from exc
-
-    return {"success": True, "data": {"content": content}}
+    return {"success": True, "data": {"content": content, "version": doc.version}}
 
 
 # ── Update document content ──────────────────────────────────────────────────
@@ -287,10 +280,182 @@ async def update_document(
             detail={"success": False, "error": "Document not found", "code": "NOT_FOUND"},
         )
 
+    try:
+        # Snapshot before renaming — the version row should capture the
+        # document's name as it was, not the name it's about to become.
+        set_document_content(
+            db, doc, body.content, mode="replace", expected_version=body.expected_version
+        )
+    except VersionConflict as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "success": False,
+                "error": (
+                    f"Document was edited since you loaded it (now at version "
+                    f"{exc.actual}, expected {exc.expected}). Reload and reapply your change."
+                ),
+                "code": "VERSION_CONFLICT",
+                "current_version": exc.actual,
+            },
+        ) from exc
+
     if body.name:
         doc.name = body.name
-    set_document_content(doc, body.content, mode="replace")
 
+    await db.commit()
+    await db.refresh(doc)
+
+    dispatch_agent_document_processing(str(doc.id))
+    return {"success": True, "data": AgentDocumentResponse.model_validate(doc)}
+
+
+# ── Version history ───────────────────────────────────────────────────────────
+
+
+@router.get("/{agent_id}/documents/{document_id}/versions")
+async def list_document_versions(
+    agent_id: uuid.UUID,
+    document_id: uuid.UUID,
+    user: CurrentUser,
+    db: DBSession,
+) -> dict:
+    await _assert_owns_agent(agent_id, user.id, db)
+    doc = await db.get(AgentKnowledgeDocument, document_id)
+    if not doc or doc.agent_id != agent_id:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"success": False, "error": "Document not found", "code": "NOT_FOUND"},
+        )
+
+    result = await db.execute(
+        select(AgentKnowledgeDocumentVersion)
+        .where(AgentKnowledgeDocumentVersion.document_id == document_id)
+        .order_by(AgentKnowledgeDocumentVersion.version.desc())
+    )
+    versions = result.scalars().all()
+    return {
+        "success": True,
+        "data": {
+            "current_version": doc.version,
+            "versions": [AgentDocumentVersionResponse.model_validate(v) for v in versions],
+        },
+    }
+
+
+@router.post("/{agent_id}/documents/{document_id}/versions/{version}/restore")
+async def restore_document_version(
+    agent_id: uuid.UUID,
+    document_id: uuid.UUID,
+    version: int,
+    user: CurrentUser,
+    db: DBSession,
+) -> dict:
+    await _assert_owns_agent(agent_id, user.id, db)
+    doc = await db.get(AgentKnowledgeDocument, document_id)
+    if not doc or doc.agent_id != agent_id:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"success": False, "error": "Document not found", "code": "NOT_FOUND"},
+        )
+
+    result = await db.execute(
+        select(AgentKnowledgeDocumentVersion).where(
+            AgentKnowledgeDocumentVersion.document_id == document_id,
+            AgentKnowledgeDocumentVersion.version == version,
+        )
+    )
+    snapshot = result.scalar_one_or_none()
+    if not snapshot:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"success": False, "error": "Version not found", "code": "VERSION_NOT_FOUND"},
+        )
+
+    # Restoring is itself an edit: the content being replaced (the current,
+    # post-snapshot state) gets its own version row first, so restoring an
+    # old version never loses the state you restored away from.
+    set_document_content(
+        db,
+        doc,
+        snapshot.content,
+        mode="replace",
+        source="restore",
+        instruction=f"Restored v{version}",
+    )
+    doc.name = snapshot.name
+
+    await db.commit()
+    await db.refresh(doc)
+
+    dispatch_agent_document_processing(str(doc.id))
+    return {"success": True, "data": AgentDocumentResponse.model_validate(doc)}
+
+
+# ── Instruction-based edit ────────────────────────────────────────────────────
+
+
+@router.post("/{agent_id}/documents/{document_id}/instruct")
+async def instruct_document_edit(
+    agent_id: uuid.UUID,
+    document_id: uuid.UUID,
+    body: AgentDocumentInstructRequest,
+    user: CurrentUser,
+    db: DBSession,
+) -> dict:
+    """Apply a natural-language instruction to a document without the
+    caller having to supply the full replacement text themselves."""
+    await _assert_owns_agent(agent_id, user.id, db)
+    doc = await db.get(AgentKnowledgeDocument, document_id)
+    if not doc or doc.agent_id != agent_id:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"success": False, "error": "Document not found", "code": "NOT_FOUND"},
+        )
+
+    if body.expected_version is not None and body.expected_version != doc.version:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "success": False,
+                "error": (
+                    f"Document was edited since you loaded it (now at version "
+                    f"{doc.version}, expected {body.expected_version}). Reload and try again."
+                ),
+                "code": "VERSION_CONFLICT",
+                "current_version": doc.version,
+            },
+        )
+
+    try:
+        current_content = await get_current_content(doc)
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={
+                "success": False,
+                "error": f"Could not read current content: {exc}",
+                "code": "EXTRACT_FAILED",
+            },
+        ) from exc
+
+    try:
+        new_content = await merge_document_with_instruction(
+            current_content, body.instruction, user.id, db
+        )
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail={
+                "success": False,
+                "error": f"Instruction-based edit failed: {exc}",
+                "code": "MERGE_FAILED",
+            },
+        ) from exc
+
+    set_document_content(
+        db, doc, new_content, mode="replace", source="instruction", instruction=body.instruction
+    )
     await db.commit()
     await db.refresh(doc)
 

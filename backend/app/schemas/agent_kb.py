@@ -19,6 +19,7 @@ class AgentDocumentResponse(BaseModel):
     chunk_count: int
     token_count: int
     error_message: str | None
+    version: int
     created_at: datetime
     updated_at: datetime
 
@@ -49,6 +50,27 @@ class AgentTextIngestRequest(BaseModel):
 class AgentDocumentUpdateRequest(BaseModel):
     content: str = Field(..., min_length=1, max_length=500_000)
     name: str | None = Field(None, min_length=1, max_length=500)
+    # When set, the write is rejected with 409 if the document has moved on
+    # to a different version since the caller last read it (e.g. someone
+    # else, or the agent, edited it in between) — see set_document_content.
+    expected_version: int | None = Field(None, ge=1)
+
+
+class AgentDocumentInstructRequest(BaseModel):
+    instruction: str = Field(..., min_length=1, max_length=2000)
+    expected_version: int | None = Field(None, ge=1)
+
+
+class AgentDocumentVersionResponse(BaseModel):
+    model_config = {"from_attributes": True}
+
+    id: uuid.UUID
+    version: int
+    name: str
+    content: str
+    source: str
+    instruction: str | None
+    created_at: datetime
 
 
 class AgentSearchRequest(BaseModel):
