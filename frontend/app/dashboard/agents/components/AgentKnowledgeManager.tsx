@@ -3,12 +3,15 @@
 import { useEffect, useRef, useState, useCallback } from "react";
 import {
   FileText, Globe, Link2, Loader2, Search, Trash2, Upload, X,
-  CheckCircle2, AlertCircle, Clock,
+  CheckCircle2, AlertCircle, Clock, Pencil, History, Sparkles, RotateCcw,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import {
+  Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
+} from "@/components/ui/dialog";
 import { apiClient } from "@/lib/api";
 import { toast } from "@/hooks/use-toast";
 import { getErrorMessage } from "@/lib/errors";
@@ -24,6 +27,17 @@ interface KBDocument {
   chunk_count: number | null;
   source_url?: string | null;
   error_message?: string | null;
+  version: number;
+}
+
+interface DocVersion {
+  id: string;
+  version: number;
+  name: string;
+  content: string;
+  source: string;
+  instruction: string | null;
+  created_at: string;
 }
 
 interface SearchResult {
@@ -55,6 +69,22 @@ export function AgentKnowledgeManager({
   const [loading, setLoading] = useState(true);
   const [addMode, setAddMode] = useState<AddMode>(null);
   const [deleting, setDeleting] = useState<string | null>(null);
+
+  const [editingDoc, setEditingDoc] = useState<KBDocument | null>(null);
+  const [editName, setEditName] = useState("");
+  const [editContent, setEditContent] = useState("");
+  const [editVersion, setEditVersion] = useState<number | null>(null);
+  const [loadingEditContent, setLoadingEditContent] = useState(false);
+  const [savingEdit, setSavingEdit] = useState(false);
+
+  const [historyDoc, setHistoryDoc] = useState<KBDocument | null>(null);
+  const [versions, setVersions] = useState<DocVersion[] | null>(null);
+  const [loadingHistory, setLoadingHistory] = useState(false);
+  const [restoringVersion, setRestoringVersion] = useState<number | null>(null);
+
+  const [instructDoc, setInstructDoc] = useState<KBDocument | null>(null);
+  const [instruction, setInstruction] = useState("");
+  const [submittingInstruct, setSubmittingInstruct] = useState(false);
 
   const fileRef = useRef<HTMLInputElement>(null);
   const [uploading, setUploading] = useState(false);
@@ -189,6 +219,145 @@ export function AgentKnowledgeManager({
       });
     } finally {
       setDeleting(null);
+    }
+  }
+
+  async function openEdit(doc: KBDocument) {
+    setEditingDoc(doc);
+    setEditName(doc.name);
+    setEditContent("");
+    setEditVersion(null);
+    setLoadingEditContent(true);
+    try {
+      const { data } = await apiClient.get(
+        `/api/agent-kb/${agentId}/documents/${doc.id}/content`
+      );
+      setEditContent(data.data.content);
+      setEditVersion(data.data.version);
+    } catch (err) {
+      toast({
+        variant: "destructive",
+        title: "Failed to load document content",
+        description: getErrorMessage(err),
+      });
+      setEditingDoc(null);
+    } finally {
+      setLoadingEditContent(false);
+    }
+  }
+
+  async function handleSaveEdit() {
+    if (!editingDoc || !editContent.trim()) return;
+    setSavingEdit(true);
+    try {
+      const { data } = await apiClient.patch(
+        `/api/agent-kb/${agentId}/documents/${editingDoc.id}`,
+        {
+          content: editContent.trim(),
+          name: editName.trim() || undefined,
+          expected_version: editVersion ?? undefined,
+        }
+      );
+      setDocs((prev) => prev.map((d) => (d.id === editingDoc.id ? data.data : d)));
+      setEditingDoc(null);
+    } catch (err) {
+      if ((err as { response?: { status?: number } })?.response?.status === 409) {
+        toast({
+          variant: "destructive",
+          title: "Someone else edited this document",
+          description: "It changed since you opened it. Reopen it and reapply your change.",
+        });
+      } else {
+        toast({
+          variant: "destructive",
+          title: "Failed to update document",
+          description: getErrorMessage(err),
+        });
+      }
+    } finally {
+      setSavingEdit(false);
+    }
+  }
+
+  async function openHistory(doc: KBDocument) {
+    setHistoryDoc(doc);
+    setVersions(null);
+    setLoadingHistory(true);
+    try {
+      const { data } = await apiClient.get(
+        `/api/agent-kb/${agentId}/documents/${doc.id}/versions`
+      );
+      setVersions(data.data.versions);
+    } catch (err) {
+      toast({
+        variant: "destructive",
+        title: "Failed to load version history",
+        description: getErrorMessage(err),
+      });
+      setHistoryDoc(null);
+    } finally {
+      setLoadingHistory(false);
+    }
+  }
+
+  async function handleRestore(version: number) {
+    if (!historyDoc) return;
+    setRestoringVersion(version);
+    try {
+      const { data } = await apiClient.post(
+        `/api/agent-kb/${agentId}/documents/${historyDoc.id}/versions/${version}/restore`,
+        { expected_version: historyDoc.version }
+      );
+      setDocs((prev) => prev.map((d) => (d.id === historyDoc.id ? data.data : d)));
+      toast({ title: `Restored to v${version}`, description: "Re-indexing now." });
+      setHistoryDoc(null);
+    } catch (err) {
+      if ((err as { response?: { status?: number } })?.response?.status === 409) {
+        toast({
+          variant: "destructive",
+          title: "Someone else edited this document",
+          description: "It changed since this history list loaded. Reopen it and try again.",
+        });
+      } else {
+        toast({
+          variant: "destructive",
+          title: "Failed to restore version",
+          description: getErrorMessage(err),
+        });
+      }
+    } finally {
+      setRestoringVersion(null);
+    }
+  }
+
+  async function handleSubmitInstruct() {
+    if (!instructDoc || !instruction.trim()) return;
+    setSubmittingInstruct(true);
+    try {
+      const { data } = await apiClient.post(
+        `/api/agent-kb/${agentId}/documents/${instructDoc.id}/instruct`,
+        { instruction: instruction.trim(), expected_version: instructDoc.version }
+      );
+      setDocs((prev) => prev.map((d) => (d.id === instructDoc.id ? data.data : d)));
+      toast({ title: "Update applied", description: "Re-indexing the document now." });
+      setInstructDoc(null);
+      setInstruction("");
+    } catch (err) {
+      if ((err as { response?: { status?: number } })?.response?.status === 409) {
+        toast({
+          variant: "destructive",
+          title: "Someone else edited this document",
+          description: "Close this and try again with the latest version.",
+        });
+      } else {
+        toast({
+          variant: "destructive",
+          title: "Failed to apply update",
+          description: getErrorMessage(err),
+        });
+      }
+    } finally {
+      setSubmittingInstruct(false);
     }
   }
 
@@ -422,6 +591,14 @@ export function AgentKnowledgeManager({
                     <p className="text-[11px] text-muted-foreground">
                       {doc.chunk_count != null ? `${doc.chunk_count} chunks` : "—"}
                     </p>
+                    <button
+                      className="inline-flex items-center gap-0.5 text-[11px] text-muted-foreground hover:text-primary hover:underline"
+                      onClick={() => openHistory(doc)}
+                      title="Version history"
+                    >
+                      <History className="h-3 w-3" />
+                      v{doc.version}
+                    </button>
                     {doc.source_url && (
                       <a
                         href={doc.source_url}
@@ -438,17 +615,36 @@ export function AgentKnowledgeManager({
                     <p className="text-[11px] text-destructive mt-1">{doc.error_message}</p>
                   )}
                 </div>
-                <button
-                  className="rounded p-1.5 hover:bg-muted text-muted-foreground hover:text-destructive shrink-0"
-                  onClick={() => handleDelete(doc.id)}
-                  disabled={deleting === doc.id}
-                >
-                  {deleting === doc.id ? (
-                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                  ) : (
-                    <Trash2 className="h-3.5 w-3.5" />
-                  )}
-                </button>
+                <div className="flex items-center gap-0.5 shrink-0">
+                  <button
+                    className="rounded p-1.5 hover:bg-muted text-muted-foreground hover:text-primary"
+                    onClick={() => setInstructDoc(doc)}
+                    disabled={doc.status === "processing"}
+                    title="Ask AI to update"
+                  >
+                    <Sparkles className="h-3.5 w-3.5" />
+                  </button>
+                  <button
+                    className="rounded p-1.5 hover:bg-muted text-muted-foreground hover:text-primary"
+                    onClick={() => openEdit(doc)}
+                    disabled={doc.status === "processing"}
+                    title="Edit content"
+                  >
+                    <Pencil className="h-3.5 w-3.5" />
+                  </button>
+                  <button
+                    className="rounded p-1.5 hover:bg-muted text-muted-foreground hover:text-destructive"
+                    onClick={() => handleDelete(doc.id)}
+                    disabled={deleting === doc.id}
+                    title="Delete"
+                  >
+                    {deleting === doc.id ? (
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                    ) : (
+                      <Trash2 className="h-3.5 w-3.5" />
+                    )}
+                  </button>
+                </div>
               </div>
             </Card>
           ))}
@@ -501,6 +697,150 @@ export function AgentKnowledgeManager({
           )}
         </div>
       )}
+
+      <Dialog open={editingDoc !== null} onOpenChange={(open) => !open && setEditingDoc(null)}>
+        <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>Edit Document</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3">
+            <div>
+              <Label className="text-[11px] text-muted-foreground mb-1 block">Name</Label>
+              <Input
+                value={editName}
+                onChange={(e) => setEditName(e.target.value)}
+                className="h-8 text-sm"
+              />
+            </div>
+            <div>
+              <Label className="text-[11px] text-muted-foreground mb-1 block">Content</Label>
+              {loadingEditContent ? (
+                <div className="flex justify-center py-10">
+                  <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+                </div>
+              ) : (
+                <textarea
+                  value={editContent}
+                  onChange={(e) => setEditContent(e.target.value)}
+                  rows={14}
+                  className="w-full rounded-md border bg-background px-3 py-2 text-xs resize-y focus:outline-none focus:ring-1 focus:ring-ring font-mono"
+                />
+              )}
+              <p className="text-[11px] text-muted-foreground mt-1">
+                Saving replaces the document's full content and re-indexes it — the
+                agent's answers reflect the update once processing finishes.
+              </p>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" size="sm" onClick={() => setEditingDoc(null)}>
+              Cancel
+            </Button>
+            <Button
+              size="sm"
+              disabled={savingEdit || loadingEditContent || !editContent.trim()}
+              onClick={handleSaveEdit}
+            >
+              {savingEdit ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : "Save & Re-index"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={instructDoc !== null} onOpenChange={(open) => !open && setInstructDoc(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Ask AI to Update</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-2">
+            <p className="text-xs text-muted-foreground">
+              Describe the change — no need to paste the full document. This calls a
+              quick model to apply just this change and re-index the result.
+            </p>
+            <textarea
+              autoFocus
+              placeholder="e.g. Update the refund window to 30 days"
+              value={instruction}
+              onChange={(e) => setInstruction(e.target.value)}
+              rows={4}
+              className="w-full rounded-md border bg-background px-3 py-2 text-xs resize-y focus:outline-none focus:ring-1 focus:ring-ring"
+            />
+          </div>
+          <DialogFooter>
+            <Button variant="outline" size="sm" onClick={() => setInstructDoc(null)}>
+              Cancel
+            </Button>
+            <Button
+              size="sm"
+              disabled={submittingInstruct || !instruction.trim()}
+              onClick={handleSubmitInstruct}
+            >
+              {submittingInstruct ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : "Apply Update"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={historyDoc !== null} onOpenChange={(open) => !open && setHistoryDoc(null)}>
+        <DialogContent className="max-w-xl">
+          <DialogHeader>
+            <DialogTitle>Version History{historyDoc ? ` — ${historyDoc.name}` : ""}</DialogTitle>
+          </DialogHeader>
+          {loadingHistory ? (
+            <div className="flex justify-center py-8">
+              <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+            </div>
+          ) : (
+            <div className="space-y-2 max-h-[400px] overflow-y-auto">
+              {historyDoc && (
+                <Card className="p-2.5 flex items-center justify-between bg-primary/5 border-primary/30">
+                  <div>
+                    <p className="text-xs font-medium">Current — v{historyDoc.version}</p>
+                  </div>
+                </Card>
+              )}
+              {versions !== null && versions.length === 0 && (
+                <p className="text-xs text-muted-foreground text-center py-4">
+                  No prior versions — this document hasn't been edited yet.
+                </p>
+              )}
+              {versions?.map((v) => (
+                <Card key={v.id} className="p-2.5 space-y-1">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <p className="text-xs font-medium">v{v.version}</p>
+                      <span className="text-[10px] rounded-full bg-muted px-1.5 py-0.5 text-muted-foreground">
+                        {v.source}
+                      </span>
+                      <p className="text-[11px] text-muted-foreground">
+                        {new Date(v.created_at).toLocaleString()}
+                      </p>
+                    </div>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="h-6 gap-1 text-[11px]"
+                      disabled={restoringVersion === v.version}
+                      onClick={() => handleRestore(v.version)}
+                    >
+                      {restoringVersion === v.version ? (
+                        <Loader2 className="h-3 w-3 animate-spin" />
+                      ) : (
+                        <RotateCcw className="h-3 w-3" />
+                      )}
+                      Restore
+                    </Button>
+                  </div>
+                  {v.instruction && (
+                    <p className="text-[11px] text-muted-foreground italic">"{v.instruction}"</p>
+                  )}
+                  <p className="text-xs line-clamp-2 text-muted-foreground">{v.content}</p>
+                </Card>
+              ))}
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

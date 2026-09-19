@@ -1123,6 +1123,8 @@ _BUILTIN_TOOL_NAMES = frozenset(
         "list_available_models",
         "create_agent",
         "search_kb",
+        "update_kb_document",
+        "edit_kb_document",
         "calculate_faraid",
         "get_current_datetime",
         "generate_image",
@@ -2312,6 +2314,10 @@ def _build_builtin_tools(tools_config: dict) -> list[dict]:
                             "type": "boolean",
                             "description": "Enable knowledge base search tool",
                         },
+                        "tool_update_kb": {
+                            "type": "boolean",
+                            "description": "Enable knowledge base update tool (create/replace/append a document)",
+                        },
                         "tool_agent_builder": {
                             "type": "boolean",
                             "description": "Enable agent-builder tool (lets this agent spawn new agents)",
@@ -2349,6 +2355,80 @@ def _build_builtin_tools(tools_config: dict) -> list[dict]:
                         },
                     },
                     "required": ["query"],
+                },
+            }
+        )
+
+    if tools_config.get("update_kb"):
+        defs.append(
+            {
+                "name": "update_kb_document",
+                "description": (
+                    "Create or update a document in this agent's private knowledge base. "
+                    "Give it a document name and the full text to store — if a document "
+                    "with that name already exists it is replaced (or appended to, if "
+                    "mode='append'); otherwise a new text document is created. The content "
+                    "is automatically re-chunked and re-embedded, so search_kb reflects the "
+                    "change within moments. Use this when the user shares an updated "
+                    "version of a document, asks you to record new information for later, "
+                    "or wants existing notes revised — you compose the final text yourself "
+                    "and pass it here."
+                ),
+                "input_schema": {
+                    "type": "object",
+                    "properties": {
+                        "document_name": {
+                            "type": "string",
+                            "description": (
+                                "Name of the document to create or update — matched "
+                                "case-insensitively against this agent's existing documents"
+                            ),
+                        },
+                        "content": {
+                            "type": "string",
+                            "description": "Full text to store (or to append, if mode='append')",
+                        },
+                        "mode": {
+                            "type": "string",
+                            "enum": ["replace", "append"],
+                            "description": (
+                                "'replace' (default) overwrites the document's content; "
+                                "'append' adds this text to the end of its existing content"
+                            ),
+                        },
+                    },
+                    "required": ["document_name", "content"],
+                },
+            }
+        )
+        defs.append(
+            {
+                "name": "edit_kb_document",
+                "description": (
+                    "Apply a natural-language edit to an EXISTING knowledge base "
+                    "document without retyping its full content — good for targeted "
+                    "changes ('update the refund window to 30 days') to documents "
+                    "that are long or where you only know what should change, not "
+                    "the whole text. For short documents, or to replace the whole "
+                    "thing, use update_kb_document instead. Fails if no document "
+                    "with that name exists yet — create one with update_kb_document first."
+                ),
+                "input_schema": {
+                    "type": "object",
+                    "properties": {
+                        "document_name": {
+                            "type": "string",
+                            "description": (
+                                "Name of the existing document to edit — matched "
+                                "case-insensitively against this agent's documents"
+                            ),
+                        },
+                        "instruction": {
+                            "type": "string",
+                            "description": "Natural-language description of the change to make",
+                        },
+                    },
+                    "required": ["document_name", "instruction"],
                 },
             }
         )
@@ -2881,6 +2961,10 @@ async def _execute_tool_impl(name: str, inputs: dict, mcp_map: dict, ctx: dict |
             return await _tool_create_agent(inputs, ctx or {})
         elif name == "search_kb":
             return await _tool_search_kb(inputs, ctx or {})
+        elif name == "update_kb_document":
+            return await _tool_update_kb_document(inputs, ctx or {})
+        elif name == "edit_kb_document":
+            return await _tool_edit_kb_document(inputs, ctx or {})
         elif name == "calculate_faraid":
             return _tool_calculate_faraid(inputs)
         elif name == "get_current_datetime":
@@ -3707,6 +3791,7 @@ async def _tool_create_agent(inputs: dict, ctx: dict) -> str:
         "sheets": bool(inputs.get("tool_sheets", False)),
         "verification": bool(inputs.get("tool_verification", False)),
         "search_kb": bool(inputs.get("tool_search_kb", False)),
+        "update_kb": bool(inputs.get("tool_update_kb", False)),
         "agent_builder": bool(inputs.get("tool_agent_builder", False)),
     }
     try:
@@ -3807,6 +3892,158 @@ async def _tool_search_kb(inputs: dict, ctx: dict) -> str:
             f"[{i}] {c.document_name} (similarity {c.similarity:.2f})\n{c.content.strip()}"
         )
     return "\n\n---\n\n".join(parts)
+
+
+async def _tool_update_kb_document(inputs: dict, ctx: dict) -> str:
+    """Create or replace/append a document in this agent's private KB, then
+    re-chunk and re-embed it. Matches by name (case-insensitive) so the model
+    doesn't need to know a document's UUID."""
+    document_name = (inputs.get("document_name") or "").strip()
+    content = (inputs.get("content") or "").strip()
+    mode = inputs.get("mode") or "replace"
+
+    if not document_name:
+        return "Error: document_name is required"
+    if not content:
+        return "Error: content is required"
+    if mode not in ("replace", "append"):
+        mode = "replace"
+
+    agent_id_str = ctx.get("agent_id")
+    if not agent_id_str:
+        return "Error: no agent context available for KB update"
+    try:
+        agent_uuid = uuid.UUID(agent_id_str)
+    except ValueError:
+        return "Error: malformed agent_id"
+
+    from sqlalchemy import func, select
+
+    from app.db.session import AsyncSessionLocal
+    from app.models.agent_knowledge_base import AgentKnowledgeDocument
+    from app.models.knowledge_base import DocumentStatus, DocumentType
+    from app.services.kb.agent_kb_service import (
+        ContentTooLarge,
+        dispatch_agent_document_processing,
+        set_document_content,
+    )
+
+    async with AsyncSessionLocal() as db:
+        result = await db.execute(
+            select(AgentKnowledgeDocument).where(
+                AgentKnowledgeDocument.agent_id == agent_uuid,
+                func.lower(AgentKnowledgeDocument.name) == document_name.lower(),
+            )
+        )
+        doc = result.scalars().first()
+
+        created = doc is None
+        if doc is None:
+            doc = AgentKnowledgeDocument(
+                agent_id=agent_uuid,
+                name=document_name,
+                type=DocumentType.text,
+                status=DocumentStatus.pending,
+            )
+            db.add(doc)
+
+        try:
+            set_document_content(db, doc, content, mode=mode, source="agent")
+        except ContentTooLarge as exc:
+            return (
+                f"Error: content is {exc.length:,} characters, over the "
+                f"{exc.limit:,}-character limit for a knowledge base document."
+            )
+        await db.commit()
+        await db.refresh(doc)
+        dispatch_agent_document_processing(str(doc.id))
+
+    action = "Created" if created else ("Appended to" if mode == "append" else "Updated")
+    return (
+        f"{action} knowledge base document '{document_name}'. It's being re-indexed "
+        f"now and will be searchable via search_kb within moments."
+    )
+
+
+async def _tool_edit_kb_document(inputs: dict, ctx: dict) -> str:
+    """Apply a natural-language instruction to an existing KB document via
+    one cheap merge LLM call, so the caller doesn't have to retype the
+    whole thing just to make a targeted change."""
+    document_name = (inputs.get("document_name") or "").strip()
+    instruction = (inputs.get("instruction") or "").strip()
+
+    if not document_name:
+        return "Error: document_name is required"
+    if not instruction:
+        return "Error: instruction is required"
+
+    agent_id_str = ctx.get("agent_id")
+    user_id_str = ctx.get("user_id")
+    if not agent_id_str or not user_id_str:
+        return "Error: no agent context available for KB edit"
+    try:
+        agent_uuid = uuid.UUID(agent_id_str)
+        user_uuid = uuid.UUID(user_id_str)
+    except ValueError:
+        return "Error: malformed agent_id/user_id"
+
+    from sqlalchemy import func, select
+
+    from app.db.session import AsyncSessionLocal
+    from app.models.agent_knowledge_base import AgentKnowledgeDocument
+    from app.services.kb.agent_kb_service import (
+        ContentTooLarge,
+        dispatch_agent_document_processing,
+        get_current_content,
+        merge_document_with_instruction,
+        set_document_content,
+    )
+
+    async with AsyncSessionLocal() as db:
+        result = await db.execute(
+            select(AgentKnowledgeDocument).where(
+                AgentKnowledgeDocument.agent_id == agent_uuid,
+                func.lower(AgentKnowledgeDocument.name) == document_name.lower(),
+            )
+        )
+        doc = result.scalars().first()
+        if doc is None:
+            return (
+                f"Error: no knowledge base document named '{document_name}' found. "
+                f"Use update_kb_document to create one first."
+            )
+
+        try:
+            current_content = await get_current_content(doc)
+        except Exception as exc:
+            return f"Error: could not read current content of '{document_name}': {exc}"
+
+        try:
+            new_content = await merge_document_with_instruction(
+                current_content, instruction, user_uuid, db
+            )
+        except Exception as exc:
+            return f"Error: instruction-based edit failed: {exc}"
+
+        try:
+            set_document_content(
+                db, doc, new_content, mode="replace", source="agent", instruction=instruction
+            )
+        except ContentTooLarge as exc:
+            return (
+                f"Error: the updated content is {exc.length:,} characters, over the "
+                f"{exc.limit:,}-character limit for a knowledge base document."
+            )
+        await db.commit()
+        await db.refresh(doc)
+        dispatch_agent_document_processing(str(doc.id))
+        new_version = doc.version
+
+    return (
+        f"Updated knowledge base document '{document_name}' per your instruction "
+        f"(now at version {new_version}). It's being re-indexed and will be "
+        f"searchable via search_kb within moments."
+    )
 
 
 def _tool_get_current_datetime(inputs: dict) -> str:
@@ -4669,6 +4906,18 @@ async def _build_system_prompt(
                 f"details, prior context), call the search_kb tool BEFORE relying on your own "
                 f"general knowledge. Cite the source document name when you use retrieved content."
             )
+
+    if agent_tools_cfg.get("update_kb"):
+        parts.append(
+            "You have two knowledge base write tools: when the user shares a corrected "
+            "or updated version of a document, gives you new information to remember for "
+            "future conversations, or asks you to revise existing notes, use one of "
+            "them rather than just answering in chat — otherwise the update is lost once "
+            "this conversation ends. Use update_kb_document (composing the full text "
+            "yourself) to create a new document or replace/append to a short one. Use "
+            "edit_kb_document (giving it only a natural-language instruction) for a "
+            "targeted change to a document that's long or that you haven't fully seen."
+        )
 
     if agent_tools_cfg.get("faraid"):
         parts.append(

@@ -18,7 +18,7 @@ import {
   Globe, Code2, Link2, Mail, Smartphone, ShieldCheck, Bot,
   Loader2, Check, Brain, Zap, Settings, Plug,
   Webhook, RefreshCw, Trash2, Plus, ExternalLink,
-  AlertCircle, ChevronDown, ChevronUp, Wrench, Sheet, BookOpen, Scale, Palette,
+  AlertCircle, ChevronDown, ChevronUp, Wrench, Sheet, BookOpen, FilePenLine, Scale, Palette,
   ShoppingCart, X,
   Store, Key, TestTube2, TriangleAlert,
 } from "lucide-react";
@@ -201,6 +201,7 @@ const TOOLS: ToolConfig[] = [
   { key: "web_search",   label: "Web Search",     description: "Search the internet for current information", icon: Globe,       category: "research" },
   { key: "browser",      label: "Browser",        description: "Visit and extract content from web pages",    icon: Globe,       category: "research" },
   { key: "search_kb",    label: "Knowledge Base", description: "Search this agent's uploaded documents",      icon: BookOpen,    category: "research" },
+  { key: "update_kb",    label: "Update Knowledge Base", description: "Create, replace, or append to a knowledge base document", icon: FilePenLine, category: "research" },
   { key: "code",         label: "Code Execution", description: "Execute Python code for data processing",     icon: Code2,       category: "compute" },
   { key: "faraid",       label: "Faraid Calculator", description: "Deterministic Islamic inheritance (Hanafi) share calculation", icon: Scale, category: "compute" },
   { key: "http",         label: "HTTP Requests",  description: "Make API calls to external services",         icon: Link2,       category: "integration" },

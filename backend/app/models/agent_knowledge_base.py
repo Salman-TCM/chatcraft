@@ -48,11 +48,23 @@ class AgentKnowledgeDocument(TimestampMixin, Base):
     token_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
 
+    # Bumped on every content-changing write (create excluded). Also doubles
+    # as an optimistic-concurrency token: a PATCH/tool edit that names a
+    # stale `expected_version` is rejected rather than silently clobbering a
+    # newer edit — see agent_kb_service.set_document_content.
+    version: Mapped[int] = mapped_column(Integer, nullable=False, default=1, server_default="1")
+
     chunks: Mapped[list["AgentKnowledgeChunk"]] = relationship(
         "AgentKnowledgeChunk",
         back_populates="document",
         cascade="all, delete-orphan",
         order_by="AgentKnowledgeChunk.chunk_index",
+    )
+    versions: Mapped[list["AgentKnowledgeDocumentVersion"]] = relationship(
+        "AgentKnowledgeDocumentVersion",
+        back_populates="document",
+        cascade="all, delete-orphan",
+        order_by="AgentKnowledgeDocumentVersion.version.desc()",
     )
 
     def __repr__(self) -> str:
@@ -81,3 +93,36 @@ class AgentKnowledgeChunk(TimestampMixin, Base):
 
     def __repr__(self) -> str:
         return f"<AgentKBChunk doc={self.document_id} idx={self.chunk_index}>"
+
+
+class AgentKnowledgeDocumentVersion(TimestampMixin, Base):
+    """A snapshot of a document's content immediately before it was
+    overwritten, so an edit (from the UI, the update_kb_document tool, or an
+    instruction-based merge) can be reviewed or rolled back later."""
+
+    __tablename__ = "agent_kb_document_versions"
+
+    document_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("agent_kb_documents.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+
+    version: Mapped[int] = mapped_column(Integer, nullable=False)
+    name: Mapped[str] = mapped_column(String(500), nullable=False)
+    content: Mapped[str] = mapped_column(Text, nullable=False)
+
+    # Who/what produced this prior state — "user" (dashboard edit),
+    # "agent" (update_kb_document tool call), or "instruction" (the
+    # instruction-based merge tool). Free text, not an enum, since this is
+    # descriptive metadata only and new sources shouldn't need a migration.
+    source: Mapped[str] = mapped_column(String(20), nullable=False, default="user")
+    instruction: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    document: Mapped["AgentKnowledgeDocument"] = relationship(
+        "AgentKnowledgeDocument", back_populates="versions"
+    )
+
+    def __repr__(self) -> str:
+        return f"<AgentKBDocumentVersion doc={self.document_id} v={self.version}>"
