@@ -23,6 +23,7 @@ class AgentToolsConfig(BaseModel):
     verification: bool = False
     agent_builder: bool = False
     search_kb: bool = False
+    update_kb: bool = False
     faraid: bool = False
     # Exposes list_products/buy_product for the CommerceStore linked to this
     # agent via CommerceStore.agent_id — no-op if no store is linked.
