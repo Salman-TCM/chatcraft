@@ -9,6 +9,7 @@ exact same reprocessing path.
 
 from app.models.agent_knowledge_base import AgentKnowledgeDocument
 from app.models.knowledge_base import DocumentStatus
+from app.services.kb.extractor import fix_legacy_bengali_encoding
 
 
 def set_document_content(
@@ -20,9 +21,17 @@ def set_document_content(
     extraction step (extract_text_for_document) skips re-fetching the
     original file/URL and re-chunks/re-embeds straight from this text, so
     edits work the same way regardless of the document's original type.
+
+    Runs the same Bijoy/SutonnyMJ legacy-Bengali-font fix used for freshly
+    extracted files: pasting text copied out of a legacy-encoded Word/PDF
+    straight into the edit box (or having an agent relay it) hits the same
+    mis-encoded byte sequences, so it needs the same correction, not just
+    text that came in through file extraction. No-op on already-correct
+    Unicode text (English or otherwise).
+
     Caller is responsible for committing and dispatching reprocessing.
     """
-    content = content.strip()
+    content = fix_legacy_bengali_encoding(content.strip())
     if mode == "append" and doc.raw_content:
         content = f"{doc.raw_content.rstrip()}\n\n{content}"
 

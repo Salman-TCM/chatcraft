@@ -5,7 +5,7 @@ code points, so extracted PDF/DOCX/TXT text comes out as near-valid but
 meaningless Windows-1252 text instead of Bengali Unicode.
 """
 
-from app.services.kb.extractor import _fix_legacy_bengali_encoding, _looks_like_bijoy_encoded
+from app.services.kb.extractor import _looks_like_bijoy_encoded, fix_legacy_bengali_encoding
 
 # Real sample retrieved from a live agent's knowledge base — legacy
 # Bijoy-encoded text for a clause of the Muslim Family Laws Ordinance, 1961.
@@ -42,7 +42,7 @@ def test_does_not_flag_empty_string():
 
 
 def test_converts_bijoy_sample_to_readable_bengali():
-    fixed = _fix_legacy_bengali_encoding(_BIJOY_SAMPLE)
+    fixed = fix_legacy_bengali_encoding(_BIJOY_SAMPLE)
     assert fixed != _BIJOY_SAMPLE
     # Actual Bengali Unicode range characters should now dominate the text.
     bengali_chars = sum(1 for c in fixed if "ঀ" <= c <= "৿")
@@ -53,12 +53,12 @@ def test_converts_bijoy_sample_to_readable_bengali():
 
 
 def test_leaves_plain_english_untouched():
-    assert _fix_legacy_bengali_encoding(_ENGLISH_SAMPLE) == _ENGLISH_SAMPLE
+    assert fix_legacy_bengali_encoding(_ENGLISH_SAMPLE) == _ENGLISH_SAMPLE
 
 
 def test_leaves_correct_unicode_bengali_untouched():
-    assert _fix_legacy_bengali_encoding(_CORRECT_UNICODE_BENGALI) == _CORRECT_UNICODE_BENGALI
+    assert fix_legacy_bengali_encoding(_CORRECT_UNICODE_BENGALI) == _CORRECT_UNICODE_BENGALI
 
 
 def test_leaves_empty_string_untouched():
-    assert _fix_legacy_bengali_encoding("") == ""
+    assert fix_legacy_bengali_encoding("") == ""

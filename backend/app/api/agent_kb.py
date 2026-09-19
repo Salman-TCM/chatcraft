@@ -164,9 +164,11 @@ async def ingest_text(
         agent_id=agent_id,
         name=body.name,
         type=DocumentType.text,
-        raw_content=body.content,
         status=DocumentStatus.pending,
     )
+    # Runs the same legacy Bijoy/SutonnyMJ Bengali-font fix used for file
+    # extraction — pasted text can carry the same mis-encoded byte sequences.
+    set_document_content(doc, body.content, mode="replace")
     db.add(doc)
     await db.commit()
     await db.refresh(doc)

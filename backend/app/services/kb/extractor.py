@@ -82,11 +82,13 @@ def _looks_like_bijoy_encoded(text: str) -> bool:
     return (signal_count / len(text)) > _BIJOY_SIGNAL_THRESHOLD
 
 
-def _fix_legacy_bengali_encoding(text: str) -> str:
+def fix_legacy_bengali_encoding(text: str) -> str:
     """Re-decode legacy Bijoy/SutonnyMJ-encoded text into real Bengali Unicode.
 
-    Safe to call on any extracted text: it only rewrites text that matches
-    the Bijoy signal above, and leaves normal English/Unicode text alone.
+    Safe to call on any text — extracted from a file, pasted straight into a
+    textarea, or written back during an edit — since it only rewrites text
+    that matches the Bijoy signal above, and leaves normal English/already-
+    Unicode Bengali text alone.
     """
     if not _looks_like_bijoy_encoded(text):
         return text
@@ -113,7 +115,7 @@ def extract_pdf(data: bytes) -> str:
                     text_parts.append(t)
         text = "\n\n".join(text_parts).strip()
         if text:
-            return _fix_legacy_bengali_encoding(text)
+            return fix_legacy_bengali_encoding(text)
     except Exception as exc:
         logger.warning(f"pdfplumber failed: {exc!r}, trying PyMuPDF")
 
@@ -123,7 +125,7 @@ def extract_pdf(data: bytes) -> str:
     doc = fitz.open(stream=data, filetype="pdf")
     for page in doc:
         text_parts.append(page.get_text())
-    return _fix_legacy_bengali_encoding("\n\n".join(text_parts).strip())
+    return fix_legacy_bengali_encoding("\n\n".join(text_parts).strip())
 
 
 def extract_docx(data: bytes) -> str:
@@ -131,16 +133,16 @@ def extract_docx(data: bytes) -> str:
 
     doc = Document(io.BytesIO(data))
     paragraphs = [p.text for p in doc.paragraphs if p.text.strip()]
-    return _fix_legacy_bengali_encoding("\n\n".join(paragraphs))
+    return fix_legacy_bengali_encoding("\n\n".join(paragraphs))
 
 
 def extract_txt(data: bytes) -> str:
     for enc in ("utf-8", "latin-1", "cp1252"):
         try:
-            return _fix_legacy_bengali_encoding(data.decode(enc))
+            return fix_legacy_bengali_encoding(data.decode(enc))
         except UnicodeDecodeError:
             continue
-    return _fix_legacy_bengali_encoding(data.decode("utf-8", errors="replace"))
+    return fix_legacy_bengali_encoding(data.decode("utf-8", errors="replace"))
 
 
 async def extract_url(url: str) -> str:
